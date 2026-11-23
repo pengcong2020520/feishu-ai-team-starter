@@ -178,7 +178,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress })
 
 - **一览页**：代码在项目工作区写 `shots/<名字>-sheet.html`：两列网格，最多 6 格；每格一个 iframe（`sandbox="allow-scripts"`，`scrolling="no"`），按电脑首屏 1280×800 打开到某个状态，再缩小一半成 640×400；格子下面写编号和说明（说明来自模型产出，一律转义）。整页宽 1368，高按行数算（每行 400 + 说明 44，行间 24，上下留白各 32，标题 60）。
 - **每格打开什么**：线框用 `../design/wireframe.html#screen=<屏>&state=<状态>`，屏和状态从线框里的 `design-outline` 取；网页用 `../site/index.html#state=<状态 id>`，状态从 `docs/outline.json` 取；走查用 `walkthrough.json` 各屏的 state，并在格子上标"可以 / 待改 / 阻塞"。
-- **截图**：无头 Chrome 截整页：`<Chrome> --headless=new --disable-gpu --hide-scrollbars --window-size=<宽>,<高> --screenshot=<png> file://<一览页>`，超时 30 秒。Chrome 路径读 `.env` 的 `CHROME_PATH`，没写时 macOS 用 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`；容器里装 chromium 和中文字体，并加 `--no-sandbox`。
+- **截图**：无头 Chrome 截整页：`<Chrome> --headless=new --disable-gpu --hide-scrollbars --window-size=<宽>,<高> --virtual-time-budget=5000 --screenshot=<png> file://<一览页>`，超时 30 秒。`--virtual-time-budget` 让 Chrome 等各格的页面画完再截；不加时实测出现过后三格空白。Chrome 路径读 `.env` 的 `CHROME_PATH`，没写时 macOS 用 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`；容器里装 chromium 和中文字体，并加 `--no-sandbox`。
 - **放进卡片**：用 `im.v1.image.create`（`image_type: 'message'`）上传，拿到 `image_key`，卡片里放 `{ tag: 'img', img_key, alt: { tag: 'plain_text', content: '页面一览' } }`，后面紧跟链接按钮。
 - **失败不卡流程**：截图前先删掉旧图，免得复用上一轮的；截图或上传失败时，卡片里写一行灰字"一览图未生成（原因）"，链接照常放，阶段照常推进。
 
