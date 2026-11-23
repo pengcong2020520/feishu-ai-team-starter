@@ -139,6 +139,29 @@ runAgent({ role, prompt, projectDir, resume, onProgress })
 - 调用飞书失败时，日志和群里的报错都带上飞书返回的 `code` 和 `msg`（在错误的 `response.data` 里）。只写"status code 400"没法排查。
 - 卡片格式错了，假飞书测不出来：接上真飞书后，先往群里把每种卡片各发一张测试卡片（标明"测试，请勿点击"），都能发出去再交给用户。
 
+### 7.1 卡片长相
+
+卡片是用户和 AI 同事打交道的主要界面，统一按下面做：
+
+- **每个角色一种颜色**：卡片 `header.template` 产品经理 `blue`、设计 `purple`、程序员 `green`；标题一律"角色名 · 在做什么"，如"AI 设计 · 画线框与主题""AI 程序员 · 网页已完成"。
+- **进度卡**：第一行写这一步的任务；之后每次工具调用一行，带图标：`📖 读 docs/prd.md`、`🧰 用技能 lofi-wireframe`、`✍️ 写 design/wireframe.html`、`✏️ 改 site/index.html`、`🔍 找文件 *.json`（路径用项目里的相对路径，技能名去掉 `team:`）；只显示最近 12 行，更早的写"……前面还有 N 步"；15 秒没动静加一行"正在思考……"；最后一行灰字 `<font color='grey'>已用 N 秒</font>`。干完把标题改成"角色名 · 完成"。
+- **结果卡**（PRD、设计、网页、走查）：先是智能体的一句话回复，再用 `{ tag: 'hr' }` 分隔要点（如"主题：……""主色：#……"），然后一行灰字过程："过程：读了 N 个文件、写了 N 个文件，N 轮，用时 N 秒，模型读入 X 万、写出 Y 万 token"；最后是链接按钮，下面一行灰字"链接在本机打开（飞书电脑版）"，需要人确认的再放确认/打回按钮。
+- **问题卡**：标题"AI 产品经理 · 有几个问题"（蓝色）；先一句为什么要问，每题一行粗体题目、一行灰字"这个答案影响什么"，下面是下拉框；表单下方灰字"默认已选推荐项，直接提交就是全部按推荐"。
+- 灰字统一用 `<font color='grey'>…</font>`；文字用 `lark_md` 或 `markdown`，模型写的内容先去掉 Markdown 符号再放进卡片。
+
+进度卡示例（卡片 1.0）：
+
+```json
+{ "config": { "wide_screen_mode": true, "update_multi": true },
+  "header": { "title": { "tag": "plain_text", "content": "AI 设计 · 干活中" }, "template": "purple" },
+  "elements": [
+    { "tag": "div", "text": { "tag": "lark_md", "content": "绘制线框并确定主题" } },
+    { "tag": "div", "text": { "tag": "lark_md", "content": "📖 读 docs/prd.md" } },
+    { "tag": "div", "text": { "tag": "lark_md", "content": "🧰 用技能 lofi-wireframe" } },
+    { "tag": "div", "text": { "tag": "lark_md", "content": "✍️ 写 design/wireframe.html" } },
+    { "tag": "div", "text": { "tag": "lark_md", "content": "<font color='grey'>已用 48 秒</font>" } } ] }
+```
+
 ## 8. 预览服务与工作台
 
 - 两个端口，都只监听 127.0.0.1：**4871** 放模型写的页面（线框、网页），**4870** 放代码生成的页面（走查页、工作台和它的接口）。端口不同就不同源，模型写的页面碰不到工作台。地址形如 `http://127.0.0.1:4871/p/<项目号>/wireframe`。
