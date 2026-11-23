@@ -134,11 +134,12 @@ runAgent({ role, prompt, projectDir, resume, onProgress })
 - 过滤：只处理 `sender_type` 为 user 的消息；群里只处理 @ 了自己的；同一条 `message_id` 只处理一次；文字里的 @ 占位符（如 `@_user_1`）先去掉。
 - 同一个机器人同时只能有一条连接：启动服务前停掉自检程序；本机和服务器不能同时在线。
 - 发消息 `im.v1.message.create`（`receive_id_type: 'chat_id'`），更新卡片 `im.v1.message.patch`（卡片 config 里 `update_multi: true`），图片 `im.v1.image.create`，文件 `im.v1.file.create`。
-- 进度、结果、确认/打回卡片用卡片 1.0：确认与打回是普通按钮，`value` 里带 `{ action, stage, projectId }`；链接按钮写 `url`。按钮回调先核对 `stage` 和 `projectId`，对不上回 toast"这张卡片已过期"；点过的卡片改成"✓ 某某已确认"。
+- 进度、结果、确认/打回卡片用卡片 1.0：确认与打回是普通按钮，`value` 里带 `{ action, stage, projectId, cardId }`（`cardId` 是这张卡片的编号，项目状态里记着当前等人点的那张）；链接按钮写 `url`。点过的卡片改成"✓ 某某已确认"。
+- 过期卡片：按钮回调先核对 `projectId`、`stage`、`cardId`，对不上就是过期卡片。toast 只闪一下，用户会以为没反应，所以除了 toast，还要在群里回一句"这张卡片已过期，现在在「某阶段」，请点最新的那张"，消息记录里也记下这次点击没被接受。
 - 问题卡片用卡片 2.0 表单（`schema: '2.0'`，body 里一个 `form`）：每题一个 `select_static`（`name` 为题号，`initial_index` 从 1 数、默认选中推荐项，选项 `value` 用 `String(下标)`，文字不超过 120 字）；一个 `input`（name `extra`，其他补充）；提交按钮必须写 `form_action_type: 'submit'`，回传值放在 `behaviors: [{ type: 'callback', value }]`。回调里表单的值在 `action.form_value`。
 - 回调要在 3 秒内返回（返回 toast），真正的活放到后台做。
 - 调用飞书失败时，日志和群里的报错都带上飞书返回的 `code` 和 `msg`（在错误的 `response.data` 里）。只写"status code 400"没法排查。
-- 卡片格式错了，假飞书测不出来：接上真飞书后，先往群里把每种卡片各发一张测试卡片（标明"测试，请勿点击"），都能发出去再交给用户。
+- 卡片格式错了，假飞书测不出来：接上真飞书后，先往群里把每种卡片各发一张测试卡片，都能发出去再交给用户。测试卡片标题以"测试 ·"开头，项目号写 `test`，不要用真实项目号：它和正式卡片长得一样，用户很可能点错。点测试卡片只回"这是测试卡片，不会推动流程，请点正式卡片"，不改项目状态。
 
 ### 7.1 卡片长相
 
