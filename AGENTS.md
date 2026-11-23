@@ -34,6 +34,7 @@ src/agents/             run.mjs（runAgent）、roles.mjs（角色表）
 src/flow/               stages.mjs（阶段表）、orchestrator.mjs（编排）、validate.mjs（交付检查）
 src/cards.mjs           飞书卡片
 src/walkthrough-page.mjs 走查页模板
+src/sheet.mjs           一览图
 src/feishu.mjs          接入层
 src/preview.mjs         预览服务（线框、网页、走查页、工作台接口）
 src/workbench/          消息记录与工作台接口
@@ -169,7 +170,16 @@ runAgent({ role, prompt, projectDir, resume, onProgress })
 - 走查页由代码里的固定模板生成：读 `design/walkthrough.json`，每屏一个 iframe 嵌真实网页（`site/index.html#state=<状态>`，`sandbox="allow-scripts allow-forms"`，不加 allow-same-origin），旁边是 AI 的标记和说明、用户的反馈框和"可以 / 待改 / 阻塞"按钮；反馈存本地，可导出 Markdown 和 JSON。
 - 工作台的写接口（提需求、给角色发消息、点卡片按钮）调用编排里和飞书同一套处理函数，并让机器人在群里转述"来自工作台：……"、更新飞书上的原卡片；立即返回，不等智能体干完。安全：Host 只能是 127.0.0.1 或 localhost 加端口；有 Origin 时必须同源；必须带请求头 `X-Workbench: 1`；只收 JSON、16 KB 以内；操作人固定为"你（工作台）"。
 - 模型写的文字一律当不可信输入：网页里只用 `textContent` 显示；模型写的 HTML 只放进 sandbox iframe。
-- 可选：用无头 Chrome 把线框、网页的几个状态排成一张一览图放进卡片，链接仍保留。
+
+### 8.1 一览图：卡片里直接看到页面
+
+设计卡（线框）、网页卡、走查卡都要带一张**一览图**，下面再放"打开线框""打开网页""打开走查页"链接。用户在飞书里不用点开就能先看个大概。
+
+- **一览页**：代码在项目工作区写 `shots/<名字>-sheet.html`：两列网格，最多 6 格；每格一个 iframe（`sandbox="allow-scripts"`，`scrolling="no"`），按电脑首屏 1280×800 打开到某个状态，再缩小一半成 640×400；格子下面写编号和说明（说明来自模型产出，一律转义）。整页宽 1368，高按行数算（每行 400 + 说明 44，行间 24，上下留白各 32，标题 60）。
+- **每格打开什么**：线框用 `../design/wireframe.html#screen=<屏>&state=<状态>`，屏和状态从线框里的 `design-outline` 取；网页用 `../site/index.html#state=<状态 id>`，状态从 `docs/outline.json` 取；走查用 `walkthrough.json` 各屏的 state，并在格子上标"可以 / 待改 / 阻塞"。
+- **截图**：无头 Chrome 截整页：`<Chrome> --headless=new --disable-gpu --hide-scrollbars --window-size=<宽>,<高> --screenshot=<png> file://<一览页>`，超时 30 秒。Chrome 路径读 `.env` 的 `CHROME_PATH`，没写时 macOS 用 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`；容器里装 chromium 和中文字体，并加 `--no-sandbox`。
+- **放进卡片**：用 `im.v1.image.create`（`image_type: 'message'`）上传，拿到 `image_key`，卡片里放 `{ tag: 'img', img_key, alt: { tag: 'plain_text', content: '页面一览' } }`，后面紧跟链接按钮。
+- **失败不卡流程**：截图前先删掉旧图，免得复用上一轮的；截图或上传失败时，卡片里写一行灰字"一览图未生成（原因）"，链接照常放，阶段照常推进。
 
 ## 9. 做事的规矩（实测踩过的坑）
 

@@ -63,7 +63,7 @@ code,.k{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",mon
       <div class="c"><h3>编排</h3><span class="step">第 5 步</span><p class="k" style="font-size:12px;color:#5d6b80">orchestrator.mjs</p><p>派活与任务消息；会话续用、走查开新会话；人只在 4 个关口出手；出错就停</p></div>
       <div class="c"><h3>交付检查</h3><span class="step">第 4·5 步</span><p class="k" style="font-size:12px;color:#5d6b80">validate.mjs</p><p>按文件契约检查每步产物；不信"做完了"</p></div>
       <div class="c"><h3>卡片</h3><span class="step">第 5·6 步</span><p class="k" style="font-size:12px;color:#5d6b80">src/cards.mjs</p><p>进度卡 1.0（patch）· 问题卡 2.0 表单 · 确认/打回 · 完成卡 · 过期判断</p></div>
-      <div class="c"><h3>走查页</h3><span class="step">第 6 步</span><p class="k" style="font-size:12px;color:#5d6b80">walkthrough-page.mjs</p><p>固定模板：每屏嵌真实网页、标记、反馈、导出</p></div>
+      <div class="c"><h3>走查页 · 一览图</h3><span class="step">第 6 步</span><p class="k" style="font-size:12px;color:#5d6b80">walkthrough-page.mjs · sheet.mjs</p><p>走查页每屏嵌真实网页；一览图把各状态截成一张放进卡片</p></div>
       <div class="c"><h3>消息记录</h3><span class="step">第 7 步</span><p class="k" style="font-size:12px;color:#5d6b80">workbench/recorder.mjs</p><p>飞书与工作台的消息、卡片、点击 → data/messages</p></div>
     </div>
   </div>
@@ -97,7 +97,7 @@ code,.k{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",mon
   </div>
   <div class="row">
     <div class="lab">外部系统</div>
-    <div class="chips"><span>飞书开放平台<small>长连接，不用公网地址</small></span><span>模型接口<small>Anthropic · 火山方舟 · DeepSeek（兼容 Claude）</small></span><span>服务器 Docker<small>可选 · 第 8 步 · SSH 隧道</small></span><span>无头 Chrome<small>可选 · 一览图</small></span></div>
+    <div class="chips"><span>飞书开放平台<small>长连接，不用公网地址</small></span><span>模型接口<small>Anthropic · 火山方舟 · DeepSeek（兼容 Claude）</small></span><span>服务器 Docker<small>可选 · 第 8 步 · SSH 隧道</small></span><span>无头 Chrome<small>一览图截图 · CHROME_PATH</small></span></div>
   </div>
   <div class="foot"><span><span class="step">第 N 步</span> 表示这个模块在动手路线的第几步建出来</span><span>文字版：docs/施工图.md　·　约定细节：AGENTS.md</span></div>
 </div>
