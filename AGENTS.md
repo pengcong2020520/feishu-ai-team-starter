@@ -14,6 +14,8 @@
 
 ## 2. 整体结构
 
+**动手前先看施工图**：[docs/施工图.md](docs/施工图.md)（图版 docs/施工图.png）写清了每一层有哪些模块、每个模块放在哪个文件、负责什么、通过什么接口相连、在第几步建出来。新建或改动模块时对照它；结构有变化，同步更新施工图。
+
 ```
 飞书群 ⇄ 接入层（3 条长连接）⇄ 编排（普通代码：阶段表）⇄ 3 个 Agent（Agent SDK）⇄ 工作区文件
                                      ⇅                          ⇅
@@ -27,10 +29,14 @@
 prompts/                角色说明（已提供，照原文用）
 team-skills/            技能插件 team（已提供，照原文用）
 docs/动手搭建.md         动手路线与提示词
+docs/施工图.md · .png    施工图
 src/agents/             run.mjs（runAgent）、roles.mjs（角色表）
-src/flow/               stages.mjs（阶段表）、编排
+src/flow/               stages.mjs（阶段表）、orchestrator.mjs（编排）、validate.mjs（交付检查）
+src/cards.mjs           飞书卡片
+src/walkthrough-page.mjs 走查页模板
 src/feishu.mjs          接入层
 src/preview.mjs         预览服务（线框、网页、走查页、工作台接口）
+src/workbench/          消息记录与工作台接口
 src/main.mjs            启动入口
 web/                    工作台前端
 scripts/                试跑脚本

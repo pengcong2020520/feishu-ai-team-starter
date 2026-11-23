@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>施工图：飞书 AI 团队（启蒙版）</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f6fb;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#13233a}
+.sheet{width:1600px;padding:26px 30px 22px;background:linear-gradient(180deg,#ffffff 0%,#f1f5fc 100%)}
+h1{margin:0;font-size:34px;display:flex;align-items:baseline;gap:18px}
+h1 small{font-size:18px;font-weight:400;color:#5d6b80}
+code,.k{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",monospace}
+.row{display:grid;grid-template-columns:112px minmax(0,1fr);gap:12px;margin-top:12px}
+.lab{border-radius:12px;background:linear-gradient(160deg,#2f7bf5,#1b5fd6);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-weight:700;font-size:19px;padding:8px;line-height:1.3}
+.lab small{font-weight:400;font-size:12px;opacity:.85;margin-top:4px}
+.cards{display:grid;gap:10px}
+.c{background:#fff;border:1px solid #d9e3f2;border-radius:12px;padding:10px 14px;position:relative;min-width:0}
+.c h3{margin:0 0 2px;font-size:17px;display:flex;align-items:baseline;gap:8px;padding-right:62px}
+.c h3 .k{font-size:12.5px;font-weight:500;color:#5d6b80}
+.c p{margin:3px 0 0;font-size:13.5px;line-height:1.5;color:#33455e}
+.c .t{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.c .t span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#eef3fb;border:1px solid #d6e2f5;color:#1d4f9c;border-radius:6px;padding:1px 7px}
+.step{position:absolute;right:10px;top:9px;font-size:12px;font-weight:700;color:#d1561e;background:#fff2ea;border:1px solid #f4c3a7;border-radius:999px;padding:1px 8px}
+.wire{display:flex;align-items:center;justify-content:center;gap:10px;margin:6px 0 -2px 124px;font-size:12.5px;color:#5d6b80}
+.wire b{color:#2f7bf5;font-size:17px}
+.wire code{background:#eef3fb;border-radius:5px;padding:1px 6px;color:#1d4f9c}
+.c.pm{border-top:4px solid #2F6BFF}.c.ds{border-top:4px solid #7A4FD6}.c.dev{border-top:4px solid #0F7B67}
+.c.pm h3{color:#2F6BFF}.c.ds h3{color:#7A4FD6}.c.dev h3{color:#0F7B67}
+.chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chips span{background:#fff;border:1px solid #d9e3f2;border-radius:8px;padding:6px 12px;font-size:14px;font-weight:600}
+.chips span small{font-weight:400;color:#5d6b80;margin-left:6px}
+.foot{margin-top:10px;font-size:12.5px;color:#5d6b80;display:flex;gap:18px}
+.foot .step{position:static}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <h1>施工图：飞书 AI 团队（启蒙版）<small>一个 Node 进程 + 3 个 Agent（Agent SDK）；飞书走长连接，网页只开在本机</small></h1>
+
+  <div class="row">
+    <div class="lab">接入层</div>
+    <div class="cards" style="grid-template-columns:1.25fr 1fr 1.05fr 1fr">
+      <div class="c"><h3>飞书 · 3 个机器人 <span class="k">src/feishu.mjs</span></h3><span class="step">第 1·2·6 步</span>
+        <p>每个机器人一条长连接；只认人发的、@ 了自己的，同一条只处理一次，去掉 @ 占位符；失败带上飞书的 code / msg</p>
+        <div class="t"><span>im.message.receive_v1</span><span>card.action.trigger</span><span>message.create · patch</span></div></div>
+      <div class="c"><h3>预览服务 <span class="k">src/preview.mjs</span></h3><span class="step">第 6 步</span>
+        <p>两个端口不同源：:4871 放模型写的线框和网页，:4870 放代码生成的走查页；CSP · nosniff · no-store</p>
+        <div class="t"><span>/p/&lt;项目号&gt;/wireframe · site · walkthrough</span></div></div>
+      <div class="c"><h3>工作台接口 <span class="k">:4870 /api</span></h3><span class="step">第 7 步</span>
+        <p>读项目、消息、PRD、角色原文；写接口和飞书走同一套编排，群里转述"来自工作台"</p>
+        <div class="t"><span>GET /api/state</span><span>/api/events (SSE)</span><span>POST · X-Workbench · 16 KB</span></div></div>
+      <div class="c"><h3>工作台前端 <span class="k">web/</span></h3><span class="step">第 7 步</span>
+        <p>看板 6 列 · 项目详情（流程、产物标签页、消息与卡片）· 角色聊天 · 提需求</p>
+        <div class="t"><span>textContent</span><span>sandbox iframe</span></div></div>
+    </div>
+  </div>
+  <div class="wire"><b>⇅</b>接入 → 编排 <code>onMessage({ chatId, role, text, user })</code> <code>onCardAction({ chatId, value, formValue, user })</code>　·　编排 → 接入：发卡片、更新卡片</div>
+
+  <div class="row">
+    <div class="lab">编排<small>普通代码<br>不是 AI</small></div>
+    <div class="cards" style="grid-template-columns:repeat(6,minmax(0,1fr))">
+      <div class="c"><h3>阶段表</h3><span class="step">第 5 步</span><p class="k" style="font-size:12px;color:#5d6b80">src/flow/stages.mjs</p><p>9 个阶段 + 3 个打回；谁负责、现在该做什么；只按表跳转</p></div>
+      <div class="c"><h3>编排</h3><span class="step">第 5 步</span><p class="k" style="font-size:12px;color:#5d6b80">orchestrator.mjs</p><p>派活与任务消息；会话续用、走查开新会话；人只在 4 个关口出手；出错就停</p></div>
+      <div class="c"><h3>交付检查</h3><span class="step">第 4·5 步</span><p class="k" style="font-size:12px;color:#5d6b80">validate.mjs</p><p>按文件契约检查每步产物；不信"做完了"</p></div>
+      <div class="c"><h3>卡片</h3><span class="step">第 5·6 步</span><p class="k" style="font-size:12px;color:#5d6b80">src/cards.mjs</p><p>进度卡 1.0（patch）· 问题卡 2.0 表单 · 确认/打回 · 完成卡 · 过期判断</p></div>
+      <div class="c"><h3>走查页</h3><span class="step">第 6 步</span><p class="k" style="font-size:12px;color:#5d6b80">walkthrough-page.mjs</p><p>固定模板：每屏嵌真实网页、标记、反馈、导出</p></div>
+      <div class="c"><h3>消息记录</h3><span class="step">第 7 步</span><p class="k" style="font-size:12px;color:#5d6b80">workbench/recorder.mjs</p><p>飞书与工作台的消息、卡片、点击 → data/messages</p></div>
+    </div>
+  </div>
+  <div class="wire"><b>⇅</b>编排 → 智能体 <code>runAgent({ role, prompt, projectDir, resume, onProgress })</code> → <code>{ ok, text, sessionId, error?, stats }</code>　·　只有人和编排能让智能体开工</div>
+
+  <div class="row">
+    <div class="lab">智能体层<small>Agent SDK<br>query() → Claude Code 子进程</small></div>
+    <div class="cards" style="grid-template-columns:1fr 1.15fr 1fr 1.25fr">
+      <div class="c pm"><h3>AI 产品经理 <span class="k">product</span></h3><span class="step">第 3 步</span>
+        <p>prompts/product.md · 只能写 docs/</p>
+        <div class="t"><span>team:clarify</span><span>prd-spec</span><span>spec-checklist</span></div>
+        <p>交出 questions.json · prd.md · outline.json · checklist.md</p></div>
+      <div class="c ds"><h3>AI 设计 <span class="k">designer</span></h3><span class="step">第 4 步</span>
+        <p>prompts/designer.md · 只能写 design/ · 走查开新会话</p>
+        <div class="t"><span>lofi-wireframe</span><span>theme-pick</span><span>flow-walkthrough</span><span>consistency-check</span></div>
+        <p>交出 wireframe.html · theme.json · walkthrough.json</p></div>
+      <div class="c dev"><h3>AI 程序员 <span class="k">developer</span></h3><span class="step">第 4 步</span>
+        <p>prompts/developer.md · 只能写 site/</p>
+        <div class="t"><span>frontend-design</span></div>
+        <p>交出 site/index.html（支持 #state= 直达）</p></div>
+      <div class="c"><h3>共用 <span class="k">src/agents/run.mjs · roles.mjs</span></h3><span class="step">第 3 步</span>
+        <p>prompts/shared.md · 插件 team-skills/</p>
+        <div class="t"><span>Read · Write · Edit · Glob · Skill</span><span>canUseTool 只写本角色目录</span><span>env 白名单</span><span>maxTurns 30</span><span>onProgress</span></div></div>
+    </div>
+  </div>
+  <div class="wire"><b>⇅</b>智能体只读写 <code>workspace/&lt;项目号&gt;/</code>，靠文件交接　·　模型请求走 <code>ANTHROPIC_BASE_URL</code></div>
+
+  <div class="row">
+    <div class="lab">基础设施<small>本机文件</small></div>
+    <div class="chips"><span>.env<small>600 · 飞书凭证 · 模型密钥</small></span><span>data/state.json<small>每群一个项目 · 阶段 · 会话 id</small></span><span>data/messages/*.jsonl<small>消息记录</small></span><span>workspace/&lt;项目号&gt;/<small>docs · design · site</small></span><span>prompts/ · team-skills/<small>起步包原文</small></span></div>
+  </div>
+  <div class="row">
+    <div class="lab">外部系统</div>
+    <div class="chips"><span>飞书开放平台<small>长连接，不用公网地址</small></span><span>模型接口<small>Anthropic · 火山方舟 · DeepSeek（兼容 Claude）</small></span><span>服务器 Docker<small>可选 · 第 8 步 · SSH 隧道</small></span><span>无头 Chrome<small>可选 · 一览图</small></span></div>
+  </div>
+  <div class="foot"><span><span class="step">第 N 步</span> 表示这个模块在动手路线的第几步建出来</span><span>文字版：docs/施工图.md　·　约定细节：AGENTS.md</span></div>
+</div>
+</body>
+</html>
