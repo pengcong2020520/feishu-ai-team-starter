@@ -19,6 +19,16 @@ test('后台启动、不重复启动、停止', async () => {
   assert.equal(existsSync(path.join(root, 'data/service.pid')), false);
 });
 
+test('沙箱里没有权限发停止信号：不报错退出，保留 pid 文件，说明是谁停不掉', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'setup-svc-'));
+  writeFileSync(path.join(root, 'fake-main.mjs'), "console.log('3 个机器人已连上飞书'); setInterval(() => {}, 1000);");
+  const first = await startService(root, { entry: 'fake-main.mjs', intervalMs: 50 });
+  const denied = () => { throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' }); };
+  assert.deepEqual(await stopService(root, { kill: denied }), { stopped: false, denied: true, pid: first.pid });
+  assert.equal(serviceStatus(root).running, true);
+  assert.deepEqual(await stopService(root), { stopped: true });
+});
+
 test('服务启动失败时带回日志里的报错', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'setup-svc-'));
   writeFileSync(path.join(root, 'bad-main.mjs'), "console.error('缺少配置：FEISHU_PRODUCT_APP_ID'); process.exit(1);");

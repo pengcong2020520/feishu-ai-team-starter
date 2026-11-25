@@ -55,14 +55,15 @@ export async function startService(root, { entry = 'src/main.mjs', readyText = '
   return { ok: false, pid: child.pid, error: `${timeoutMs / 1000} 秒内没看到“${readyText}”，看 data/service.log` };
 }
 
-export async function stopService(root, { timeoutMs = 5000 } = {}) {
+export async function stopService(root, { timeoutMs = 5000, kill = (pid, signal) => process.kill(pid, signal) } = {}) {
   const status = serviceStatus(root);
   const pidFile = paths(root).pid;
   if (!status.running) { rmSync(pidFile, { force: true }); return { stopped: false }; }
-  process.kill(status.pid, 'SIGTERM');
+  // AI 助手的沙箱（Codex 默认沙箱、Grok）不让给沙箱外或上一轮起的进程发信号：留着 pid 文件，交给用户自己停
+  try { kill(status.pid, 'SIGTERM'); } catch (error) { if (error.code === 'EPERM') return { stopped: false, denied: true, pid: status.pid }; throw error; }
   const end = Date.now() + timeoutMs;
   while (alive(status.pid) && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 100));
-  if (alive(status.pid)) process.kill(status.pid, 'SIGKILL');
+  if (alive(status.pid)) kill(status.pid, 'SIGKILL');
   rmSync(pidFile, { force: true });
   return { stopped: true };
 }
