@@ -1,12 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { isOurProcess } from './proc.mjs';
 
 export const REQUIRED = ['@larksuiteoapi/node-sdk', '@anthropic-ai/claude-agent-sdk', 'qrcode'];
 export const NPMJS = 'https://registry.npmjs.org/';
 export const MIRROR = 'https://registry.npmmirror.com/';
 const statusFile = root => path.join(root, 'data/install.json');
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+// 装依赖时不把模型和飞书的密钥带给 npm 及依赖的安装脚本
+export const installEnv = env => Object.fromEntries(Object.entries(env).filter(([name]) => !/^(ANTHROPIC_|MODEL_|FEISHU_)/.test(name)));
 
 export const depsReady = root => REQUIRED.every(name => existsSync(path.join(root, 'node_modules', name, 'package.json')));
 
@@ -21,14 +23,14 @@ export async function pickRegistry({ fetchImpl = fetch, timeoutMs = 4000 } = {})
 export function installStatus(root) {
   let s;
   try { s = JSON.parse(readFileSync(statusFile(root), 'utf8')); } catch { return { status: 'none' }; }
-  if (s.status === 'running' && !alive(s.pid)) return { ...s, status: 'failed', reason: '安装进程意外退出' };
+  if (s.status === 'running' && !isOurProcess(s.pid, 'install-run.mjs')) return { ...s, status: 'failed', reason: '安装进程意外退出' };
   return s;
 }
 
 // 脱离当前进程在后台跑 npm ci：用户回答问题的同时依赖在装
 export function startInstall(root, { registry, spawnImpl = spawn }) {
   mkdirSync(path.join(root, 'data'), { recursive: true });
-  const child = spawnImpl(process.execPath, [path.join(root, 'src/setup/install-run.mjs'), registry], { cwd: root, detached: true, stdio: 'ignore' });
+  const child = spawnImpl(process.execPath, [path.join(root, 'src/setup/install-run.mjs'), registry], { cwd: root, detached: true, stdio: 'ignore', env: installEnv(process.env) });
   child.unref();
   const s = { status: 'running', pid: child.pid, registry, startedAt: new Date().toISOString() };
   writeFileSync(statusFile(root), JSON.stringify(s));

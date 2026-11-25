@@ -60,7 +60,7 @@ export async function writeQrPage({ qrDir, qrcode, entries }) {
 const timeoutError = () => Object.assign(new Error('等待扫码超时'), { code: 'timeout' });
 
 // 给缺凭证的角色各出一张码并行等待；过期自动换码；每建成一个立即 save
-export async function registerMissing({ lark, qrcode, roles, qrDir, save, timeoutMs = 540000, open = openFile, log = console.log }) {
+export async function registerMissing({ lark, qrcode, roles, qrDir, save, timeoutMs = 540000, retryDelayMs = 3000, open = openFile, log = console.log }) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
   const entries = roles.map(role => ({ role, url: null, done: false, version: 0 }));
@@ -85,7 +85,10 @@ export async function registerMissing({ lark, qrcode, roles, qrDir, save, timeou
       } catch (error) {
         if (abort.signal.aborted) throw timeoutError();
         if (error?.code === 'expired_token') { log(`${entry.role.name}：二维码过期，换一张`); continue; }
-        throw error;
+        if (!NETWORK.test(`${error?.code ?? ''} ${error?.message ?? ''}`)) throw error;
+        // 重试拦截器也没救回来的断网：等一会儿换一张新码（页面会自动刷新），一直试到整体截止
+        log(`${entry.role.name}：网络中断，稍后换一张二维码`);
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
       }
     }
     throw timeoutError();

@@ -2,6 +2,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statS
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
+import { isOurProcess } from './proc.mjs';
 
 // 团队服务脱离启动它的进程常驻，不随 AI 助手这一轮对话结束被关
 const paths = root => ({ pid: path.join(root, 'data/service.pid'), log: path.join(root, 'data/service.log') });
@@ -21,8 +22,9 @@ export async function pickPort(start = 4870) {
 
 export function serviceStatus(root) {
   const file = paths(root).pid;
-  const pid = existsSync(file) ? Number(readFileSync(file, 'utf8').trim()) : 0;
-  return pid && alive(pid) ? { running: true, pid } : { running: false };
+  const [pidText = '', entry = 'src/main.mjs'] = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n') : [];
+  const pid = Number(pidText);
+  return isOurProcess(pid, entry) ? { running: true, pid } : { running: false };
 }
 
 export async function startService(root, { entry = 'src/main.mjs', readyText = '3 个机器人已连上飞书', timeoutMs = 60000, intervalMs = 500 } = {}) {
@@ -35,7 +37,7 @@ export async function startService(root, { entry = 'src/main.mjs', readyText = '
   const child = spawn(process.execPath, [entry], { cwd: root, detached: true, stdio: ['ignore', fd, fd] });
   closeSync(fd);
   child.unref();
-  writeFileSync(pidFile, String(child.pid));
+  writeFileSync(pidFile, `${child.pid}\n${entry}\n`);
   let exited = null;
   child.on('exit', code => { exited = code ?? -1; });
   const end = Date.now() + timeoutMs;
