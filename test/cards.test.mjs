@@ -2,13 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gateCard, questionCard, progressCard, resultCard, stuckCard, confirmEndCard, closedCard } from '../src/flow/cards.mjs';
 
-test('角色颜色、进度最近十二行和完成标题', () => {
-  const card = progressCard({ title: 'AI 设计 · 画线框与主题', task: '绘制线框', lines: Array.from({ length: 15 }, (_, i) => `📖 读 docs/${i}.md`), stats: { durationMs: 48000, inputTokens: 120, outputTokens: 30 }, done: true });
-  assert.equal(card.header.template, 'purple');
-  assert.equal(card.header.title.content, 'AI 设计 · 完成');
-  assert.match(card.elements[1].text.content, /前面还有 3 步/);
-  assert.equal(card.elements.length, 15);
-  assert.match(card.elements.at(-1).text.content, /已用 48 秒/);
+test('进度卡一行显示现在在做什么，带停下按钮；做完换成用时和 token', () => {
+  const stopValue = { action: 'stop', stage: 'designing', projectId: 'p', cardId: 'c' };
+  const running = progressCard({ title: 'AI 设计 · 画线框与主题', task: '按 PRD 画线框、选主题', current: '🧰 在用「画线框」技能', steps: 3, elapsedSeconds: 48, guides: ['主色用绿色'], stopValue });
+  assert.equal(running.header.template, 'purple');
+  assert.deepEqual(running.elements.slice(0, 3).map(x => x.text.content), ['按 PRD 画线框、选主题', '🧰 在用「画线框」技能', '↪ 你的引导：主色用绿色']);
+  assert.match(running.elements[3].text.content, /已用 48 秒 · 第 3 步/);
+  assert.deepEqual(running.elements.at(-1).actions.map(b => [b.text.content, b.value]), [['停下', stopValue]]);
+  const done = progressCard({ title: 'AI 设计 · 画线框与主题', task: '按 PRD 画线框、选主题', steps: 9, stopValue, stats: { durationMs: 48000, inputTokens: 120, outputTokens: 30 }, done: true });
+  assert.equal(done.header.title.content, 'AI 设计 · 完成');
+  assert.equal(done.elements[1].text.content, '✅ 已完成');
+  assert.match(done.elements.at(-1).text.content, /用时 48 秒 · 9 步；读入 120 \/ 写出 30 token/);
+  const stopped = progressCard({ title: 'AI 设计 · 画线框与主题', stats: { durationMs: 1000 }, done: true, ok: false, outcome: '⏹ 已停下' });
+  assert.equal(stopped.header.title.content, 'AI 设计 · 停下了');
 });
 
 test('结果卡把截图放在链接前，失败时保留链接', () => {

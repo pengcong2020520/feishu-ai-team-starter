@@ -56,15 +56,27 @@ export function questionCard({ projectId, cardId, questions }) {
 
 export const toast = text => ({ toast: { type: 'info', content: text } });
 
-export function progressCard({ title, task = '正在处理这一步', lines = [], elapsedSeconds = 0, stats, done = false }) {
+// 进度卡：任务一行 + 现在在做什么一行（一直在换）+ 灰字用时和步数 + 停下按钮；用户的引导单独列出
+export function progressCard({ title, task = '正在处理这一步', current = '⏳ 在读任务', steps = 0, elapsedSeconds = 0, guides = [], stopValue, stats, done = false, ok = true, outcome = '✅ 已完成' }) {
   const role = roleOf(title);
-  const visible = lines.slice(-12);
-  const elements = [md(escape(task))];
-  if (lines.length > 12) elements.push(gray(`……前面还有 ${lines.length - 12} 步`));
-  for (const line of visible) elements.push(md(escape(line)));
-  if (stats) elements.push(gray(`已用 ${Math.round(stats.durationMs / 1000)} 秒；读入 ${stats.inputTokens} / 写出 ${stats.outputTokens} token`));
-  else elements.push(gray(`已用 ${elapsedSeconds} 秒`));
-  return { config, header: header(done ? `${roleNames[role]} · 完成` : title, role), elements };
+  const elements = [md(escape(task)), md(escape(done ? outcome : current))];
+  for (const text of guides.slice(-3)) elements.push(md(escape(`↪ 你的引导：${text}`)));
+  if (stats) elements.push(gray(`用时 ${Math.round((stats.durationMs ?? 0) / 1000)} 秒 · ${steps} 步；读入 ${stats.inputTokens ?? 0} / 写出 ${stats.outputTokens ?? 0} token`));
+  else elements.push(gray(`已用 ${elapsedSeconds} 秒 · 第 ${steps} 步`));
+  if (!done && stopValue) elements.push({ tag: 'action', actions: [button('停下', stopValue)] });
+  return { config, header: header(done ? `${roleNames[role]} · ${ok ? '完成' : '停下了'}` : title, role), elements };
+}
+
+// 角色干活时对它说的话：先记下，这一步做完再回；急的话可以插进这一步，或者让它停下
+export const queuedTitle = role => `${roleNames[role]} · 先记下了`;
+export function queuedCard({ role, doing, minutes = 0, text, projectId, stage, cardId }) {
+  const value = action => ({ action, stage, projectId, cardId });
+  return { config, header: header(queuedTitle(role), role), elements: [
+    md(escape(`${roleNames[role]}正在${doing}（${minutes < 1 ? '刚开始' : `已用 ${minutes} 分钟`}）。这句话会在这一步做完后回复。`)),
+    gray(`你说的：${text}`),
+    gray('急的话点“现在引导”，把这句话插进这一步；不想让它接着做就点“停下这一步”。'),
+    { tag: 'action', actions: [button('现在引导', value('steer'), 'primary'), button('停下这一步', value('stop'))] },
+  ] };
 }
 
 // 某一步停下了：一句原因 + 下一步，按钮直接重试或结束项目
@@ -77,11 +89,11 @@ export function stuckCard({ role, brief, projectId, stage, cardId }) {
   ] };
 }
 
-export function confirmEndCard({ name, projectId, stage, cardId }) {
+export function confirmEndCard({ name, projectId, stage, cardId, busy = false }) {
   const value = action => ({ action, stage, projectId, cardId });
   return { config, header: header('AI 产品经理 · 结束这个项目？', 'product'), elements: [
-    md(escape(`结束后「${name}」的文件都会保留，工作台里能看到；群里可以重新提需求。`)),
-    { tag: 'action', actions: [button('结束项目', value('end'), 'danger'), button('继续做', value('keep'))] },
+    md(escape(`${busy ? '正在干活的这一步会先停下。' : ''}结束后「${name}」的文件都会保留，工作台里能看到；群里可以重新提需求。`)),
+    { tag: 'action', actions: [button(busy ? '停下并结束' : '结束项目', value('end'), 'danger'), button('继续做', value('keep'))] },
   ] };
 }
 

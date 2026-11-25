@@ -131,23 +131,28 @@ test('三个打回分支与回归走查，旧卡片过期', () => fixture(async 
   assert.equal((await flow.getProject('g')).stage, 'accept');
 }));
 
-test('忙时回复；交付文件错误后停住且可重试', () => fixture(async ({ flow, messages, dir }) => {
+test('干活时对它说话先记下，做完再回；交付文件错误后停住且可重试', () => fixture(async ({ flow, messages, dir }) => {
   let release;
   let count = 0;
   const gate = new Promise(resolve => { release = resolve; });
   const sent = [];
   // 本用例用单独的编排来制造未完成的智能体调用。
   const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { sent.push(card); return 'm'; }, patchCard: async () => {} },
-    agent: async ({ projectDir }) => {
+    agent: async ({ projectDir, mode, prompt }) => {
+      if (mode === 'chat') { messages.push(`对话：${prompt.match(/用户这次对你说：(.*)/)[1]}`); return { ok: true, structured: { reply: '收到', proposal: { action: 'none', detail: '' } }, stats: {} }; }
       count++;
       if (count === 1) await gate;
       if (count > 1) await put(projectDir, 'docs/questions.json', { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] });
       return { ok: true, text: '', sessionId: 's', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } };
     } });
   await local.handleMessage({ chatId: 'busy', text: '报名页', intent: 'demand' });
-  assert.equal((await local.handleMessage({ chatId: 'busy', text: '又发一次' })).busy, true);
+  assert.equal((await local.handleMessage({ chatId: 'busy', text: '又发一次' })).queued, true);
+  assert.equal(sent.at(-1).header.title.content, 'AI 产品经理 · 先记下了');
+  assert.match(JSON.stringify(sent.at(-1)), /这句话会在这一步做完后回复/);
+  assert.equal((await local.handleMessage({ chatId: 'busy', text: '重试' })).busy, true);
   assert.match(messages.at(-1), /AI 产品经理正在澄清需求，做完会在群里发新卡片/);
   release(); await local.waitForIdle('busy');
+  assert.equal(messages.at(-2), '对话：又发一次');
   const stuck = await local.getProject('busy');
   assert.equal(stuck.stage, 'clarifying');
   assert.match(stuck.error, /questions\.json/);
@@ -414,6 +419,8 @@ test('群聊对话：澄清时文字回答可提交；新提议替换旧提议�
   await flow.handleMessage({ chatId: 'g', text: '报名页', intent: 'demand' }); await flow.waitForIdle('g');
   await flow.handleMessage({ chatId: 'g', role: 'product', text: '重试' });
   assert.match(messages.at(-1), /现在没有停下的步骤/);
+  assert.deepEqual(await flow.handleMessage({ chatId: 'g', role: 'designer', text: '停止' }), { waiting: true });
+  assert.match(messages.at(-1), /现在没有正在干活的同事/);
   chats.push({ reply: '收到。', proposal: { action: 'answer', detail: '需要电话' } }, { reply: '收到，按你说的提交。', proposal: { action: 'answer', detail: '不需要电话' } });
   await flow.handleMessage({ chatId: 'g', role: 'product', text: '要电话' });
   await flow.handleMessage({ chatId: 'g', role: 'product', text: '算了不要电话' }); await flow.waitForIdle('g');
@@ -437,4 +444,60 @@ test('群聊对话：澄清时文字回答可提交；新提议替换旧提议�
   assert.equal((await flow.getProject('g')).stage, 'confirm_prd');
   assert.match((await flow.handleAction({ chatId: 'g', value: buttons(late)[0].value })).toast.content, /过期/);
   assert.match(messages.at(-1), /这张卡片已过期，现在在「确认 PRD」/);
+}));
+
+test('干活时：“现在引导”插进这一步；进度卡“停下”和文字“停止”让它停下；“停下并结束”直接结束', () => fixture(async ({ dir }) => {
+  const sent = [], patches = [], messages = [], steered = [];
+  let running = null;
+  const local = createFlow({ root: dir, id: (() => { let n = 0; return () => `s${++n}`; })(), feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { sent.push(card); return `m${sent.length}`; }, patchCard: async (messageId, card) => { patches.push({ messageId, card }); } },
+    agent: async ({ control, onProgress, mode }) => {
+      if (mode === 'chat') return { ok: true, structured: { reply: '收到', proposal: { action: 'none', detail: '' } }, stats: {} };
+      onProgress({ tool: 'Skill', file: 'team:clarify' });
+      return new Promise(resolve => {
+        control.steer = text => { steered.push(text); return true; };
+        control.stop = () => resolve({ ok: false, stopped: true, error: '用户让它停下了', stats: { durationMs: 1000 } });
+        running = resolve;
+      });
+    } });
+  const started = async () => { while (!running) await new Promise(resolve => setTimeout(resolve, 2)); running = null; };
+  const text = card => JSON.stringify(card);
+  await local.handleMessage({ chatId: 'w', text: '报名页', intent: 'demand' }); await started();
+  const progress = sent[0];
+  assert.equal(progress.header.title.content, 'AI 产品经理 · 澄清需求');
+  assert.match(text(progress), /读你的需求，看还要问什么/);
+  assert.ok(patches.some(x => x.messageId === 'm1' && /🧰 在用「澄清」技能/.test(text(x.card))));
+  assert.match((await local.getState()).projects[0].activity, /在用「澄清」技能/);
+  // 对正在干活的产品经理说话：先记下，点“现在引导”插进这一步
+  assert.equal((await local.handleMessage({ chatId: 'w', role: 'product', text: '加上电话字段' })).queued, true);
+  const queuedCard = sent.at(-1);
+  assert.equal(queuedCard.header.title.content, 'AI 产品经理 · 先记下了');
+  assert.equal((await local.handleAction({ chatId: 'w', value: buttons(queuedCard)[0].value })).toast.content, '已插进这一步');
+  assert.deepEqual(steered, ['加上电话字段']);
+  assert.match(text(patches.at(-1).card), /↪ 已插进这一步：加上电话字段/);
+  // 进度卡上的“停下”
+  assert.equal((await local.handleAction({ chatId: 'w', value: buttons(progress)[0].value, actor: '小王' })).toast.content, '正在停下');
+  await local.waitForIdle('w');
+  let p = await local.getProject('w');
+  assert.equal(p.errorBrief, '小王让 AI 产品经理停下了这一步');
+  assert.equal(sent.at(-1).header.title.content, 'AI 产品经理 · 这一步停下了');
+  const final = patches.filter(x => x.messageId === 'm1').at(-1).card;
+  assert.equal(final.header.title.content, 'AI 产品经理 · 停下了');
+  assert.match(text(final), /⏹ 已停下/);
+  assert.match(text(final), /↪ 你的引导：加上电话字段/);
+  // 文字“停止”
+  await local.handleMessage({ chatId: 'w', role: 'product', text: '重试' }); await started();
+  assert.deepEqual(await local.handleMessage({ chatId: 'w', role: 'designer', text: '停止' }), { stopping: true });
+  await local.waitForIdle('w');
+  assert.equal((await local.getProject('w')).errorBrief, '你让 AI 产品经理停下了这一步');
+  // 干活中说“结束”：确认卡是“停下并结束”，点了不发停下卡，直接结束
+  await local.handleMessage({ chatId: 'w', role: 'product', text: '重试' }); await started();
+  await local.handleMessage({ chatId: 'w', role: 'product', text: '结束' });
+  const confirm = sent.at(-1);
+  assert.deepEqual(buttons(confirm).map(b => b.text.content), ['停下并结束', '继续做']);
+  const stuckCards = sent.filter(card => card.header?.title?.content?.endsWith('这一步停下了')).length;
+  assert.equal((await local.handleAction({ chatId: 'w', value: buttons(confirm)[0].value })).toast.content, '正在停下并结束');
+  await local.waitForIdle('w');
+  assert.equal(await local.getProject('w'), null);
+  assert.equal(sent.filter(card => card.header?.title?.content?.endsWith('这一步停下了')).length, stuckCards);
+  assert.match(messages.at(-1), /已结束「报名页」/);
 }));
