@@ -2,8 +2,14 @@
   "name": "feishu-ai-team",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
+    "setup": "node setup.mjs",
+    "start": "node scripts/service.mjs start",
+    "stop": "node scripts/service.mjs stop",
+    "status": "node scripts/service.mjs status",
     "test": "node --test test/*.test.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
