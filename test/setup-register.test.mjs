@@ -58,3 +58,20 @@ test('等扫码超时、手机上拒绝，都按角色报出来', async () => {
   const results = await registerMissing({ lark, qrcode, roles: team.slice(0, 2), qrDir, save: async () => {}, timeoutMs: 30, open: () => {}, log: () => {} });
   assert.deepEqual(results.map(r => [r.role.key, r.ok, r.error?.code]), [['product', false, 'timeout'], ['designer', false, 'access_denied']]);
 });
+
+test('重试也没救回来的断网：换一张新码继续等，不让这个角色直接失败', async () => {
+  const qrDir = mkdtempSync(path.join(os.tmpdir(), 'setup-qr-'));
+  let calls = 0; const logs = [];
+  const lark = {
+    async registerApp(options) {
+      calls += 1;
+      options.onQRCodeReady({ url: `https://qr.test/${calls}`, expireIn: 600 });
+      if (calls < 3) throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+      return { client_id: 'cli_ok', client_secret: 's', user_info: { open_id: 'ou' } };
+    },
+  };
+  const results = await registerMissing({ lark, qrcode, roles: team.slice(0, 1), qrDir, save: async () => {}, retryDelayMs: 1, open: () => {}, log: l => logs.push(l) });
+  assert.deepEqual(results.map(r => r.ok), [true]);
+  assert.equal(calls, 3);
+  assert.ok(logs.some(l => l.includes('网络中断')));
+});

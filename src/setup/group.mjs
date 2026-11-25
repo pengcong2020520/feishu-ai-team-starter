@@ -16,13 +16,12 @@ export function introCard(role, { workbench }) {
   return { config: { wide_screen_mode: true }, header: { template: role.color, title: { tag: 'plain_text', content: `${role.name} · 报到` } }, elements };
 }
 
-export async function createTeamGroup({ clients, appIds, team, ownerOpenId, existingChatId = null, onChat = () => {}, workbench = 'http://127.0.0.1:4870', log = console.log }) {
+export async function createTeamGroup({ clients, appIds, team, ownerOpenId, existing = null, onChat = () => {}, workbench = 'http://127.0.0.1:4870', log = console.log }) {
   const pm = clients.product;
   const data = { name: 'AI 团队', description: '飞书 AI 团队：@AI 产品经理 说一句需求就能开始', bot_id_list: team.filter(r => r.key !== 'product').map(r => appIds[r.key]) };
   const uuid = `ai-team-${appIds.product}`.slice(0, 50);
-  let chatId = existingChatId;
-  let ownerSet = Boolean(existingChatId);
-  let joinLink = null;
+  // 续跑时沿用上次真实的群号、是否当上群主、分享链接
+  let { chatId = null, ownerSet = false, joinLink = null } = existing ?? {};
   if (!chatId && ownerOpenId) {
     try {
       const res = await call(pm.im.v1.chat.create({ params: { user_id_type: 'open_id', set_bot_manager: true, uuid }, data: { ...data, owner_id: ownerOpenId, user_id_list: [ownerOpenId] } }));
@@ -35,6 +34,8 @@ export async function createTeamGroup({ clients, appIds, team, ownerOpenId, exis
   if (!chatId) {
     const res = await call(pm.im.v1.chat.create({ params: { set_bot_manager: true, uuid: `${uuid}-link`.slice(0, 50) }, data }));
     chatId = res.data.chat_id;
+  }
+  if (!ownerSet && !joinLink) {
     try {
       const link = await call(pm.im.v1.chat.link({ path: { chat_id: chatId }, data: { validity_period: 'week' } }));
       joinLink = link.data?.share_link ?? null;
@@ -42,7 +43,7 @@ export async function createTeamGroup({ clients, appIds, team, ownerOpenId, exis
       log(`生成群分享链接没成功（${error.message}）`);
     }
   }
-  onChat(chatId);
+  onChat({ chatId, ownerSet, joinLink });
   for (const role of team) {
     await call(clients[role.key].im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(introCard(role, { workbench })) } }));
   }

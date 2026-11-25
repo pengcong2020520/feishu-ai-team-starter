@@ -153,3 +153,41 @@ test('群已建好、只差起服务时端口被占，也会先换端口再起�
   assert.match(readFileSync(path.join(root, '.env'), 'utf8'), /PREVIEW_PORT=4880/);
   assert.equal(calls.service, 1);
 });
+
+test('--key-file：读文件里的密钥写进 .env，读完删掉文件，输出里没有密钥', async () => {
+  const root = setupRoot();
+  const { deps } = fakes();
+  (await import('node:fs')).mkdirSync(path.join(root, 'data'), { recursive: true });
+  writeFileSync(path.join(root, 'data/model-key.txt'), "sk-it's-secret\n");
+  const { text } = await run(root, ['model', '--base-url', 'https://m.test/api', '--model', 'm1', '--key-file', 'data/model-key.txt'], { deps });
+  assert.match(readFileSync(path.join(root, '.env'), 'utf8'), /MODEL_API_KEY="sk-it's-secret"/);
+  assert.equal((await import('node:fs')).existsSync(path.join(root, 'data/model-key.txt')), false);
+  assert.doesNotMatch(text, /sk-it's-secret/);
+});
+
+test('依赖文件在但安装还没跑完：先等安装，不提前进入扫码', async () => {
+  const root = setupRoot(MODEL + BOTS);
+  saveProgress(root, { modelOk: true });
+  let waited = 0;
+  const { deps, calls } = fakes({ installStatus: () => ({ status: 'running' }), waitForInstall: async () => { waited += 1; return { ok: false, pending: true }; } });
+  const { text } = await run(root, [], { deps });
+  assert.equal(waited, 1);
+  assert.equal(calls.install, 0);
+  assert.match(text, /依赖还在后台安装/);
+});
+
+test('上次安装失败留下半截依赖：重跑会重新安装', async () => {
+  const root = setupRoot(MODEL);
+  saveProgress(root, { modelOk: true });
+  const { deps, calls } = fakes({ installStatus: () => ({ status: 'failed', code: 1 }), waitForInstall: async () => ({ ok: false, pending: true }) });
+  await run(root, [], { deps });
+  assert.equal(calls.install, 1);
+});
+
+test('建群续跑：把上次保存的群号、群主状态、链接交给建群', async () => {
+  const root = setupRoot(MODEL + BOTS);
+  saveProgress(root, { modelOk: true, chatId: 'oc_half', ownerSet: false, joinLink: 'https://applink.test/j' });
+  const { deps, calls } = fakes();
+  await run(root, [], { deps });
+  assert.deepEqual(calls.group[0].existing, { chatId: 'oc_half', ownerSet: false, joinLink: 'https://applink.test/j' });
+});

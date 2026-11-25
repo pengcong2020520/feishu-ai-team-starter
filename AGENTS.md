@@ -5,7 +5,7 @@
 ## 安装与运行（用户要搭建时先看这里）
 
 1. 运行 `node setup.mjs`（Node 24 以上；不用先 `npm install`，它会在后台装依赖）。它每次只做下一件能做的事，最后打印 `== 下一步 ==`：照着在对话里问用户、或告诉用户要做什么，拿到回答后再运行。不要自己写扫码、建群之类的脚本。
-2. 模型：问用户接口地址、密钥、模型名（Anthropic 兼容接口；火山方舟是 `https://ark.cn-beijing.volces.com/api/compatible`，不是 `/api/v3`）。密钥用户可以直接发给你，也可以自己填进 `.env` 的 `MODEL_API_KEY`。拿到后用 `printf '%s' '<密钥>' | node setup.mjs model --base-url <地址> --model <模型名>` 写入；不要把密钥放进命令行参数、不要复述。终端已有 `ANTHROPIC_*` 变量时 setup 会提示，用户说"沿用"就运行 `node setup.mjs --use-anthropic-env`。
+2. 模型：问用户接口地址、密钥、模型名（Anthropic 兼容接口；火山方舟是 `https://ark.cn-beijing.volces.com/api/compatible`，不是 `/api/v3`）。密钥用户可以直接发给你，也可以自己填进 `.env` 的 `MODEL_API_KEY`。拿到后先用你的文件写入工具把密钥原样存成 `data/model-key.txt`（不要用 echo、printf 等 shell 命令写，密钥里的引号会破坏命令），再运行 `node setup.mjs model --base-url <地址> --model <模型名> --key-file data/model-key.txt`，它读完会删掉这个文件；不要把密钥放进命令行参数、不要复述。终端已有 `ANTHROPIC_*` 变量时 setup 会提示，用户说"沿用"就运行 `node setup.mjs --use-anthropic-env`。
 3. 扫码：先告诉用户马上会弹出二维码页面、用飞书手机版逐个扫码并在手机上确认，再运行 `node setup.mjs scan`。它会等到扫完（最长 9 分钟）：把命令超时放宽到 10 分钟，或放到后台运行并查看输出。被打断就重跑，已建成的不用再扫。
 4. 扫完后它自动建群「AI 团队」（用户当群主）、3 个机器人发报到卡片、后台启动团队服务。最后告诉用户去群里 @AI 产品经理 说一句需求。
 5. 需要联网：Codex 先切到能联网、能运行命令的模式（默认沙箱不能联网）。

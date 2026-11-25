@@ -49,3 +49,12 @@ test('服务因端口占用起不来时，提示改 PREVIEW_PORT', async () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /端口 4871 被别的程序占用：在 \.env 里把 PREVIEW_PORT 改成别的/);
 });
+
+test('pid 文件指向的进程不是我们的服务（PID 被复用），不算在运行，也不发信号', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'setup-svc-'));
+  (await import('node:fs')).mkdirSync(path.join(root, 'data'));
+  writeFileSync(path.join(root, 'data/service.pid'), `${process.pid}\nsrc/main.mjs\n`);
+  assert.equal(serviceStatus(root).running, false);
+  assert.deepEqual(await stopService(root), { stopped: false });
+  assert.equal(existsSync(path.join(root, 'data/service.pid')), false);
+});

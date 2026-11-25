@@ -1,3 +1,4 @@
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { team } from './team.mjs';
 import { readEnv, ensureEnv, updateEnv } from './env-file.mjs';
@@ -11,7 +12,7 @@ import { createTeamGroup } from './group.mjs';
 
 const workbenchOf = env => `http://127.0.0.1:${env.PREVIEW_PORT || 4870}`;
 const LABEL = { MODEL_BASE_URL: '接口地址', MODEL_API_KEY: '密钥', MODEL_NAME: '模型名' };
-const MODEL_CMD = "printf '%s' '<密钥>' | node setup.mjs model --base-url <地址> --model <模型名>";
+const MODEL_CMD = '用文件写入工具把密钥原样存成 data/model-key.txt（不要用 shell 命令写），再运行 node setup.mjs model --base-url <地址> --model <模型名> --key-file data/model-key.txt（读完会删掉这个文件）';
 
 const realDeps = {
   depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, pickPort, portsFree,
@@ -29,6 +30,9 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   const d = { ...realDeps, ...injected };
   const envFile = path.join(root, '.env');
   ensureEnv(envFile, path.join(root, '.env.example'));
+  mkdirSync(path.join(root, 'data'), { recursive: true });
+  // 后台安装还在跑或失败过，就算文件在也不算装好（可能只装了一半）
+  const depsOk = () => d.depsReady(root) && !['running', 'failed'].includes(d.installStatus(root).status);
   const [command, ...rest] = argv;
   const flag = name => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
   const finish = (code, lines) => {
@@ -38,7 +42,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     const mark = ok => (ok ? '✓' : '…');
     log(['', '== 当前进度 ==',
       `${mark(progress.modelOk && !missingModel(fileEnv).length)} 模型`,
-      `${mark(d.depsReady(root))} 依赖`,
+      `${mark(depsOk())} 依赖`,
       `${mark(bots === team.length)} 飞书机器人 ${bots}/${team.length}`,
       `${mark(progress.groupReady)} 飞书群「AI 团队」`,
       `${mark(d.serviceStatus(root).running)} 团队服务`,
@@ -50,15 +54,21 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     const updates = {};
     if (flag('--base-url')) updates.MODEL_BASE_URL = flag('--base-url');
     if (flag('--model')) updates.MODEL_NAME = flag('--model');
-    const key = (await readStdin()).trim();
+    const keyFile = flag('--key-file');
+    let key;
+    if (keyFile) {
+      try { key = readFileSync(path.resolve(root, keyFile), 'utf8'); } catch { return finish(1, [`读不到密钥文件 ${keyFile}。${MODEL_CMD}`]); }
+      rmSync(path.resolve(root, keyFile), { force: true });
+    } else key = await readStdin();
+    key = key.trim();
     if (key) updates.MODEL_API_KEY = key;
-    if (!Object.keys(updates).length) return finish(1, [`没收到模型信息。用法：${MODEL_CMD}`]);
+    if (!Object.keys(updates).length) return finish(1, [`没收到模型信息。${MODEL_CMD}`]);
     updateEnv(envFile, updates);
     saveProgress(root, { modelOk: false });
     log(`已写入 .env：${Object.keys(updates).join('、')}`);
   } else if (command === '--use-anthropic-env') {
     const { found, values } = anthropicEnv(env);
-    if (!values.MODEL_API_KEY) return finish(0, ['需要用户：终端里没有 ANTHROPIC_AUTH_TOKEN 或 ANTHROPIC_API_KEY，请直接提供模型的接口地址、密钥、模型名', `拿到后运行：${MODEL_CMD}`]);
+    if (!values.MODEL_API_KEY) return finish(0, ['需要用户：终端里没有 ANTHROPIC_AUTH_TOKEN 或 ANTHROPIC_API_KEY，请直接提供模型的接口地址、密钥、模型名', `拿到后：${MODEL_CMD}`]);
     updateEnv(envFile, values);
     saveProgress(root, { modelOk: false });
     log(`已沿用终端变量 ${found.join('、')}，写入 .env：${Object.keys(values).join('、')}`);
@@ -67,7 +77,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   }
 
   // 依赖不在、也没在装，就先在后台装：用户回答问题的同时装好
-  if (!d.depsReady(root) && d.installStatus(root).status !== 'running') {
+  if (!depsOk() && d.installStatus(root).status !== 'running') {
     const registry = await d.pickRegistry();
     d.startInstall(root, { registry });
     log(`已在后台安装依赖（${registry.includes('npmmirror') ? 'npmmirror 镜像' : 'npm 官方源'}），日志 data/install.log`);
@@ -87,7 +97,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   for (let round = 0; round < 10; round += 1) {
     const fileEnv = readEnv(envFile);
     const progress = readProgress(root);
-    const stage = nextStage({ env: fileEnv, progress, depsReady: d.depsReady(root), serviceRunning: d.serviceStatus(root).running });
+    const stage = nextStage({ env: fileEnv, progress, depsReady: depsOk(), serviceRunning: d.serviceStatus(root).running });
     if (command === 'status') return finish(0, [stage === 'done' ? '都好了，不用再做什么' : '运行 node setup.mjs 继续']);
 
     if (stage === 'model') {
@@ -97,7 +107,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
         `需要用户：提供模型的${missing.map(k => LABEL[k]).join('、')}（Anthropic 兼容接口，比如火山方舟、DeepSeek）`,
         '密钥可以直接发给助手，也可以由用户自己填进 .env 的 MODEL_API_KEY 后说“填好了”；助手不要复述密钥',
         a.values.MODEL_API_KEY ? `可选：终端里已有 ${a.found.join('、')}（接口地址 ${a.baseUrl ?? '官方默认'}），用户说“沿用”就运行 node setup.mjs --use-anthropic-env` : null,
-        `拿到后运行：${MODEL_CMD}（只缺模型名时：node setup.mjs model --model <模型名>；用户自己填了 .env 就直接运行 node setup.mjs）`,
+        `拿到后：${MODEL_CMD}（只缺模型名时：node setup.mjs model --model <模型名>；用户自己填了 .env 就直接运行 node setup.mjs）`,
       ]);
     }
     if (stage === 'model-check') {
@@ -140,7 +150,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       const appIds = Object.fromEntries(team.map(r => [r.key, fileEnv[`${r.prefix}APP_ID`]]));
       const clients = Object.fromEntries(team.map(r => [r.key, new feishu.lark.Client({ appId: fileEnv[`${r.prefix}APP_ID`], appSecret: fileEnv[`${r.prefix}APP_SECRET`], loggerLevel: feishu.lark.LoggerLevel.error })]));
       try {
-        const g = await feishu.createTeamGroup({ clients, appIds, team, ownerOpenId: progress.ownerOpenId, existingChatId: progress.chatId, onChat: chatId => saveProgress(root, { chatId }), workbench: workbenchOf(fileEnv), log });
+        const g = await feishu.createTeamGroup({ clients, appIds, team, ownerOpenId: progress.ownerOpenId, existing: progress.chatId ? { chatId: progress.chatId, ownerSet: Boolean(progress.ownerSet), joinLink: progress.joinLink ?? null } : null, onChat: info => saveProgress(root, info), workbench: workbenchOf(fileEnv), log });
         saveProgress(root, { chatId: g.chatId, ownerSet: g.ownerSet, joinLink: g.joinLink, groupReady: true });
         log('✓ 已建群「AI 团队」，3 个机器人发了报到卡片');
       } catch (error) {
