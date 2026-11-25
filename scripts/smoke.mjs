@@ -1,5 +1,8 @@
-// 冒烟测试：语法检查 → 用假飞书、假模型起工作台并能打开
+// 冒烟测试：语法检查 → 用假飞书、假模型起工作台并能打开 → 启动命令首跑
 import { execFileSync, spawn } from 'node:child_process';
+import { cpSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const files = execFileSync('git', ['ls-files', '*.mjs'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
 for (const file of files) execFileSync(process.execPath, ['--check', file]);
@@ -24,4 +27,17 @@ try {
   console.log('✓ 假飞书、假模型下工作台能打开');
 } finally {
   child.kill();
+}
+
+// 启动命令首跑：在临时目录里跑，确认建好 .env（600）并请用户提供模型信息
+const dir = mkdtempSync(path.join(os.tmpdir(), 'setup-smoke-'));
+try {
+  for (const item of ['setup.mjs', 'src', '.env.example', 'package.json']) cpSync(item, path.join(dir, item), { recursive: true });
+  symlinkSync(path.resolve('node_modules'), path.join(dir, 'node_modules'), 'dir');
+  const out = execFileSync(process.execPath, ['setup.mjs'], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (!out.includes('== 下一步 ==') || !out.includes('接口地址、密钥、模型名')) throw new Error(`启动命令首跑输出不对：\n${out}`);
+  if ((statSync(path.join(dir, '.env')).mode & 0o777) !== 0o600) throw new Error('.env 权限不是 600');
+  console.log('✓ 启动命令首跑：建好 .env 并请用户提供模型信息');
+} finally {
+  rmSync(dir, { recursive: true, force: true });
 }
