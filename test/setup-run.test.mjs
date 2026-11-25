@@ -154,6 +154,20 @@ test('群已建好、只差起服务时端口被占，也会先换端口再起�
   assert.equal(calls.service, 1);
 });
 
+test('起好服务后状态仍判不出来（比如沙箱里 ps 用不了）：这次运行只启动一次，不换端口', async () => {
+  const root = setupRoot(MODEL + BOTS);
+  saveProgress(root, { modelOk: true, groupReady: true, chatId: 'oc', ownerSet: true });
+  // 端口启动前空闲，启动后被刚起的服务自己占着
+  const fake = fakes({ serviceStatus: () => ({ running: false }), portsFree: async () => fake.calls.service === 0 });
+  const { deps, calls } = fake;
+  const { code, text } = await run(root, [], { deps });
+  assert.equal(code, 0);
+  assert.equal(calls.service, 1);
+  assert.doesNotMatch(readFileSync(path.join(root, '.env'), 'utf8'), /PREVIEW_PORT=/);
+  assert.match(text, /都好了/);
+  assert.match(text, /✓ 团队服务/);
+});
+
 test('--key-file：读文件里的密钥写进 .env，读完删掉文件，输出里没有密钥', async () => {
   const root = setupRoot();
   const { deps } = fakes();

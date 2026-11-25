@@ -33,6 +33,9 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   mkdirSync(path.join(root, 'data'), { recursive: true });
   // 后台安装还在跑或失败过，就算文件在也不算装好（可能只装了一半）
   const depsOk = () => d.depsReady(root) && !['running', 'failed'].includes(d.installStatus(root).status);
+  // 这次运行里刚起好的服务就算在跑：万一判断进程的办法在这台机器上不灵，也不会一遍遍重复启动
+  let serviceStarted = false;
+  const serviceRunning = () => serviceStarted || d.serviceStatus(root).running;
   const [command, ...rest] = argv;
   const flag = name => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
   const finish = (code, lines) => {
@@ -45,7 +48,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       `${mark(depsOk())} 依赖`,
       `${mark(bots === team.length)} 飞书机器人 ${bots}/${team.length}`,
       `${mark(progress.groupReady)} 飞书群「AI 团队」`,
-      `${mark(d.serviceStatus(root).running)} 团队服务`,
+      `${mark(serviceRunning())} 团队服务`,
       '', '== 下一步 ==', ...lines.filter(Boolean)].join('\n'));
     return code;
   };
@@ -86,7 +89,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   // 报到卡片和服务都要用工作台地址：先定好端口，被别的程序占了就换一对空闲的
   const ensurePort = async fileEnv => {
     const want = Number(fileEnv.PREVIEW_PORT || 4870);
-    if (d.serviceStatus(root).running || await d.portsFree(want)) return;
+    if (serviceRunning() || await d.portsFree(want)) return;
     const port = await d.pickPort(want + 10);
     updateEnv(envFile, { PREVIEW_PORT: String(port) });
     fileEnv.PREVIEW_PORT = String(port);
@@ -97,7 +100,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   for (let round = 0; round < 10; round += 1) {
     const fileEnv = readEnv(envFile);
     const progress = readProgress(root);
-    const stage = nextStage({ env: fileEnv, progress, depsReady: depsOk(), serviceRunning: d.serviceStatus(root).running });
+    const stage = nextStage({ env: fileEnv, progress, depsReady: depsOk(), serviceRunning: serviceRunning() });
     if (command === 'status') return finish(0, [stage === 'done' ? '都好了，不用再做什么' : '运行 node setup.mjs 继续']);
 
     if (stage === 'model') {
@@ -162,6 +165,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       await ensurePort(fileEnv);
       const r = await d.startService(root);
       if (!r.ok) return finish(1, [`团队服务没起来：${r.error}`, '日志在 data/service.log；修好后运行 npm start']);
+      serviceStarted = true;
       log('✓ 团队服务已在后台启动');
       continue;
     }
