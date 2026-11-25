@@ -204,6 +204,7 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
   const dir = await mkdtemp(path.join(root, 'test-flow-'));
   try {
     await put(dir, 'data/state.json', { groups: { g: { id: 'p1', chatId: 'g', name: '报名页', demand: '报名页', stage: 'clarifying', busy: true, error: null, questionRound: 2, walkthroughRound: 0, sessions: { product: 's2' }, cardId: null, cardMessageId: 'm2', lastDetail: '需要电话吗？：需要' } }, archived: [] });
+    await mkdir(path.join(dir, 'workspace/p1'), { recursive: true });
     const messages = [];
     const calls = [];
     const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async () => 'm3', patchCard: async () => {} }, agent: async ({ prompt, resume, projectDir }) => {
@@ -216,6 +217,8 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
     assert.equal(p.busy, false);
     assert.match(p.error, /团队服务重启过/);
     assert.match(messages.at(-1), /“澄清需求”出错：团队服务重启过，上一步没做完。请 @AI 产品经理 发送“重试”/);
+    const [listed] = (await local.getState()).projects;
+    assert.deepEqual([listed.number, listed.waitingFor, listed.retryRole], [1, '重试', 'product']);
     assert.equal((JSON.parse(await readFile(path.join(dir, 'data/state.json'), 'utf8'))).groups.g.busy, false);
     await local.handleMessage({ chatId: 'g', role: 'product', text: '重试' }); await local.waitForIdle('g');
     assert.equal(calls.length, 1);
