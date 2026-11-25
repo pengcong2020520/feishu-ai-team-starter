@@ -22,8 +22,14 @@ const put = async (dir, file, content) => { const full = path.join(dir, file); a
 const prd = ['# 活动报名页','## 产品概述','让访客在线报名活动。','## 目标用户与场景','访客在活动页面填写信息。','## 用户故事','假如打开页面，当提交报名，那么看到成功提示。','## 页面与状态','default：默认填写；success：成功提示。','## 边界情况','姓名为空时提示。','## 功能需求','FR-001 填写姓名并报名。','## 成功标准','SC-001 成功提交后看到提示。','## 假设','本地演示，不连接后台。','## 本期不做','支付。'].join('\n');
 const outline = { title: '活动报名页', blocks: [{ name: '介绍', content: '活动信息' }, { name: '报名', content: '输入姓名' }], states: [{ id: 'default', name: '填写报名', desc: '看到活动信息和报名表单' }, { id: 'success', name: '报名成功', desc: '看到成功提示' }] };
 const colors = Object.fromEntries(['background','surface','text','muted','border','primary','onPrimary','accent','success','warning','error','disabled'].map(key => [key, '#315fdb']));
-const agent = async ({ role, prompt, projectDir, onProgress, mode }) => {
+const agent = async ({ role, prompt, projectDir, onProgress, mode, control }) => {
   // 群聊对话：设计确认时用户提了修改意见，AI 设计提议“按这个改”
+  // 干活中的示例：一直在做，直到在工作台或卡片上点“停下”
+  if (prompt.includes('干活中')) {
+    onProgress({ tool: 'Skill', file: 'team:clarify' });
+    onProgress({ tool: 'Read', file: 'docs/questions.json' });
+    return new Promise(resolve => { control.steer = () => true; control.stop = () => resolve({ ok: false, stopped: true, error: '用户让它停下了', stats: { turns: 1, durationMs: 100, inputTokens: 100, outputTokens: 10 } }); });
+  }
   if (mode === 'chat') return { ok: true, text: '', structured: { reply: '可以，主色换成绿色，按钮和标题跟着变，布局不动。', proposal: { action: 'revise', detail: '主色换成绿色' } }, sessionId: 'chat-demo', stats: { turns: 1, durationMs: 100, inputTokens: 100, outputTokens: 50 } };
   if (role === 'product') {
     if (prompt.includes('会卡住')) {
@@ -65,6 +71,14 @@ for (const [chatId, text] of [['demo-ended','做一个已结束的活动报名�
   await flow.handleMessage({ chatId: 'demo-ended', text: '结束' });
   const p = await flow.getProject('demo-ended');
   await flow.handleAction({ chatId: 'demo-ended', value: { action: 'end', stage: p.stage, projectId: p.id, cardId: p.endCardId } });
+}
+{ // 干活中的项目：产品经理正在澄清，对它说的话先记下（卡片上可以“现在引导”或“停下这一步”）
+  const text = '做一个干活中的活动报名页';
+  await recorder.add('demo-working', { kind: 'user', role: 'product', text, source: '试用' });
+  await flow.handleMessage({ chatId: 'demo-working', text, intent: 'demand' });
+  while (!(await flow.getProject('demo-working'))?.activity?.includes('在看')) await new Promise(resolve => setTimeout(resolve, 10));
+  await recorder.add('demo-working', { kind: 'user', role: 'product', text: '记得加上电话字段', source: '试用' });
+  await flow.handleMessage({ chatId: 'demo-working', role: 'product', text: '记得加上电话字段' });
 }
 const preview = await startPreview({ root, assetsRoot, modelPort: port + 1, workbenchPort: port, flow, feishu, recorder });
 console.log(`试用工作台已启动：http://127.0.0.1:${port}`);

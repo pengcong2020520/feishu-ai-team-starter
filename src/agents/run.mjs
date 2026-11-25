@@ -48,6 +48,8 @@ async function resolvedTarget(target) {
 function denied(message) { return { behavior: 'deny', message }; }
 
 async function permissionFor(role, projectDir, tool, input, allowed = tools) {
+  // 对话模式按固定格式回复时，SDK 让模型调用 StructuredOutput 工具交结果，要放行
+  if (tool === 'StructuredOutput' && allowed === chatTools) return { behavior: 'allow' };
   if (!allowed.includes(tool)) return denied('工具不在白名单中');
   if (tool === 'Skill') {
     return roles[role].skills.includes(input.skill) ? { behavior: 'allow' } : denied('此角色不能使用该技能');
@@ -86,15 +88,54 @@ function tokenTotals(result) {
   return { inputTokens: result.usage?.input_tokens ?? 0, outputTokens: result.usage?.output_tokens ?? 0 };
 }
 
+// 干活时的输入通道：先送任务，之后用户的引导以 priority 'now' 插进当前这一步；第一个结果到了就关上
+function inputChannel(prompt) {
+  const inbox = [];
+  let wake = null;
+  let closed = false;
+  const notify = () => { const fn = wake; wake = null; fn?.(); };
+  return {
+    async *messages() {
+      yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null };
+      while (true) {
+        while (inbox.length) yield inbox.shift();
+        if (closed) return;
+        await new Promise(resolve => { wake = resolve; });
+      }
+    },
+    push(text) {
+      if (closed) return false;
+      inbox.push({ type: 'user', message: { role: 'user', content: `用户在你干活时插话引导：${text}` }, parent_tool_use_id: null, priority: 'now' });
+      notify();
+      return true;
+    },
+    close() { closed = true; notify(); },
+  };
+}
+
 export function createRunAgent(queryImpl = query) {
-  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode = 'work' }) {
+  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode = 'work', control }) {
     const started = Date.now();
     const stats = { turns: 0, durationMs: 0, inputTokens: 0, outputTokens: 0 };
     let sessionId = null;
     // 到时间还没做完就中止，交给编排按“停下了”处理
     const abortController = new AbortController();
     let timedOut = false;
+    let stopped = false;
     const timer = timeoutMs ? setTimeout(() => { timedOut = true; abortController.abort(); }, timeoutMs) : null;
+    // control：编排传进来一个空对象，这里填上 steer(text) 和 stop()；这一步结束后 steer 一律返回 false
+    const channel = control ? inputChannel(prompt) : null;
+    let running = null;
+    if (control) {
+      control.steer = text => channel.push(text);
+      control.stop = async () => {
+        if (stopped) return;
+        stopped = true;
+        channel.close();
+        try { if (typeof running?.interrupt === 'function') await running.interrupt(); else abortController.abort(); }
+        catch { abortController.abort(); }
+      };
+    }
     try {
       if (!roles[role]) throw new Error('未知角色');
       if (typeof prompt !== 'string' || !prompt) throw new Error('任务不能为空');
@@ -148,16 +189,20 @@ export function createRunAgent(queryImpl = query) {
       };
       if (resume && !chat) options.resume = resume;
       let result;
-      for await (const message of queryImpl({ prompt, options })) {
+      running = queryImpl({ prompt: channel ? channel.messages() : prompt, options });
+      // 中途插话时会先出一个结果再接着干，以最后一个结果为准
+      for await (const message of running) {
         if (message.session_id) sessionId = message.session_id;
         if (message.type === 'assistant') {
           for (const block of message.message?.content ?? []) {
             if (block.type === 'tool_use') onProgress?.(progressFrom(block, cwd));
           }
         }
-        if (message.type === 'result') result = message;
+        if (message.type === 'result') { result = message; channel?.close(); }
       }
       if (timedOut) throw new Error('timeout');
+      // 刚好做完时才点停下：活已经干完，按做完算
+      if (stopped && !(result?.subtype === 'success' && !result.is_error)) throw new Error('stopped');
       if (!result) throw new Error('智能体没有返回结果');
       stats.turns = result.num_turns ?? 0;
       stats.durationMs = result.duration_ms ?? Date.now() - started;
@@ -168,8 +213,13 @@ export function createRunAgent(queryImpl = query) {
     } catch (error) {
       stats.durationMs = Date.now() - started;
       if (timedOut) return { ok: false, text: '', sessionId, error: `超过 ${Math.round(timeoutMs / 60000)} 分钟没做完`, timedOut: true, stats };
+      if (stopped) return { ok: false, text: '', sessionId, error: '用户让它停下了', stopped: true, stats };
       return { ok: false, text: '', sessionId, error: error.message, stats };
-    } finally { clearTimeout(timer); }
+    } finally {
+      clearTimeout(timer);
+      channel?.close();
+      if (control) control.steer = () => false;
+    }
   };
 }
 

@@ -23,6 +23,34 @@ export function checkFailed(errors) {
   return new StepError(`交付的${labels.join('、') || '文件'}没通过格式检查`, { kind: 'check', detail: errors.join('；'), checks: errors });
 }
 
+const skillNames = {
+  clarify: '澄清', 'prd-spec': '写 PRD', 'spec-checklist': '需求自查', 'lofi-wireframe': '画线框', 'theme-pick': '选主题',
+  'flow-walkthrough': '走查', 'consistency-check': '需求覆盖检查', 'frontend-design': '前端设计',
+};
+// 进度卡上那一行：把工具调用说成人话，如“📖 在看 PRD”“🧰 在用「前端设计」技能”
+const phrase = (verb, name) => /^[A-Za-z0-9]/.test(name) ? `${verb} ${name}` : `${verb}${name}`;
+export function activityText({ tool, file = '' }) {
+  if (tool === 'Skill') { const skill = file.replace(/^team:/, ''); return `🧰 在用「${skillNames[skill] ?? skill}」技能`; }
+  if (tool === 'Glob') return '🔍 在找文件';
+  const name = /team-skills|SKILL\.md|\.\.\//.test(file) ? '技能说明' : fileNames[file] ?? (file.split('/').pop() || '文件');
+  const verb = { Read: '📖 在看', Write: '✍️ 在写', Edit: '✏️ 在改' }[tool];
+  return verb ? phrase(verb, name) : '⏳ 在处理';
+}
+
+// 进度卡第一行：这一步在做什么（给人看的，不是发给智能体的任务消息）
+export function taskLine(stage, detail = '', round = 1) {
+  switch (stage) {
+    case 'clarifying': return round === 1 ? '读你的需求，看还要问什么' : `看你的回答，再问一轮或写 PRD（第 ${round} 轮）`;
+    case 'revise_prd': return `按你的意见改 PRD：${shorten(detail)}`;
+    case 'designing': return '按 PRD 画线框、选主题';
+    case 'revise_design': return `按你的意见改设计：${shorten(detail)}`;
+    case 'building': return '照 PRD、线框和主题写网页';
+    case 'walkthrough': return round === 1 ? '替你逐屏走查网页' : `回归走查网页（第 ${round} 轮）`;
+    case 'revise_build': return `按你的意见改网页：${shorten(detail)}`;
+    default: return stageNames[stage] ?? '正在处理这一步';
+  }
+}
+
 export const shorten = (text, max = 40) => {
   const value = String(text ?? '').replace(/\s+/g, ' ').trim();
   return value.length > max ? `${value.slice(0, max)}…` : value;

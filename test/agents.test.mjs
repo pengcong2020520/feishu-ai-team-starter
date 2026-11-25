@@ -115,5 +115,46 @@ test('对话模式：只读、不用技能、开新会话，按固定格式返�
     assert.equal((await options.canUseTool('Read', { file_path: 'docs/prd.md' })).behavior, 'allow');
     assert.equal((await options.canUseTool('Write', { file_path: 'design/theme.json' })).behavior, 'deny');
     assert.equal((await options.canUseTool('Skill', { skill: 'team:theme-pick' })).behavior, 'deny');
+    assert.equal((await options.canUseTool('StructuredOutput', { reply: '你好' })).behavior, 'allow');
+    assert.deepEqual(await options.hooks.PreToolUse[0].hooks[0]({ tool_name: 'StructuredOutput', tool_input: {} }), {});
+  } finally { await rm(project, { recursive: true, force: true }); }
+});
+
+test('干活时插话和停下：引导以 priority now 送进这一步、以最后一个结果为准；停下调 interrupt', async () => {
+  const project = await mkdtemp(path.join(root, 'test-project-'));
+  try {
+    const control = {};
+    const seen = [];
+    const result = { type: 'result', subtype: 'success', is_error: false, session_id: 's', num_turns: 1, duration_ms: 1, modelUsage: {} };
+    const steerQuery = ({ prompt }) => (async function* () {
+      const input = prompt[Symbol.asyncIterator]();
+      seen.push((await input.next()).value);
+      yield { type: 'assistant', session_id: 's', message: { content: [] } };
+      assert.equal(control.steer('主色用绿色'), true);
+      seen.push((await input.next()).value);
+      yield { ...result, result: '' };
+      yield { ...result, result: '按引导改好了' };
+      assert.equal((await input.next()).done, true);
+    })();
+    const done = await createRunAgent(steerQuery)({ role: 'designer', prompt: '画线框', projectDir: project, control });
+    assert.equal(done.text, '按引导改好了');
+    assert.equal(seen[0].message.content, '画线框');
+    assert.equal(seen[1].priority, 'now');
+    assert.match(seen[1].message.content, /主色用绿色/);
+    assert.equal(control.steer('晚了'), false);
+
+    const stopControl = {};
+    let interrupted = false;
+    const stopQuery = () => {
+      const run = (async function* () {
+        yield { type: 'assistant', session_id: 's2', message: { content: [] } };
+        await stopControl.stop();
+        throw new Error('interrupted');
+      })();
+      run.interrupt = async () => { interrupted = true; };
+      return run;
+    };
+    const stopped = await createRunAgent(stopQuery)({ role: 'designer', prompt: '画线框', projectDir: project, control: stopControl });
+    assert.deepEqual([stopped.ok, stopped.stopped, interrupted, stopped.sessionId], [false, true, true, 's2']);
   } finally { await rm(project, { recursive: true, force: true }); }
 });

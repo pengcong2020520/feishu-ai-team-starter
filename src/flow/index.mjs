@@ -5,8 +5,8 @@ import { roles } from '../agents/roles.mjs';
 import { runAgent } from '../agents/run.mjs';
 import { validateQuestions, validatePrd, validateDesign, validateSite, validateWalkthrough } from './validate.mjs';
 import { nextStage, roleFor, stageNames, taskFor, timeLimits } from './stages.mjs';
-import { gateCard, questionCard, answeredCard, progressCard, resultCard, completeCard, stuckCard, confirmEndCard, closedCard, proposalCard, proposalTitle, proposalChoices, proposalButton, toast } from './cards.mjs';
-import { StepError, checkFailed, briefOf, shorten, gateRole, retryRole, nextStep, staleText } from './guide.mjs';
+import { gateCard, questionCard, answeredCard, progressCard, queuedCard, queuedTitle, resultCard, completeCard, stuckCard, confirmEndCard, closedCard, proposalCard, proposalTitle, proposalChoices, proposalButton, toast } from './cards.mjs';
+import { StepError, checkFailed, briefOf, shorten, gateRole, retryRole, nextStep, staleText, activityText, taskLine } from './guide.mjs';
 import { allowedActions, checkProposal, chatPrompt, chatTimeoutMs, artifacts, tidy } from './chat.mjs';
 import { createSheet } from '../sheet.mjs';
 import { createOutline } from '../outline.mjs';
@@ -26,6 +26,8 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   const jobs = new Map();
   // 群聊对话：同一个群的对话按顺序一条条回，不占用项目的“干活中”
   const talks = new Map();
+  // 正在跑的智能体：用来把用户的引导插进去、让它停下
+  const live = new Map();
   let state = { groups: {}, archived: [], proposals: {} };
   let saves = Promise.resolve();
   const ready = (async () => {
@@ -42,6 +44,8 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
         jobs.set(project.chatId, entry);
       }
       project.busy = false;
+      project.activity = null;
+      project.ending = null;
     }
   })();
   const save = () => {
@@ -94,11 +98,46 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     p.error = null;
     const job = (async () => {
       try { await save(); await fn(); }
-      catch (e) { await safeError(p, e); }
-      finally { p.busy = false; p.currentFile = null; await save(); jobs.delete(p.chatId); }
+      // 用户点了“停下并结束”：不发停下卡，下面直接结束项目
+      catch (e) { if (!p.ending) await safeError(p, e); }
+      finally {
+        p.busy = false; p.currentFile = null; p.activity = null; await save();
+        try {
+          if (p.ending) { const who = p.ending; p.ending = null; await endProject(p, who); }
+          else await drain(p);
+        } catch (error) { console.error(`收尾出错：${errorText(error)}`); }
+        if (jobs.get(p.chatId) === job) jobs.delete(p.chatId);
+      }
     })();
     jobs.set(p.chatId, job);
     return job;
+  };
+  // 干活时记下的话：这一步做完后逐条进对话
+  const drain = async p => {
+    const queued = p.queued ?? [];
+    if (!queued.length) return;
+    p.queued = [];
+    await save();
+    for (const item of queued) {
+      await closeCard(p.chatId, item.messageId, queuedTitle(item.role), `这一步做完了，接着回复这句话：${item.text}`, item.role);
+      talk(p.chatId, item.role, item.text);
+    }
+  };
+  const queue = async (p, role, text) => {
+    const item = { cardId: id(), role, text };
+    p.queued = [...(p.queued ?? []), item];
+    await save();
+    const minutes = Math.floor((Date.now() - Date.parse(p.workStartedAt ?? p.stageAt ?? Date.now())) / 60000);
+    item.messageId = await delivery.sendCard(p.chatId, queuedCard({ role, doing: stageNames[p.stage], minutes, text, projectId: p.id, stage: p.stage, cardId: item.cardId }), role);
+    await save();
+  };
+  // 让正在干活的智能体停下；它已经在收尾（没有在跑智能体）时停不了
+  const stopStep = async (p, actor, role) => {
+    const entry = live.get(p.chatId);
+    if (!entry) { await sendText(p.chatId, '这一步正在收尾，停不下来了，做完会发新卡片。', role); return false; }
+    p.stoppedBy = actor;
+    void entry.control.stop?.();
+    return true;
   };
   const linksFor = (p, stage) => stage === 'confirm_prd' ? [{ label: '打开结构图', url: `${workbenchBase}/p/${p.id}/outline` }]
     : stage === 'confirm_design' ? [{ label: '打开线框', url: `${previewBase}/p/${p.id}/wireframe` }]
@@ -166,41 +205,59 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     const round = stage === 'clarifying' ? p.questionRound + 1 : stage === 'walkthrough' ? p.walkthroughRound + 1 : 1;
     if (stage === 'clarifying') await unlink(path.join(dir, 'docs/questions.json')).catch(e => { if (e.code !== 'ENOENT') throw e; });
     const title = `${roles[role].name} · ${stageNames[stage]}`;
+    const task = taskLine(stage, detail, round);
     let progressId;
     let lastPatch = 0;
     let lastActivity = Date.now();
+    let pending = null;
     const started = Date.now();
-    const lines = [];
+    let current = '⏳ 在读任务';
+    let steps = 0;
+    const guides = [];
     const reads = new Set();
     const writes = new Set();
     let completed = false;
-    try { progressId = await delivery.sendCard(p.chatId, progressCard({ title, task: taskFor(stage, detail, round).split('\n')[0] }), role); } catch (e) { throw e; }
-    const patchProgress = async (force = false) => {
-      if (!progressId || completed || (!force && Date.now() - lastPatch < 2000)) return;
+    p.workStartedAt = new Date(started).toISOString();
+    p.progressCardId = id();
+    p.activity = current;
+    const stopValue = { action: 'stop', stage, projectId: p.id, cardId: p.progressCardId };
+    const view = () => progressCard({ title, task, current, steps, guides, stopValue, elapsedSeconds: Math.round((Date.now() - started) / 1000) });
+    progressId = await delivery.sendCard(p.chatId, view(), role);
+    // 最多 2 秒更新一次，被挡下的那次随后补上；没动静时每 30 秒刷新一次用时
+    const patchProgress = async () => {
+      if (!progressId || completed) return;
+      const wait = 2000 - (Date.now() - lastPatch);
+      if (wait > 0) { pending ??= setTimeout(() => { pending = null; void patchProgress(); }, wait); return; }
       lastPatch = Date.now();
-      try { await delivery.patchCard(progressId, progressCard({ title, task: stageNames[stage], lines, elapsedSeconds: Math.round((Date.now() - started) / 1000) }), role, p.chatId); } catch (e) { p.progressError = errorText(e); }
+      try { await delivery.patchCard(progressId, view(), role, p.chatId); } catch (e) { p.progressError = errorText(e); }
     };
-    const thinking = setInterval(() => { if (Date.now() - lastActivity >= 15000 && lines.at(-1) !== '正在思考……') { lines.push('正在思考……'); void patchProgress(); } }, 2000);
+    const ticker = setInterval(() => {
+      if (Date.now() - lastActivity >= 15000 && current !== '💭 在思考') { current = '💭 在思考'; p.activity = current; void patchProgress(); }
+      else if (Date.now() - lastPatch >= 30000) void patchProgress();
+    }, 2000);
+    const control = {};
+    live.set(p.chatId, { role, control, guide: text => { guides.push(text); lastActivity = Date.now(); void patchProgress(); } });
     let result;
-    try { result = await agent({ role, prompt: taskFor(stage, detail, round) + note, projectDir: dir, timeoutMs: timeLimits[stage] * 60000,
+    try { result = await agent({ role, prompt: taskFor(stage, detail, round) + note, projectDir: dir, timeoutMs: timeLimits[stage] * 60000, control,
       resume: stage === 'walkthrough' ? undefined : p.sessions[role], onProgress: event => {
         lastActivity = Date.now();
         const file = String(event.file ?? '').replace(/^.*?workspace\/[^/]+\//, '');
         p.currentFile = file;
         p.currentTool = event.tool;
         p.activityAt = new Date().toISOString();
-        void save();
-        const label = event.tool === 'Read' ? `📖 读 ${file}` : event.tool === 'Write' ? `✍️ 写 ${file}`
-          : event.tool === 'Edit' ? `✏️ 改 ${file}` : event.tool === 'Glob' ? `🔍 找文件 ${file}`
-          : event.tool === 'Skill' ? `🧰 用技能 ${file.replace(/^team:/, '')}` : `使用 ${event.tool}`;
         if (event.tool === 'Read') reads.add(file);
         if (event.tool === 'Write' || event.tool === 'Edit') writes.add(file);
-        lines.push(label);
+        steps += 1;
+        current = activityText({ tool: event.tool, file });
+        p.activity = current;
+        void save();
         void patchProgress();
       } }); }
-    finally { clearInterval(thinking); completed = true; }
-    if (progressId) await delivery.patchCard(progressId, progressCard({ title, task: stageNames[stage], lines: [...lines, result?.ok ? '已完成' : `失败：${result?.error ?? '未知错误'}`], stats: result?.stats, done: true }), role, p.chatId);
+    finally { clearInterval(ticker); clearTimeout(pending); completed = true; live.delete(p.chatId); }
+    const outcome = result?.ok ? '✅ 已完成' : result?.stopped ? '⏹ 已停下' : '⚠️ 没做完';
+    if (progressId) await delivery.patchCard(progressId, progressCard({ title, task, steps, guides, stats: result?.stats ?? {}, done: true, ok: Boolean(result?.ok), outcome }), role, p.chatId);
     const process = { reads: reads.size, writes: writes.size, stats: result?.stats };
+    if (result?.stopped) { const who = p.stoppedBy ?? '你'; p.stoppedBy = null; throw new StepError(`${who}让 ${roles[role].name}停下了这一步`, { kind: 'stopped' }); }
     if (result?.timedOut) throw new StepError(`${roles[role].name}这一步超过 ${timeLimits[stage]} 分钟还没做完，已经停下`, { kind: 'timeout', detail: `${roles[role].name}执行超时：${result.error}` });
     if (!result?.ok) throw new StepError(`${roles[role].name}这一步没做完：${shorten(result?.error ?? '没有返回结果', 30)}`, { kind: 'agent', detail: `${roles[role].name}执行失败：${result?.error ?? '没有返回结果'}` });
     if (stage !== 'walkthrough' && result.sessionId) p.sessions[role] = result.sessionId;
@@ -277,7 +334,8 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     await closeCard(p.chatId, p.stuckMessageId, `${roles[retryRole(p)].name} · 这一步停下了`, `✓ ${actor}结束了项目`, retryRole(p));
     await closeCard(p.chatId, p.endMessageId, 'AI 产品经理 · 结束这个项目？', `✓ ${actor}结束了项目`, 'product');
     if (p.cardId && gateRole(p.stage)) await closeCard(p.chatId, p.cardMessageId, `${roles[p.cardRole ?? 'product'].name} · ${stageNames[p.stage]}`, '项目已结束', p.cardRole ?? 'product');
-    Object.assign(p, { ended: true, endedAt: new Date().toISOString(), endedStage: p.stage, stage: 'done', cardId: null, error: null, errorBrief: null, pendingCard: null, pendingAction: null, stuckCardId: null, stuckMessageId: null, endCardId: null, endMessageId: null });
+    for (const item of p.queued ?? []) await closeCard(p.chatId, item.messageId, queuedTitle(item.role), `项目已结束，这句话没有处理：${item.text}`, item.role);
+    Object.assign(p, { queued: [], ended: true, endedAt: new Date().toISOString(), endedStage: p.stage, stage: 'done', cardId: null, error: null, errorBrief: null, pendingCard: null, pendingAction: null, stuckCardId: null, stuckMessageId: null, endCardId: null, endMessageId: null });
     state.archived.push(structuredClone(p));
     delete state.groups[p.chatId];
     await save();
@@ -285,7 +343,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   };
   const askToEnd = async p => {
     p.endCardId = id();
-    p.endMessageId = await delivery.sendCard(p.chatId, confirmEndCard({ name: p.name, projectId: p.id, stage: p.stage, cardId: p.endCardId }), 'product');
+    p.endMessageId = await delivery.sendCard(p.chatId, confirmEndCard({ name: p.name, projectId: p.id, stage: p.stage, cardId: p.endCardId, busy: p.busy }), 'product');
     await save();
   };
   // 开项目：工作台“提需求”和提议卡上的“就按这个开始”都走这里
@@ -378,11 +436,15 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     const active = p && p.stage !== 'done';
     // 工作台“提需求”是明确的需求，直接开工；群里的话先聊，点了提议卡才开工
     if (intent === 'demand' && !active) return begin(chatId, text);
-    if (p?.busy && role === roleFor(p.stage)) { await sendText(chatId, nextStep(p), role); return { busy: true }; }
+    if (['停止', '停下'].includes(said)) {
+      if (p?.busy) { await stopStep(p, '你', role); return { stopping: true }; }
+      await sendText(chatId, `现在没有正在干活的同事。${nextStep(active ? p : null)}`, role);
+      return { waiting: true };
+    }
     if (['重试', '结束'].includes(said)) {
       if (!active) { await sendText(chatId, `群里现在没有进行中的项目。${nextStep(null)}`, role); return { waiting: true }; }
-      if (p.busy) { await sendText(chatId, nextStep(p), role); return { busy: true }; }
       if (said === '结束') { await askToEnd(p); return { confirming: 'end' }; }
+      if (p.busy) { await sendText(chatId, nextStep(p), role); return { busy: true }; }
       if (p.error) { await retry(p, '你'); return { retrying: true }; }
       await sendText(chatId, `现在没有停下的步骤。${nextStep(p)}`, role);
       return { waiting: true };
@@ -393,6 +455,8 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
       launch(p, () => run(p, p.stage, text));
       return { stage: p.stage };
     }
+    // 对正在干活的角色说话：先记下，这一步做完再回；卡片上可以“现在引导”或“停下这一步”
+    if (p?.busy && role === roleFor(p.stage)) { await queue(p, role, text); return { queued: true }; }
     talk(chatId, role, text);
     return { chatting: true };
   };
@@ -408,6 +472,43 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     const offer = state.proposals[chatId];
     if (offer && value?.cardId === offer.cardId) return decide(chatId, p, offer, value, actor);
     const action = value?.action;
+    const mine = p && p.id === value?.projectId;
+    // 干活中也能点：进度卡和排队卡上的“停下”、排队卡上的“现在引导”
+    const queued = mine ? p.queued?.find(item => item.cardId === value?.cardId) : null;
+    if (mine && p.busy && action === 'stop' && (queued || value.cardId === p.progressCardId)) {
+      await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
+      if (queued) {
+        p.queued = p.queued.filter(item => item !== queued); await save();
+        await closeCard(chatId, queued.messageId, queuedTitle(queued.role), `✓ ${actor}点了“停下这一步”`, queued.role);
+      }
+      return toast(await stopStep(p, actor) ? '正在停下' : '这一步正在收尾，停不下来了');
+    }
+    if (queued && p.busy && action === 'steer') {
+      const entry = live.get(chatId);
+      if (entry?.role === queued.role && entry.control.steer?.(queued.text)) {
+        await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
+        p.queued = p.queued.filter(item => item !== queued); await save();
+        entry.guide(queued.text);
+        await closeCard(chatId, queued.messageId, queuedTitle(queued.role), `↪ 已插进这一步：${queued.text}`, queued.role);
+        return toast('已插进这一步');
+      }
+      return toast('这一步正在收尾，做完会接着回复这句话');
+    }
+    // 结束确认卡（干活中点“停下并结束”：先停下，这一步收尾后结束）
+    if (mine && p.endCardId && value.cardId === p.endCardId && p.busy && ['end', 'keep'].includes(action)) {
+      await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
+      if (action === 'keep') {
+        await closeCard(chatId, p.endMessageId, 'AI 产品经理 · 结束这个项目？', `✓ ${actor}选择继续做`, 'product');
+        p.endCardId = null; p.endMessageId = null; await save();
+        return toast('继续做');
+      }
+      p.ending = actor;
+      await closeCard(chatId, p.endMessageId, 'AI 产品经理 · 结束这个项目？', `✓ ${actor}点了“停下并结束”，这一步停下后结束`, 'product');
+      p.endCardId = null; p.endMessageId = null; await save();
+      const entry = live.get(chatId);
+      if (entry) { p.stoppedBy = actor; void entry.control.stop?.(); }
+      return toast('正在停下并结束');
+    }
     const ours = p && p.id === value?.projectId && p.stage === value?.stage && !p.busy;
     // 停下卡：重试或结束项目
     if (ours && p.error && p.stuckCardId && value.cardId === p.stuckCardId && ['retry', 'end'].includes(action)) {
