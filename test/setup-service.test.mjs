@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { serviceStatus, startService, stopService } from '../src/setup/service.mjs';
+import net from 'node:net';
+import { pickPort, portsFree, serviceStatus, startService, stopService } from '../src/setup/service.mjs';
 
 test('后台启动、不重复启动、停止', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'setup-svc-'));
@@ -25,4 +26,26 @@ test('服务启动失败时带回日志里的报错', async () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /FEISHU_PRODUCT_APP_ID/);
   assert.equal(serviceStatus(root).running, false);
+});
+
+test('端口被占时跳到下一对空闲端口', async () => {
+  const blocker = net.createServer();
+  await new Promise(resolve => blocker.listen(0, '127.0.0.1', resolve));
+  const busy = blocker.address().port;
+  try {
+    assert.equal(await portsFree(busy), false);
+    const picked = await pickPort(busy);
+    assert.notEqual(picked, busy);
+    assert.equal((picked - busy) % 10, 0);
+  } finally {
+    blocker.close();
+  }
+});
+
+test('服务因端口占用起不来时，提示改 PREVIEW_PORT', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'setup-svc-'));
+  writeFileSync(path.join(root, 'busy-main.mjs'), "console.error(\"Error: listen EADDRINUSE: address already in use 127.0.0.1:4871\"); process.exit(1);");
+  const r = await startService(root, { entry: 'busy-main.mjs', intervalMs: 50 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /端口 4871 被别的程序占用：在 \.env 里把 PREVIEW_PORT 改成别的/);
 });

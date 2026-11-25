@@ -5,16 +5,16 @@ import { readProgress, saveProgress } from './progress.mjs';
 import { missingModel, missingBots, nextStage } from './state.mjs';
 import { anthropicEnv, checkModel } from './model.mjs';
 import { depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail } from './install.mjs';
-import { serviceStatus, startService } from './service.mjs';
+import { serviceStatus, startService, pickPort, portsFree } from './service.mjs';
 import { installRetry, registerMissing } from './register.mjs';
 import { createTeamGroup } from './group.mjs';
 
-export const WORKBENCH = 'http://127.0.0.1:4870';
+const workbenchOf = env => `http://127.0.0.1:${env.PREVIEW_PORT || 4870}`;
 const LABEL = { MODEL_BASE_URL: '接口地址', MODEL_API_KEY: '密钥', MODEL_NAME: '模型名' };
 const MODEL_CMD = "printf '%s' '<密钥>' | node setup.mjs model --base-url <地址> --model <模型名>";
 
 const realDeps = {
-  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService,
+  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, pickPort, portsFree,
   // 飞书 SDK 和 qrcode 要等依赖装好才能加载
   async loadFeishu() {
     const lark = await import('@larksuiteoapi/node-sdk');
@@ -73,6 +73,16 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     log(`已在后台安装依赖（${registry.includes('npmmirror') ? 'npmmirror 镜像' : 'npm 官方源'}），日志 data/install.log`);
   }
 
+  // 报到卡片和服务都要用工作台地址：先定好端口，被别的程序占了就换一对空闲的
+  const ensurePort = async fileEnv => {
+    const want = Number(fileEnv.PREVIEW_PORT || 4870);
+    if (d.serviceStatus(root).running || await d.portsFree(want)) return;
+    const port = await d.pickPort(want + 10);
+    updateEnv(envFile, { PREVIEW_PORT: String(port) });
+    fileEnv.PREVIEW_PORT = String(port);
+    log(`端口 ${want}/${want + 1} 被别的程序占用，改用 ${port}/${port + 1}（已写进 .env 的 PREVIEW_PORT）`);
+  };
+
   let feishu = null;
   for (let round = 0; round < 10; round += 1) {
     const fileEnv = readEnv(envFile);
@@ -125,11 +135,12 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       continue;
     }
     if (stage === 'group') {
+      await ensurePort(fileEnv);
       feishu ??= await d.loadFeishu();
       const appIds = Object.fromEntries(team.map(r => [r.key, fileEnv[`${r.prefix}APP_ID`]]));
       const clients = Object.fromEntries(team.map(r => [r.key, new feishu.lark.Client({ appId: fileEnv[`${r.prefix}APP_ID`], appSecret: fileEnv[`${r.prefix}APP_SECRET`], loggerLevel: feishu.lark.LoggerLevel.error })]));
       try {
-        const g = await feishu.createTeamGroup({ clients, appIds, team, ownerOpenId: progress.ownerOpenId, existingChatId: progress.chatId, onChat: chatId => saveProgress(root, { chatId }), workbench: WORKBENCH, log });
+        const g = await feishu.createTeamGroup({ clients, appIds, team, ownerOpenId: progress.ownerOpenId, existingChatId: progress.chatId, onChat: chatId => saveProgress(root, { chatId }), workbench: workbenchOf(fileEnv), log });
         saveProgress(root, { chatId: g.chatId, ownerSet: g.ownerSet, joinLink: g.joinLink, groupReady: true });
         log('✓ 已建群「AI 团队」，3 个机器人发了报到卡片');
       } catch (error) {
@@ -138,6 +149,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       continue;
     }
     if (stage === 'service') {
+      await ensurePort(fileEnv);
       const r = await d.startService(root);
       if (!r.ok) return finish(1, [`团队服务没起来：${r.error}`, '日志在 data/service.log；修好后运行 npm start']);
       log('✓ 团队服务已在后台启动');
@@ -147,7 +159,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       '都好了。告诉用户：',
       '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；之后按卡片提示点按钮',
       progress.ownerSet ? null : progress.joinLink ? `   还不在群里的话，先打开这个链接进群：${progress.joinLink}` : '   还不在群里的话：在飞书里新建一个群，把 3 个机器人拉进来（群设置 → 群机器人 → 添加机器人）',
-      `2. 本机工作台：${WORKBENCH}`,
+      `2. 本机工作台：${workbenchOf(readEnv(envFile))}`,
       '3. 想改某个角色或技能，直接说（照 AGENTS.md「改角色和技能」改）',
       '停止服务 npm stop；查看状态 npm run status',
     ]);

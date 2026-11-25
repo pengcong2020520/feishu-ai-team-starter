@@ -1,10 +1,13 @@
 // npm start / npm stop / npm run status
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { parseEnv } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { serviceStatus, startService, stopService } from '../src/setup/service.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
-const workbench = 'http://127.0.0.1:4870';
+const env = existsSync(path.join(root, '.env')) ? parseEnv(readFileSync(path.join(root, '.env'), 'utf8')) : {};
+const workbench = `http://127.0.0.1:${env.PREVIEW_PORT || 4870}`;
 const [command] = process.argv.slice(2);
 if (command === 'start') {
   const r = await startService(root);

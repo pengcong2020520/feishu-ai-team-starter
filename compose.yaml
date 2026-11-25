@@ -8,6 +8,7 @@ services:
     mem_limit: 1536m
     environment:
       PREVIEW_HOST: 0.0.0.0
+      PREVIEW_PORT: 4870
       PUBLIC_WORKBENCH_BASE: http://127.0.0.1:4880
       PUBLIC_PREVIEW_BASE: http://127.0.0.1:4881
       CHROME_PATH: /usr/bin/chromium

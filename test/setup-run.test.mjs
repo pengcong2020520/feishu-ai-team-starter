@@ -29,6 +29,8 @@ function fakes(over = {}) {
     checkModel: async () => ({ ok: true }),
     serviceStatus: () => ({ running }),
     startService: async () => { calls.service += 1; running = true; return { ok: true, pid: 1 }; },
+    portsFree: async () => true,
+    pickPort: async start => start,
     loadFeishu: async () => ({
       lark: { defaultHttpInstance: {}, LoggerLevel: { error: 0 }, Client: class { constructor(o) { this.appId = o.appId; } } },
       qrcode: {},
@@ -131,4 +133,23 @@ test('都好了再跑只报状态；不认识的参数报错', async () => {
   assert.match(done.text, /都好了/);
   assert.equal(calls.service, 0);
   assert.equal((await run(root, ['--nope'], { deps })).code, 1);
+});
+
+test('工作台端口被别的程序占了：换一对空闲端口写进 .env，卡片和提示都用新地址', async () => {
+  const root = setupRoot(MODEL + BOTS);
+  saveProgress(root, { modelOk: true, ownerOpenId: 'ou_me' });
+  const { deps, calls } = fakes({ portsFree: async port => port !== 4870, pickPort: async start => start });
+  const { text } = await run(root, [], { deps });
+  assert.match(readFileSync(path.join(root, '.env'), 'utf8'), /PREVIEW_PORT=4880/);
+  assert.equal(calls.group[0].workbench, 'http://127.0.0.1:4880');
+  assert.match(text, /本机工作台：http:\/\/127\.0\.0\.1:4880/);
+});
+
+test('群已建好、只差起服务时端口被占，也会先换端口再起服务', async () => {
+  const root = setupRoot(MODEL + BOTS);
+  saveProgress(root, { modelOk: true, groupReady: true, chatId: 'oc', ownerSet: true });
+  const { deps, calls } = fakes({ portsFree: async port => port !== 4870, pickPort: async start => start });
+  await run(root, [], { deps });
+  assert.match(readFileSync(path.join(root, '.env'), 'utf8'), /PREVIEW_PORT=4880/);
+  assert.equal(calls.service, 1);
 });
