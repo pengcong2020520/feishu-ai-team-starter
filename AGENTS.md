@@ -1,6 +1,29 @@
 # 项目说明书：飞书 AI 团队
 
-给在这个目录里工作的 AI 编程助手（Codex、Claude Code 等）。每次开工前先读完本文件。具体做什么以用户给的提示词为准；怎么做、守什么约定，以本文件为准。
+给在这个目录里工作的 AI 编程助手（Codex、Claude Code、Grok 等）。每次开工前先读完本文件。仓库里已经是能直接运行的完整代码：用户要搭建，照「安装与运行」在对话里带着用户做；用户要改角色、技能或功能，照下面的约定改。想从零自己搭的人用 `learn` 分支。
+
+## 安装与运行（用户要搭建时先看这里）
+
+1. 运行 `node setup.mjs`（Node 24 以上；不用先 `npm install`，它会在后台装依赖）。它每次只做下一件能做的事，最后打印 `== 下一步 ==`：照着在对话里问用户、或告诉用户要做什么，拿到回答后再运行。不要自己写扫码、建群之类的脚本。
+2. 模型：问用户接口地址、密钥、模型名（Anthropic 兼容接口；火山方舟是 `https://ark.cn-beijing.volces.com/api/compatible`，不是 `/api/v3`）。密钥用户可以直接发给你，也可以自己填进 `.env` 的 `MODEL_API_KEY`。拿到后用 `printf '%s' '<密钥>' | node setup.mjs model --base-url <地址> --model <模型名>` 写入；不要把密钥放进命令行参数、不要复述。终端已有 `ANTHROPIC_*` 变量时 setup 会提示，用户说"沿用"就运行 `node setup.mjs --use-anthropic-env`。
+3. 扫码：先告诉用户马上会弹出二维码页面、用飞书手机版逐个扫码并在手机上确认，再运行 `node setup.mjs scan`。它会等到扫完（最长 9 分钟）：把命令超时放宽到 10 分钟，或放到后台运行并查看输出。被打断就重跑，已建成的不用再扫。
+4. 扫完后它自动建群「AI 团队」（用户当群主）、3 个机器人发报到卡片、后台启动团队服务。最后告诉用户去群里 @AI 产品经理 说一句需求。
+5. 需要联网：Codex 先切到能联网、能运行命令的模式（默认沙箱不能联网）。
+
+日常：`npm start` 后台启动团队服务（日志 `data/service.log`），`npm stop` 停止，`npm run status` 查看；`node setup.mjs status` 看搭到哪了；`npm test` 跑离线测试。工作台端口是 `.env` 的 `PREVIEW_PORT`（默认 4870，被占用时 setup 会自动换）。同一组机器人只能有一处在连飞书，启动前先 `npm run status`。
+
+## 改角色和技能
+
+用户描述想法，你来改：
+
+| 想改什么 | 改哪里 | 何时生效 |
+|---|---|---|
+| 某个角色的说话方式、做事规矩 | `prompts/<角色>.md`（product、designer、developer）；所有角色共用的在 `prompts/shared.md` | 下次该角色干活时，不用重启 |
+| 某个技能的做法 | `team-skills/skills/<技能>/SKILL.md` | 下次用到时，不用重启 |
+| 新增技能、调整某角色能用哪些技能 | 新建 `team-skills/skills/<名字>/SKILL.md`（开头 frontmatter 写 `name`、`description`），在 `src/agents/roles.mjs` 给角色的 `skills` 加 `team:<名字>` | `npm stop && npm start` |
+| 新增角色 | 照 `docs/动手搭建.md` 拓展 A：新机器人、角色说明、`roles.mjs`、阶段表 | 重启 |
+
+改完跑 `npm test`（会检查角色引用的说明和技能文件都存在）。想看效果可以 `node scripts/try-agent.mjs <角色> <项目目录> <任务>` 试跑一次，会花模型费用，先告诉用户。改完告诉用户：`git diff` 能看到改了什么，`git checkout -- <文件>` 能还原。
 
 ## 1. 要做什么
 
@@ -14,7 +37,7 @@
 
 ## 2. 整体结构
 
-**动手前先看施工图**：[docs/施工图.md](docs/施工图.md)（图版 docs/施工图.png）写清了每一层有哪些模块、每个模块放在哪个文件、负责什么、通过什么接口相连、在第几步建出来。新建或改动模块时对照它；结构有变化，同步更新施工图。
+**改结构前先看施工图**：[docs/施工图.md](docs/施工图.md)（图版 docs/施工图.png）写清了每个模块放在哪个文件、负责什么、通过什么接口相连。结构有变化，同步更新施工图。
 
 ```
 飞书群 ⇄ 接入层（3 条长连接）⇄ 编排（普通代码：阶段表）⇄ 3 个 Agent（Agent SDK）⇄ 工作区文件
@@ -22,27 +45,29 @@
                           预览服务与工作台（本机网页）            模型接口
 ```
 
-建议的目录（可以微调，但前后要一致）：
+目录：
 
 ```
 .env / .env.example     密钥与配置（.env 不提交）
-prompts/                角色说明（已提供，照原文用）
-team-skills/            技能插件 team（已提供，照原文用）
-docs/动手搭建.md         动手路线与提示词
-docs/施工图.md · .png    施工图
+setup.mjs               一条命令搭好：模型、扫码建机器人、建群、启动服务
+src/setup/              setup 的各步：.env 读写、连通检查、装依赖、扫码、建群、后台服务
+prompts/                角色说明
+team-skills/            技能插件 team
+docs/                   施工图、实测复盘、动手搭建（从零搭的路线）
 src/agents/             run.mjs（runAgent）、roles.mjs（角色表）
-src/flow/               stages.mjs（阶段表）、orchestrator.mjs（编排）、validate.mjs（交付检查）
-src/cards.mjs           飞书卡片
+src/flow/               stages.mjs（阶段表）、index.mjs（编排）、validate.mjs（交付检查）、cards.mjs（飞书卡片）
 src/walkthrough-page.mjs 走查页模板
+src/outline.mjs         PRD 页面结构图
 src/sheet.mjs           一览图
-src/feishu.mjs          接入层
-src/preview.mjs         预览服务（线框、网页、走查页、工作台接口）
-src/workbench/          消息记录与工作台接口
-src/main.mjs            启动入口
+src/feishu.mjs          接入层（飞书调用遇到限频自动退避重试）
+src/preview.mjs         预览服务与工作台接口
+src/workbench/          消息记录
+src/main.mjs            团队服务入口
 web/                    工作台前端
-scripts/                试跑脚本
+scripts/                服务管理（service.mjs）、试跑与冒烟脚本
 test/                   离线测试（node:test）
-data/                   状态与消息记录（不提交）
+.github/workflows/      CI
+data/                   状态、消息记录、日志（不提交）
 workspace/<项目号>/     每个项目的工作区：docs/ design/ site/（不提交）
 ```
 
@@ -50,7 +75,7 @@ workspace/<项目号>/     每个项目的工作区：docs/ design/ site/（不�
 
 - Node.js 24，ES 模块（`.mjs`，package.json 里 `"type": "module"`），测试用 `node:test`（`npm test`）。
 - 依赖只用 `@anthropic-ai/claude-agent-sdk`、`@larksuiteoapi/node-sdk`、`qrcode`。确实需要别的依赖先问用户；不要手写这些库的替代实现。
-- `.env`（权限 600）里的变量：`FEISHU_PRODUCT_APP_ID`、`FEISHU_PRODUCT_APP_SECRET`，DESIGNER、DEVELOPER 同理；`MODEL_BASE_URL`、`MODEL_API_KEY`、`MODEL_NAME`。用 `process.loadEnvFile()` 读取。
+- `.env`（权限 600）里的变量：`FEISHU_PRODUCT_APP_ID`、`FEISHU_PRODUCT_APP_SECRET`，DESIGNER、DEVELOPER 同理；`MODEL_BASE_URL`、`MODEL_API_KEY`、`MODEL_NAME`；可选 `PREVIEW_PORT`（工作台端口，默认 4870）、`CHROME_PATH`；部署时另有 `PREVIEW_HOST`、`PUBLIC_WORKBENCH_BASE`、`PUBLIC_PREVIEW_BASE`（compose.yaml 里设）。用 `process.loadEnvFile()` 读取。
 - 密钥只在 `.env`：不写进代码、日志、命令行参数、截图；任何输出都不打印密钥，报错只写变量名；检查 `.env` 时只看变量名在不在。
 - 服务只监听 127.0.0.1；在容器里才监听 0.0.0.0，并且只发布到宿主的 127.0.0.1。
 
@@ -204,11 +229,11 @@ runAgent({ role, prompt, projectDir, resume, onProgress })
 
 ## 9. 做事的规矩（实测踩过的坑）
 
-- **要一直运行的程序**（自检、整套服务）：写好后自己短暂启动，确认能连上，然后停掉，把启动命令交给用户在自己的终端里运行。你启动的程序会随你这一轮对话结束被关掉。
+- **要一直运行的程序**：团队服务用 `npm start` 后台常驻（脱离你的进程，不随这一轮对话结束被关），`npm stop` 停、`npm run status` 看。自检之类的临时程序在同一轮里启动、轮询日志、用完停掉。同一组机器人只能有一处在连飞书长连接。
 - **试跑要有输出**：试跑脚本边跑边打印每次工具调用；智能体一次要跑几分钟，等它跑完再下结论，不要中途停。
 - **先假后真**：编排先用假飞书、假智能体测；交付前再用假飞书加真实 `runAgent` 从启动跑到产品经理发出问题卡片；接上真飞书后每种卡片各发一次。
 - **用户看到的文字一律中文**：用中文角色名和步骤名（不显示 product、clarifying 这类标识）；文件路径写项目里的相对路径（如 `docs/prd.md`）；token 写成"读入 X / 写出 Y token"。
-- `prompts/` 和 `team-skills/` 是原文，除非用户要求，不要改写。
+- `prompts/` 和 `team-skills/` 用户没要求就不改；用户要求时照「改角色和技能」改。
 - 每一步结束时报告：做了什么、怎么验证的（命令和结果）、哪里不确定、需要用户做什么。
 
 ## 10. 方法与出处
