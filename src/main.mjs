@@ -13,10 +13,13 @@ for (const role of ['product', 'designer', 'developer']) {
 let flow;
 const recorder = createRecorder();
 const feishu = createFeishu({ credentials, recorder, onMessage: event => flow.handleMessage(event), onAction: event => flow.handleAction(event) });
-const workbenchBase = process.env.PUBLIC_WORKBENCH_BASE || 'http://127.0.0.1:4870';
-const previewBase = process.env.PUBLIC_PREVIEW_BASE || 'http://127.0.0.1:4871';
+// 工作台用 PREVIEW_PORT（默认 4870），模型写的页面用下一个端口
+const port = Number(process.env.PREVIEW_PORT || 4870);
+if (!Number.isInteger(port) || port < 1024 || port > 65534) throw new Error('PREVIEW_PORT 必须是 1024–65534 的整数');
+const workbenchBase = process.env.PUBLIC_WORKBENCH_BASE || `http://127.0.0.1:${port}`;
+const previewBase = process.env.PUBLIC_PREVIEW_BASE || `http://127.0.0.1:${port + 1}`;
 flow = createFlow({ feishu, recorder, workbenchBase, previewBase });
-const preview = await startPreview({ flow, feishu, recorder, host: process.env.PREVIEW_HOST || '127.0.0.1', previewBase });
+const preview = await startPreview({ flow, feishu, recorder, host: process.env.PREVIEW_HOST || '127.0.0.1', previewBase, workbenchPort: port, modelPort: port + 1 });
 try {
   await feishu.start();
   console.log('3 个机器人已连上飞书');
