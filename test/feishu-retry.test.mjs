@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withRetry } from '../src/feishu.mjs';
+import { withRetry, timed } from '../src/feishu.mjs';
 
 const noWait = { delays: [1, 1, 1], sleep: async () => {} };
 const limited = code => Object.assign(new Error('Request failed with status code 400'), { response: { status: 400, data: { code, msg: 'This operation triggers the frequency limit.' } } });
@@ -28,4 +28,9 @@ test('重试用完仍限频，报错里带错误码；其他错误不重试', as
   calls = 0;
   await assert.rejects(withRetry(async () => { calls += 1; throw limited(230002); }, noWait), /code 230002/);
   assert.equal(calls, 1);
+});
+
+test('上传超过时间上限就当失败，不让流程一直等', async () => {
+  await assert.rejects(timed(new Promise(() => {}), 20, '上传网页文件'), /上传网页文件超过 0 秒没完成/);
+  assert.equal(await timed(Promise.resolve('ok'), 1000, '上传图片'), 'ok');
 });

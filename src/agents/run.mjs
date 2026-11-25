@@ -72,10 +72,14 @@ function tokenTotals(result) {
 }
 
 export function createRunAgent(queryImpl = query) {
-  return async function runAgent({ role, prompt, projectDir, resume, onProgress }) {
+  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs }) {
     const started = Date.now();
     const stats = { turns: 0, durationMs: 0, inputTokens: 0, outputTokens: 0 };
     let sessionId = null;
+    // 到时间还没做完就中止，交给编排按“停下了”处理
+    const abortController = new AbortController();
+    let timedOut = false;
+    const timer = timeoutMs ? setTimeout(() => { timedOut = true; abortController.abort(); }, timeoutMs) : null;
     try {
       if (!roles[role]) throw new Error('未知角色');
       if (typeof prompt !== 'string' || !prompt) throw new Error('任务不能为空');
@@ -114,6 +118,7 @@ export function createRunAgent(queryImpl = query) {
         },
         settingSources: [],
         cwd,
+        abortController,
         model: process.env.MODEL_NAME,
         maxTurns: 30,
         env: {
@@ -136,6 +141,7 @@ export function createRunAgent(queryImpl = query) {
         }
         if (message.type === 'result') result = message;
       }
+      if (timedOut) throw new Error('timeout');
       if (!result) throw new Error('智能体没有返回结果');
       stats.turns = result.num_turns ?? 0;
       stats.durationMs = result.duration_ms ?? Date.now() - started;
@@ -145,8 +151,9 @@ export function createRunAgent(queryImpl = query) {
         : { ok: false, text: '', sessionId, error: (result.errors ?? []).join('；') || result.subtype, stats };
     } catch (error) {
       stats.durationMs = Date.now() - started;
+      if (timedOut) return { ok: false, text: '', sessionId, error: `超过 ${Math.round(timeoutMs / 60000)} 分钟没做完`, timedOut: true, stats };
       return { ok: false, text: '', sessionId, error: error.message, stats };
-    }
+    } finally { clearTimeout(timer); }
   };
 }
 

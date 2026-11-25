@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gateCard, questionCard, progressCard, resultCard } from '../src/flow/cards.mjs';
+import { gateCard, questionCard, progressCard, resultCard, stuckCard, confirmEndCard, closedCard } from '../src/flow/cards.mjs';
 
 test('角色颜色、进度最近十二行和完成标题', () => {
   const card = progressCard({ title: 'AI 设计 · 画线框与主题', task: '绘制线框', lines: Array.from({ length: 15 }, (_, i) => `📖 读 docs/${i}.md`), stats: { durationMs: 48000, inputTokens: 120, outputTokens: 30 }, done: true });
@@ -29,4 +29,17 @@ test('问题卡显示蓝色标题、影响说明与推荐项提示', () => {
   assert.equal(card.header.title.content, 'AI 产品经理 · 有几个问题');
   assert.match(JSON.stringify(card), /影响页面状态/);
   assert.match(JSON.stringify(card), /直接提交就是全部按推荐/);
+});
+
+test('停下卡：角色颜色、一句原因、重试与结束项目按钮带卡片号', () => {
+  const card = stuckCard({ role: 'designer', brief: '交付的线框没通过格式检查', projectId: 'p', stage: 'designing', cardId: 'k' });
+  assert.equal(card.header.template, 'purple');
+  assert.equal(card.header.title.content, 'AI 设计 · 这一步停下了');
+  assert.equal(card.elements[0].text.content, '交付的线框没通过格式检查');
+  assert.deepEqual(card.elements.at(-1).actions.map(b => b.value), [{ action: 'retry', stage: 'designing', projectId: 'p', cardId: 'k' }, { action: 'end', stage: 'designing', projectId: 'p', cardId: 'k' }]);
+  const end = confirmEndCard({ name: '报名页', projectId: 'p', stage: 'accept', cardId: 'e' });
+  assert.deepEqual(end.elements.at(-1).actions.map(b => [b.text.content, b.type, b.value.action]), [['结束项目', 'danger', 'end'], ['继续做', 'default', 'keep']]);
+  const closed = closedCard('AI 设计 · 这一步停下了', '✓ 小王点了重试', 'designer');
+  assert.equal(closed.elements.length, 1);
+  assert.equal(closed.config.update_multi, true);
 });

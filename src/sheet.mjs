@@ -10,6 +10,15 @@ const safeHash = value => encodeURIComponent(String(value ?? ''));
 const kinds = { design: '线框', site: '网页', walkthrough: '走查' };
 export const defaultChrome = () => process.env.CHROME_PATH || (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : 'chromium');
 
+// 截图失败只给卡片一句原因；Chrome 的命令行和崩溃日志放在 detail 里，只写服务日志
+export function screenshotFailure(error) {
+  const output = `${error?.stderr ?? ''}\n${error?.message ?? ''}`;
+  if (error?.killed && error?.signal === 'SIGTERM') return '浏览器截图超时';
+  if (error?.code === 'ENOENT') return '找不到 Chrome 浏览器，可在 .env 里用 CHROME_PATH 指定';
+  if (error?.signal || /Permission denied|Operation not permitted|bootstrap_check_in|crashpad/i.test(output)) return '浏览器在当前环境里起不来';
+  return '浏览器截图失败';
+}
+
 export async function capturePage({ htmlFile, pngFile, width, height, chromePath = defaultChrome() }) {
   await unlink(pngFile).catch(error => { if (error.code !== 'ENOENT') throw error; });
   const outputDir = path.dirname(pngFile);
@@ -18,7 +27,7 @@ export async function capturePage({ htmlFile, pngFile, width, height, chromePath
   try { await exec(chromePath, args, { timeout: 30000, env: { PATH: process.env.PATH ?? '', HOME: outputDir }, maxBuffer: 1024 * 1024 }); }
   catch (error) {
     const picture = await stat(pngFile).catch(() => null);
-    if (!picture || picture.size < 1000) throw new Error(error.killed ? 'Chrome 截图超时' : `Chrome 截图失败：${error.code ?? error.message}`);
+    if (!picture || picture.size < 1000) throw Object.assign(new Error(screenshotFailure(error)), { detail: String(error?.message ?? error).slice(0, 2000) });
   }
   if ((await stat(pngFile)).size < 1000) throw new Error('截图文件为空');
   return { htmlFile, pngFile, width, height };
