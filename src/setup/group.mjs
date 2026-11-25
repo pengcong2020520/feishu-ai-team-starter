@@ -12,7 +12,7 @@ const call = async promise => {
 
 export function introCard(role, { workbench }) {
   const elements = [{ tag: 'div', text: { tag: 'lark_md', content: `大家好，我是 **${role.name}**。${role.intro}` } }];
-  if (role.key === 'product') elements.push({ tag: 'div', text: { tag: 'lark_md', content: `在群里 **@${role.name}** 说一句需求就能开始。\n<font color='grey'>本机工作台：${workbench}</font>` } });
+  if (role.key === 'product') elements.push({ tag: 'div', text: { tag: 'lark_md', content: `在群里 **@${role.name}** 说说想做什么网页，说清了我会发一张卡片，点“就按这个开始”就开工。\n<font color='grey'>本机工作台：${workbench}</font>` } });
   return { config: { wide_screen_mode: true }, header: { template: role.color, title: { tag: 'plain_text', content: `${role.name} · 报到` } }, elements };
 }
 

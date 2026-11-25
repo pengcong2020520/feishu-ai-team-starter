@@ -94,3 +94,26 @@ test('到时间还没做完就中止，返回 timedOut', async () => {
     assert.deepEqual([result.ok, result.timedOut, result.sessionId], [false, true, 's9']);
   } finally { await rm(project, { recursive: true, force: true }); }
 });
+
+test('对话模式：只读、不用技能、开新会话，按固定格式返回回复和提议', async () => {
+  const project = await mkdtemp(path.join(root, 'test-project-'));
+  try {
+    let options;
+    const fakeQuery = async function* (args) {
+      options = args.options;
+      yield { type: 'result', subtype: 'success', is_error: false, result: '', structured_output: { reply: '你好', proposal: { action: 'none', detail: '' } }, session_id: 'c1', num_turns: 1, duration_ms: 5, modelUsage: {} };
+    };
+    const result = await createRunAgent(fakeQuery)({ role: 'designer', mode: 'chat', prompt: '群聊对话', projectDir: project, resume: 'old', timeoutMs: 60000 });
+    assert.deepEqual(result.structured, { reply: '你好', proposal: { action: 'none', detail: '' } });
+    assert.deepEqual(options.tools, ['Read', 'Glob']);
+    assert.equal(options.outputFormat.type, 'json_schema');
+    assert.deepEqual(options.outputFormat.schema.properties.proposal.properties.action.enum, ['none', 'start', 'revise', 'answer', 'retry', 'end']);
+    assert.equal(options.plugins, undefined);
+    assert.equal(options.skills, undefined);
+    assert.equal(options.resume, undefined);
+    assert.equal(options.maxTurns, 6);
+    assert.equal((await options.canUseTool('Read', { file_path: 'docs/prd.md' })).behavior, 'allow');
+    assert.equal((await options.canUseTool('Write', { file_path: 'design/theme.json' })).behavior, 'deny');
+    assert.equal((await options.canUseTool('Skill', { skill: 'team:theme-pick' })).behavior, 'deny');
+  } finally { await rm(project, { recursive: true, force: true }); }
+});

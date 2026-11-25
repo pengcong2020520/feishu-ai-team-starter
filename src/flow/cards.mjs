@@ -85,6 +85,29 @@ export function confirmEndCard({ name, projectId, stage, cardId }) {
   ] };
 }
 
+// 群聊里角色的提议：回复 + 提议内容 + 两个按钮，点了才执行
+const proposalKinds = {
+  start: { title: '要开始做吗？', label: '需求', yes: '就按这个开始', no: ['再聊聊', 'dismiss'] },
+  revise: { title: '要按这个改吗？', label: '要改的', yes: '按这个改', no: ['先不改', 'dismiss'] },
+  answer: { title: '把这段当回答提交？', label: '回答', yes: '提交为回答', no: ['先不提交', 'dismiss'] },
+  retry: { title: '要重试吗？', yes: '重试', no: ['结束项目', 'end'] },
+  end: { title: '结束这个项目？', yes: '结束项目', no: ['继续做', 'keep'] },
+};
+// 提议卡上两个按钮各自的动作和文字
+export const proposalChoices = action => [action, proposalKinds[action].no[1]];
+export const proposalButton = (action, choice) => choice === action ? proposalKinds[action].yes : proposalKinds[action].no[0];
+export const proposalTitle = (role, action) => `${roleNames[role]} · ${proposalKinds[action].title}`;
+export function proposalCard({ role, reply, action, detail, projectId, stage, cardId }) {
+  const kind = proposalKinds[action];
+  if (!kind) throw new Error('未知提议');
+  const value = name => ({ action: name, stage, projectId, cardId });
+  return { config, header: header(proposalTitle(role, action), role), elements: [
+    md(escape(reply)),
+    ...(kind.label && detail ? [{ tag: 'hr' }, gray(`${kind.label}：${detail}`)] : []),
+    { tag: 'action', actions: [button(kind.yes, value(action), action === 'end' ? 'danger' : 'primary'), button(kind.no[0], value(kind.no[1]))] },
+  ] };
+}
+
 // 点过的卡片收起来：只留标题和一句结果，按钮去掉
 export function closedCard(title, text, role = roleOf(title)) {
   return { config, header: header(title, role), elements: [md(escape(text))] };

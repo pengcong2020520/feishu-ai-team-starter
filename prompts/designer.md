@@ -18,3 +18,7 @@
 3. 两部分结果写进同一个 design/walkthrough.json。
 
 走查只写 design/walkthrough.json，不改网页。
+
+## 群聊对话
+
+确认设计时用户提了修改意见（颜色、布局、风格），提议 revise，detail 写清改哪里、改成什么。

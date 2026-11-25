@@ -95,4 +95,5 @@ test('卡住和已结束的项目在流程栏里分别显示', () => {
   assert.deepEqual([0, 1, 2, 3, 4].map(i => flowStatus(ended, i)), ['完成', '已结束', '未开始', '未开始', '未开始']);
   assert.equal(messageView({ kind: 'action', action: 'retry' }).text, '你点了重试');
   assert.equal(messageView({ kind: 'action', action: 'end' }).text, '你点了结束项目');
+  assert.equal(messageView({ kind: 'action', action: 'revise' }).text, '你点了按这个改');
 });

@@ -7,6 +7,21 @@ import { roles } from './roles.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const tools = ['Read', 'Write', 'Edit', 'Glob', 'Skill'];
+// 对话模式：群里 @ 角色时用，只读不写、不用技能，按固定格式返回“回复 + 提议”
+const chatTools = ['Read', 'Glob'];
+export const chatSchema = {
+  type: 'object', additionalProperties: false, required: ['reply', 'proposal'],
+  properties: {
+    reply: { type: 'string', description: '发到群里的回复：纯文本，120 字以内' },
+    proposal: {
+      type: 'object', additionalProperties: false, required: ['action', 'detail'],
+      properties: {
+        action: { type: 'string', enum: ['none', 'start', 'revise', 'answer', 'retry', 'end'] },
+        detail: { type: 'string', description: 'start 写一句话需求；revise 写要改什么；answer 写用户的回答；其余可留空' },
+      },
+    },
+  },
+};
 
 function inside(parent, child) {
   const rel = path.relative(parent, child);
@@ -32,11 +47,11 @@ async function resolvedTarget(target) {
 
 function denied(message) { return { behavior: 'deny', message }; }
 
-async function permissionFor(role, projectDir, tool, input) {
+async function permissionFor(role, projectDir, tool, input, allowed = tools) {
+  if (!allowed.includes(tool)) return denied('工具不在白名单中');
   if (tool === 'Skill') {
     return roles[role].skills.includes(input.skill) ? { behavior: 'allow' } : denied('此角色不能使用该技能');
   }
-  if (!tools.includes(tool)) return denied('工具不在白名单中');
   if (tool === 'Glob') {
     const pattern = input.pattern;
     if (typeof pattern !== 'string' || path.isAbsolute(pattern) || pattern.split(/[\\/]/).includes('..')) return denied('搜索范围越界');
@@ -72,7 +87,7 @@ function tokenTotals(result) {
 }
 
 export function createRunAgent(queryImpl = query) {
-  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs }) {
+  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode = 'work' }) {
     const started = Date.now();
     const stats = { turns: 0, durationMs: 0, inputTokens: 0, outputTokens: 0 };
     let sessionId = null;
@@ -87,7 +102,9 @@ export function createRunAgent(queryImpl = query) {
       if (!inside(root, cwd)) throw new Error('项目目录必须在当前仓库内');
       await mkdir(cwd, { recursive: true });
       if (!inside(await realpath(root), await realpath(cwd))) throw new Error('项目目录不能经软链接越界');
-      await mkdir(path.join(cwd, roles[role].writeDir), { recursive: true });
+      const chat = mode === 'chat';
+      const allowed = chat ? chatTools : tools;
+      if (!chat) await mkdir(path.join(cwd, roles[role].writeDir), { recursive: true });
       const configDir = path.join(root, '.claude-agent-config');
       await mkdir(configDir, { recursive: true });
       if (existsSync(path.join(root, '.env'))) process.loadEnvFile(path.join(root, '.env'));
@@ -98,14 +115,13 @@ export function createRunAgent(queryImpl = query) {
       const rolePrompt = await readFile(path.join(root, 'prompts', roles[role].promptFile), 'utf8');
       const options = {
         systemPrompt: { type: 'custom', prompt: `${shared}\n\n${rolePrompt}` },
-        tools: [...tools],
-        plugins: [{ type: 'local', path: path.join(root, 'team-skills') }],
-        skills: [...roles[role].skills],
-        canUseTool: (tool, input) => permissionFor(role, cwd, tool, input),
+        tools: [...allowed],
+        ...(chat ? { outputFormat: { type: 'json_schema', schema: chatSchema } } : { plugins: [{ type: 'local', path: path.join(root, 'team-skills') }], skills: [...roles[role].skills] }),
+        canUseTool: (tool, input) => permissionFor(role, cwd, tool, input, allowed),
         hooks: {
           PreToolUse: [{
             hooks: [async (input) => {
-              const decision = await permissionFor(role, cwd, input.tool_name, input.tool_input ?? {});
+              const decision = await permissionFor(role, cwd, input.tool_name, input.tool_input ?? {}, allowed);
               if (decision.behavior === 'allow') return {};
               return { hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
@@ -120,7 +136,7 @@ export function createRunAgent(queryImpl = query) {
         cwd,
         abortController,
         model: process.env.MODEL_NAME,
-        maxTurns: 30,
+        maxTurns: chat ? 6 : 30,
         env: {
           PATH: process.env.PATH ?? '',
           HOME: configDir,
@@ -130,7 +146,7 @@ export function createRunAgent(queryImpl = query) {
           ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.MODEL_NAME,
         },
       };
-      if (resume) options.resume = resume;
+      if (resume && !chat) options.resume = resume;
       let result;
       for await (const message of queryImpl({ prompt, options })) {
         if (message.session_id) sessionId = message.session_id;
@@ -147,7 +163,7 @@ export function createRunAgent(queryImpl = query) {
       stats.durationMs = result.duration_ms ?? Date.now() - started;
       Object.assign(stats, tokenTotals(result));
       return result.subtype === 'success' && !result.is_error
-        ? { ok: true, text: result.result ?? '', sessionId, stats }
+        ? { ok: true, text: result.result ?? '', ...(chat ? { structured: result.structured_output ?? null } : {}), sessionId, stats }
         : { ok: false, text: '', sessionId, error: (result.errors ?? []).join('；') || result.subtype, stats };
     } catch (error) {
       stats.durationMs = Date.now() - started;
