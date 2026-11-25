@@ -33,6 +33,10 @@ test('PRD、结构和自查清单完整检查', () => fixture(async (dir, put) =
   await put('docs/outline.json', { title: '读书会报名页', blocks: [{ name: '页头', content: '读书会简介' }], states: [{ id: 'default', name: '默认', desc: '可报名' }, { id: 'success', name: '成功', desc: '展示结果' }] });
   await put('docs/checklist.md', '# 自查\n' + Array.from({ length: 14 }, (_, i) => `- [x] CHK${String(i + 1).padStart(3, '0')} 通过`).join('\n'));
   assert.equal((await validatePrd(dir)).ok, true);
+  // 实测时模型把章节写成“## 1. 产品概述”，也要认
+  let n = 0;
+  await put('docs/prd.md', prd.replace(/^## /gm, () => `## ${++n}. `).replace('## 2. 目标用户', '## 二、目标用户'));
+  assert.deepEqual((await validatePrd(dir)).errors, []);
   await put('docs/outline.json', { title: '错误标题', blocks: [], states: [{ id: 'Bad ID', name: '', desc: '' }] });
   const result = await validatePrd(dir);
   assert.equal(result.ok, false);

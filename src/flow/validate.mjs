@@ -47,7 +47,8 @@ export async function validatePrd(projectDir) {
   if (prd !== null) {
     if (!/^# \S.+/u.test(prd.split(/\r?\n/)[0])) errors.push('docs/prd.md：第一行应为网页名称标题');
     for (const heading of ['产品概述', '目标用户与场景', '用户故事', '页面与状态', '边界情况', '功能需求', '成功标准', '假设', '本期不做']) {
-      if (!new RegExp(`^#{2,3}\\s*${heading}`, 'm').test(prd)) errors.push(`docs/prd.md：缺少“${heading}”章节`);
+      // 标题前带编号也认：“## 1. 产品概述”“## 一、产品概述”
+      if (!new RegExp(`^#{2,3}\\s*(?:[（(]?[0-9一二三四五六七八九十]+[.、．)）]?\\s*)?${heading}`, 'm').test(prd)) errors.push(`docs/prd.md：缺少“${heading}”章节`);
     }
     if (!/FR-\d{3}/.test(prd)) errors.push('docs/prd.md：缺少 FR-xxx');
     if (!/SC-\d{3}/.test(prd)) errors.push('docs/prd.md：缺少 SC-xxx');
