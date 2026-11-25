@@ -7,9 +7,22 @@ const err = e => {
   return new Error(`${e?.message ?? '飞书请求失败'}${d?.code != null ? `（code ${d.code}，msg ${d.msg ?? ''}）` : ''}`);
 };
 const check = r => {
-  if (r?.code && r.code !== 0) throw new Error(`飞书调用失败（code ${r.code}，msg ${r.msg ?? ''}）`);
+  if (r?.code && r.code !== 0) throw Object.assign(new Error(`飞书调用失败（code ${r.code}，msg ${r.msg ?? ''}）`), { feishuCode: r.code });
   return r;
 };
+
+// 飞书限频（单条消息每秒最多更新 5 次；用户刚点过的卡片马上更新也可能被限）时退避重试，
+// 不把偶发限频变成要用户手动“重试”的错误
+const RATE_LIMITED = new Set([230020, 230429, 99991400]);
+export const rateLimited = e => e?.response?.status === 429 || RATE_LIMITED.has(e?.response?.data?.code) || RATE_LIMITED.has(e?.feishuCode);
+export async function withRetry(fn, { delays = [1000, 2000, 4000], sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return check(await fn()); } catch (e) {
+      if (attempt >= delays.length || !rateLimited(e)) throw err(e);
+      await sleep(delays[attempt]);
+    }
+  }
+}
 
 export function createFeishu({ credentials, onMessage, onAction, recorder, logger = console }) {
   const clients = Object.fromEntries(names.map(role => [role, new Lark.Client({ ...credentials[role], loggerLevel: Lark.LoggerLevel.error })]));
@@ -19,43 +32,43 @@ export function createFeishu({ credentials, onMessage, onAction, recorder, logge
   const owner = new Map();
   const cardChats = new Map();
   const pick = (chatId, role) => clients[role ?? owner.get(chatId) ?? 'product'];
-  const call = async promise => { try { return check(await promise); } catch (e) { throw err(e); } };
+  const call = fn => withRetry(fn);
   const api = {
     async sendText(chatId, text, role) {
-      const r = await call(pick(chatId, role).im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }) } }));
+      const r = await call(() => pick(chatId, role).im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }) } }));
       await recorder?.add(chatId, { kind: 'text', role: role ?? owner.get(chatId) ?? 'product', text });
       return r.data?.message_id;
     },
     async sendCard(chatId, card, role) {
-      const r = await call(pick(chatId, role).im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(card) } }));
+      const r = await call(() => pick(chatId, role).im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(card) } }));
       cardChats.set(r.data?.message_id, chatId);
       await recorder?.add(chatId, { kind: 'card', messageId: r.data?.message_id, role: role ?? owner.get(chatId) ?? 'product', card: cardView(card) });
       return r.data?.message_id;
     },
     async patchCard(messageId, card, role = 'product', chatId = cardChats.get(messageId)) {
-      await call(clients[role].im.v1.message.patch({ path: { message_id: messageId }, data: { content: JSON.stringify(card) } }));
+      await call(() => clients[role].im.v1.message.patch({ path: { message_id: messageId }, data: { content: JSON.stringify(card) } }));
       if (chatId) await recorder?.add(chatId, { kind: 'card_update', messageId, role, card: cardView(card) });
     },
     async uploadImage(filePath, role = 'product') {
       const { createReadStream } = await import('node:fs');
-      const upload = await call(clients[role].im.v1.image.create({ data: { image_type: 'message', image: createReadStream(filePath) } }));
+      const upload = await call(() => clients[role].im.v1.image.create({ data: { image_type: 'message', image: createReadStream(filePath) } }));
       const key = upload?.data?.image_key ?? upload?.image_key;
       if (!key) throw new Error('飞书上传图片成功但没有 image_key');
       return key;
     },
     async sendFile(chatId, filePath, role = 'product') {
       const { createReadStream } = await import('node:fs');
-      const upload = await call(clients[role].im.v1.file.create({ data: { file_type: 'stream', file_name: 'index.html', file: createReadStream(filePath) } }));
-      const r = await call(clients[role].im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'file', content: JSON.stringify({ file_key: upload.data?.file_key ?? upload.file_key }) } }));
+      const upload = await call(() => clients[role].im.v1.file.create({ data: { file_type: 'stream', file_name: 'index.html', file: createReadStream(filePath) } }));
+      const r = await call(() => clients[role].im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'file', content: JSON.stringify({ file_key: upload.data?.file_key ?? upload.file_key }) } }));
       return r.data?.message_id;
     },
     async listChats(role = 'product') {
-      const r = await call(clients[role].im.v1.chat.list({ params: { page_size: 100 } }));
+      const r = await call(() => clients[role].im.v1.chat.list({ params: { page_size: 100 } }));
       return r.data?.items ?? [];
     },
     async start() {
       for (const role of names) {
-        const bot = await call(clients[role].request({ method: 'GET', url: '/open-apis/bot/v3/info' }));
+        const bot = await call(() => clients[role].request({ method: 'GET', url: '/open-apis/bot/v3/info' }));
         ids.set(role, bot.bot?.open_id ?? bot.data?.bot?.open_id);
         const dispatcher = new Lark.EventDispatcher({}).register({
           'im.message.receive_v1': async data => {
