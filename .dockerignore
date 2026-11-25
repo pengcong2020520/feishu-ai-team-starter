@@ -1,0 +1,9 @@
+.git
+.env
+node_modules
+data
+workspace
+.claude-agent-config
+*.log
+*.pid
+.sheet-test
