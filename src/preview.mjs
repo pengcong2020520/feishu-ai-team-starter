@@ -116,7 +116,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
           }
           if (!targetChat.startsWith('web:')) await feishu?.sendText(targetChat, url.pathname === '/api/demand' ? `来自工作台的需求：${data.text}` : `来自工作台：${data.text}`, role);
           await recorder?.add(targetChat, { kind: 'user', role, text: data.text, source: '工作台' });
-          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: '你（工作台）' });
+          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: '你（工作台）', ...(url.pathname === '/api/demand' ? { intent: 'demand' } : {}) });
           result = { ...result, chatId: targetChat, source: targetChat.startsWith('web:') ? '工作台项目' : '飞书群项目' };
         }
         return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');

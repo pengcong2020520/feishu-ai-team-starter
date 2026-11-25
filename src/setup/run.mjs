@@ -201,7 +201,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     return finish(0, [
       ...await stuckLines(fileEnv),
       '都好了。告诉用户：',
-      '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；之后按卡片提示点按钮',
+      '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；它回一张“要开始做吗？”卡片，点“就按这个开始”才开工，之后按卡片提示点按钮',
       progress.ownerSet ? null : progress.joinLink ? `   还不在群里的话，先打开这个链接进群：${progress.joinLink}` : '   还不在群里的话：在飞书里新建一个群，把 3 个机器人拉进来（群设置 → 群机器人 → 添加机器人）',
       `2. 本机工作台：${workbenchOf(readEnv(envFile))}`,
       '3. 想改某个角色或技能，直接说（照 AGENTS.md「改角色和技能」改）',

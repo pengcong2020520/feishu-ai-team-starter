@@ -79,6 +79,7 @@ test('提需求按最近群状态分流：空闲进飞书，忙时进 web 会话
     const demand = text => fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ text }) }).then(r => r.json());
     const first = await demand('做报名页');
     assert.equal(first.chatId, 'group');
+    assert.equal(calls[0].intent, 'demand');
     assert.match(sent[0][1], /^来自工作台的需求：/);
     state.groups.group.stage = 'clarifying';
     const second = await demand('再做一个页');

@@ -39,8 +39,14 @@ async function fixture(fn, agentOverride) {
   const messages = [];
   const patched = [];
   const calls = [];
+  // 群聊对话的假回复：测试往里放 { reply, proposal }，没放时只回一句、不提议
+  const chats = [];
   const feishu = { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { if (card.header?.title?.content?.includes('澄清需求') && !card.schema || card.header?.title?.content?.includes('开发网页') || card.header?.title?.content?.includes('画线框与主题') || card.header?.title?.content?.includes('走查网页') || card.header?.title?.content?.includes('修改') || card.header?.title?.content === 'AI 程序员 · 网页已完成') return 'progress'; cards.push(card); return `m${cards.length}`; }, patchCard: async (messageId, card) => { if (messageId !== 'progress') patched.push({ messageId, card }); } };
-  const agent = agentOverride ?? (async ({ role, prompt, projectDir, resume, onProgress }) => {
+  const agent = agentOverride ?? (async ({ role, prompt, projectDir, resume, onProgress, mode }) => {
+    if (mode === 'chat') {
+      calls.push({ role, prompt, mode, projectDir });
+      return { ok: true, text: '', structured: chats.shift() ?? { reply: '你好，有想做的网页可以直接说。', proposal: { action: 'none', detail: '' } }, sessionId: 'chat', stats: { turns: 1, durationMs: 1, inputTokens: 1, outputTokens: 1 } };
+    }
     assert.equal(typeof onProgress, 'function');
     onProgress({ tool: 'Write', file: 'docs/prd.md' });
     await deliver(projectDir, role, prompt, calls);
@@ -48,7 +54,7 @@ async function fixture(fn, agentOverride) {
     return { ok: true, text: '已完成', sessionId: `${role}-${calls.length}`, stats: { turns: 1, durationMs: 1, inputTokens: 2, outputTokens: 3 } };
   });
   const flow = createFlow({ root: dir, agent, feishu, id: (() => { let n = 0; return () => `id${++n}`; })() });
-  try { await fn({ flow, cards, messages, patched, calls, dir }); }
+  try { await fn({ flow, cards, messages, patched, calls, dir, chats }); }
   finally { await rm(dir, { recursive: true, force: true }); }
 }
 const value = card => card.elements.at(-1).actions[0].value;
@@ -56,7 +62,7 @@ const reject = card => card.elements.at(-1).actions[1].value;
 const answer = card => card.body.elements[0].elements.at(-1).behaviors[0].value;
 
 test('完整流程：两轮澄清、自动走查、验收与持久化', () => fixture(async ({ flow, cards, patched, calls, dir }) => {
-  await flow.handleMessage({ chatId: 'group', text: '做报名页' });
+  await flow.handleMessage({ chatId: 'group', text: '做报名页', intent: 'demand' });
   await flow.waitForIdle('group');
   assert.equal(cards[0].schema, '2.0');
   const select = cards[0].body.elements[0].elements.find(x => x.tag === 'select_static');
@@ -90,7 +96,7 @@ test('完整流程：两轮澄清、自动走查、验收与持久化', () => fi
   const saved = JSON.parse(await readFile(path.join(dir, 'data/state.json'), 'utf8'));
   assert.equal(saved.groups.group.stage, 'done');
   assert.equal(saved.groups.group.walkthroughRound, 1);
-  await flow.handleMessage({ chatId: 'group', text: '再做一个报名页' });
+  await flow.handleMessage({ chatId: 'group', text: '再做一个报名页', intent: 'demand' });
   await flow.waitForIdle('group');
   const state = await flow.getState();
   assert.equal(state.projects.length, 2);
@@ -101,7 +107,7 @@ test('完整流程：两轮澄清、自动走查、验收与持久化', () => fi
 }));
 
 test('三个打回分支与回归走查，旧卡片过期', () => fixture(async ({ flow, cards, calls, messages }) => {
-  await flow.handleMessage({ chatId: 'g', text: '报名页' }); await flow.waitForIdle('g');
+  await flow.handleMessage({ chatId: 'g', text: '报名页', intent: 'demand' }); await flow.waitForIdle('g');
   for (let i = 0; i < 2; i++) { await flow.handleAction({ chatId: 'g', value: answer(cards[i]) }); await flow.waitForIdle('g'); }
   const old = value(cards[2]);
   await flow.handleAction({ chatId: 'g', value: reject(cards[2]) }); await flow.waitForIdle('g');
@@ -138,7 +144,7 @@ test('忙时回复；交付文件错误后停住且可重试', () => fixture(asy
       if (count > 1) await put(projectDir, 'docs/questions.json', { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] });
       return { ok: true, text: '', sessionId: 's', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } };
     } });
-  await local.handleMessage({ chatId: 'busy', text: '报名页' });
+  await local.handleMessage({ chatId: 'busy', text: '报名页', intent: 'demand' });
   assert.equal((await local.handleMessage({ chatId: 'busy', text: '又发一次' })).busy, true);
   assert.match(messages.at(-1), /AI 产品经理正在澄清需求，做完会在群里发新卡片/);
   release(); await local.waitForIdle('busy');
@@ -176,7 +182,7 @@ test('web 会话的进度和问题卡只写工作台消息记录', () => fixture
     onProgress({ tool: 'Write', file: 'docs/questions.json' });
     return { ok: true, text: '请回答', sessionId: 'web-session', stats: { turns: 1, durationMs: 1, inputTokens: 1, outputTokens: 1 } };
   } });
-  await flow.handleMessage({ chatId: 'web:local', text: '做一个网页' });
+  await flow.handleMessage({ chatId: 'web:local', text: '做一个网页', intent: 'demand' });
   await flow.waitForIdle('web:local');
   const records = await recorder.list('web:local');
   assert.ok(records.some(record => record.card?.title === 'AI 产品经理 · 有几个问题'));
@@ -196,7 +202,7 @@ test('发问题卡片失败后只重发卡片，不重复调用智能体', () =>
     await put(projectDir, 'docs/questions.json', { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] });
     return { ok: true, text: '', sessionId: 's', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } };
   } });
-  await local.handleMessage({ chatId: 'card', text: '报名页' }); await local.waitForIdle('card');
+  await local.handleMessage({ chatId: 'card', text: '报名页', intent: 'demand' }); await local.waitForIdle('card');
   const stuck = await local.getProject('card');
   assert.match(stuck.error, /code 123，msg 卡片格式错误/);
   assert.equal(stuck.errorBrief, '飞书接口出错（code 123）');
@@ -263,7 +269,7 @@ test('确认卡片没发出去就停掉：重试只重发确认卡片，不再�
 
 test('智能体报错不自动重试，机器人消息不触发任务', () => fixture(async ({ flow, cards }) => {
   assert.deepEqual(await flow.handleMessage({ chatId: 'g', text: '机器人消息', senderType: 'bot' }), { ignored: true });
-  await flow.handleMessage({ chatId: 'g', text: '报名页' }); await flow.waitForIdle('g');
+  await flow.handleMessage({ chatId: 'g', text: '报名页', intent: 'demand' }); await flow.waitForIdle('g');
   const p = await flow.getProject('g');
   assert.equal(p.stage, 'clarifying');
   assert.match(p.error, /AI 产品经理执行失败：模型暂不可用/);
@@ -283,7 +289,7 @@ test('交付检查没过：停下卡上点重试，智能体会收到没过的�
     await put(projectDir, 'docs/questions.json', prompts.length === 1 ? { round: 1 } : { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] });
     return okResult('');
   } });
-  await local.handleMessage({ chatId: 'c', text: '报名页' }); await local.waitForIdle('c');
+  await local.handleMessage({ chatId: 'c', text: '报名页', intent: 'demand' }); await local.waitForIdle('c');
   const card = stuckOf(cards);
   await local.handleAction({ chatId: 'c', value: card.elements.at(-1).actions[0].value, actor: '小王' }); await local.waitForIdle('c');
   assert.equal(prompts.length, 2);
@@ -297,7 +303,7 @@ test('交付检查没过：停下卡上点重试，智能体会收到没过的�
 
 test('结束项目：停下卡上直接结束；文字“结束”先确认，可选继续做', () => fixture(async ({ flow, cards, messages, dir }) => {
   const local = createFlow({ root: dir, id: (() => { let n = 0; return () => `e${++n}`; })(), feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { cards.push(card); return `m${cards.length}`; }, patchCard: async () => {} }, agent: async () => ({ ok: false, error: '模型暂不可用', stats: {} }) });
-  await local.handleMessage({ chatId: 'x', text: '报名页' }); await local.waitForIdle('x');
+  await local.handleMessage({ chatId: 'x', text: '报名页', intent: 'demand' }); await local.waitForIdle('x');
   await local.handleAction({ chatId: 'x', value: stuckOf(cards).elements.at(-1).actions[1].value });
   assert.equal(await local.getProject('x'), null);
   assert.match(messages.at(-1), /已结束「报名页」，文件都保留着/);
@@ -306,7 +312,7 @@ test('结束项目：停下卡上直接结束；文字“结束”先确认，�
   assert.equal(state.projects[0].endedStage, 'clarifying');
   assert.equal(state.projects[0].stage, 'done');
   // 群里空出来了：新需求开新项目
-  await local.handleMessage({ chatId: 'x', text: '读书会' }); await local.waitForIdle('x');
+  await local.handleMessage({ chatId: 'x', text: '读书会', intent: 'demand' }); await local.waitForIdle('x');
   assert.equal((await local.getProject('x')).demand, '读书会');
   await local.handleMessage({ chatId: 'x', text: '结束' });
   const confirm = cards.at(-1);
@@ -332,7 +338,7 @@ test('出错后点旧卡片：提示这一步停下了和怎么继续；超时�
     if (n === 1) { assert.equal(timeoutMs, 10 * 60000); await put(projectDir, 'docs/questions.json', { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] }); return okResult(''); }
     return { ok: false, timedOut: true, error: '超过 10 分钟没做完', stats: {} };
   } });
-  await local.handleMessage({ chatId: 't', text: '报名页' }); await local.waitForIdle('t');
+  await local.handleMessage({ chatId: 't', text: '报名页', intent: 'demand' }); await local.waitForIdle('t');
   const question = cards.at(-1);
   await local.handleAction({ chatId: 't', value: answer(question), formValue: { q: '0' } }); await local.waitForIdle('t');
   assert.equal((await local.getProject('t')).errorBrief, 'AI 产品经理这一步超过 10 分钟还没做完，已经停下');
@@ -347,4 +353,88 @@ test('验收时网页文件发不出去：说一句，项目照常完成', () =>
   await fresh.handleAction({ chatId: 'a', value: { action: 'confirm', stage: 'accept', projectId: 'pa', cardId: 'ca' } }); await fresh.waitForIdle('a');
   assert.equal((await fresh.getProject('a')).stage, 'done');
   assert.match(messages.at(-1), /网页文件没能发到群里（上传网页文件超过 60 秒没完成）/);
+}));
+
+const buttons = card => card.elements.at(-1).actions;
+
+test('群聊对话：“你好”只聊天不开项目；说清需求后提议开工，点了才开工', () => fixture(async ({ flow, cards, messages, calls, chats, patched }) => {
+  await flow.handleMessage({ chatId: 'g', role: 'product', text: '你好' }); await flow.waitForIdle('g');
+  assert.equal(await flow.getProject('g'), null);
+  assert.equal(calls[0].mode, 'chat');
+  assert.match(calls[0].projectDir, /data[\\/]chat-room$/);
+  assert.match(calls[0].prompt, /- start：/);
+  assert.equal(messages.at(-1), '你好，有想做的网页可以直接说。');
+  chats.push({ reply: '读书会报名页可以做，要开始吗？', proposal: { action: 'start', detail: '做一个读书会报名页' } });
+  await flow.handleMessage({ chatId: 'g', role: 'product', text: '想做个读书会报名页' }); await flow.waitForIdle('g');
+  assert.equal(await flow.getProject('g'), null);
+  const offer = cards.at(-1);
+  assert.equal(offer.header.title.content, 'AI 产品经理 · 要开始做吗？');
+  assert.deepEqual(buttons(offer).map(b => [b.text.content, b.value.action]), [['就按这个开始', 'start'], ['再聊聊', 'dismiss']]);
+  await flow.handleAction({ chatId: 'g', value: buttons(offer)[0].value }); await flow.waitForIdle('g');
+  const p = await flow.getProject('g');
+  assert.equal(p.demand, '做一个读书会报名页');
+  assert.equal(p.stage, 'clarifying');
+  assert.equal(calls.at(-1).prompt, '用户的话：做一个读书会报名页');
+  assert.match(patched.at(-1).card.elements[0].text.content, /点了“就按这个开始”：做一个读书会报名页/);
+  assert.match((await flow.handleAction({ chatId: 'g', value: buttons(offer)[0].value })).toast.content, /过期/);
+}));
+
+test('群聊对话：关口上对负责角色提修改意见，点“按这个改”直接开始改', () => fixture(async ({ flow, cards, calls, chats, patched }) => {
+  await flow.handleMessage({ chatId: 'g', text: '报名页', intent: 'demand' }); await flow.waitForIdle('g');
+  for (let i = 0; i < 2; i++) { await flow.handleAction({ chatId: 'g', value: answer(cards[i]) }); await flow.waitForIdle('g'); }
+  await flow.handleAction({ chatId: 'g', value: value(cards[2]) }); await flow.waitForIdle('g');
+  const gate = structuredClone(await flow.getProject('g'));
+  assert.equal(gate.stage, 'confirm_design');
+  chats.push({ reply: '可以，主色改成绿色，其余不动。', proposal: { action: 'revise', detail: '主色换成绿色' } });
+  await flow.handleMessage({ chatId: 'g', role: 'designer', text: '主色换成绿色吧' }); await flow.waitForIdle('g');
+  assert.match(calls.at(-1).prompt, /- revise：/);
+  assert.equal((await flow.getProject('g')).stage, 'confirm_design');
+  const offer = cards.at(-1);
+  assert.equal(offer.header.title.content, 'AI 设计 · 要按这个改吗？');
+  assert.equal(offer.header.template, 'purple');
+  await flow.handleAction({ chatId: 'g', value: buttons(offer)[0].value }); await flow.waitForIdle('g');
+  assert.match(calls.at(-1).prompt, /^用户对设计的修改意见：主色换成绿色/);
+  assert.ok(patched.some(x => x.messageId === gate.cardMessageId && /提了修改意见/.test(x.card.elements[0].text.content)));
+  const after = await flow.getProject('g');
+  assert.equal(after.stage, 'confirm_design');
+  assert.notEqual(after.cardId, gate.cardId);
+}));
+
+test('群聊对话：提议不在允许范围只发回复；模型出错时代码兜底说下一步', () => fixture(async ({ flow, cards, messages, chats, dir }) => {
+  chats.push({ reply: '可以做，找产品经理开个项目。', proposal: { action: 'start', detail: '报名页' } });
+  await flow.handleMessage({ chatId: 'g', role: 'designer', text: '做个报名页' }); await flow.waitForIdle('g');
+  assert.equal(cards.length, 0);
+  assert.equal(messages.at(-1), '可以做，找产品经理开个项目。');
+  const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async () => 'm', patchCard: async () => {} }, agent: async () => ({ ok: false, timedOut: true, error: '超过 1 分钟没做完', stats: {} }) });
+  await local.handleMessage({ chatId: 'h', role: 'developer', text: '在吗' }); await local.waitForIdle('h');
+  assert.equal(messages.at(-1), '刚才没想好怎么回答。想做新的网页，@AI 产品经理 说说你的想法。');
+}));
+
+test('群聊对话：澄清时文字回答可提交；新提议替换旧提议；“继续做”只收起；流程往前走了旧提议就过期', () => fixture(async ({ flow, cards, messages, calls, chats, patched }) => {
+  await flow.handleMessage({ chatId: 'g', text: '报名页', intent: 'demand' }); await flow.waitForIdle('g');
+  await flow.handleMessage({ chatId: 'g', role: 'product', text: '重试' });
+  assert.match(messages.at(-1), /现在没有停下的步骤/);
+  chats.push({ reply: '收到。', proposal: { action: 'answer', detail: '需要电话' } }, { reply: '收到，按你说的提交。', proposal: { action: 'answer', detail: '不需要电话' } });
+  await flow.handleMessage({ chatId: 'g', role: 'product', text: '要电话' });
+  await flow.handleMessage({ chatId: 'g', role: 'product', text: '算了不要电话' }); await flow.waitForIdle('g');
+  const [older, offer] = cards.slice(-2);
+  assert.ok(patched.some(x => x.messageId === `m${cards.indexOf(older) + 1}` && /以最新那条为准/.test(x.card.elements[0].text.content)));
+  assert.match((await flow.handleAction({ chatId: 'g', value: buttons(older)[0].value })).toast.content, /过期/);
+  assert.equal(offer.header.title.content, 'AI 产品经理 · 把这段当回答提交？');
+  await flow.handleAction({ chatId: 'g', value: buttons(offer)[0].value }); await flow.waitForIdle('g');
+  assert.equal(calls.filter(x => !x.mode).at(-1).prompt, '用户的回答：不需要电话');
+  assert.equal((await flow.getProject('g')).questionRound, 2);
+  chats.push({ reply: '要结束吗？', proposal: { action: 'end', detail: '' } });
+  await flow.handleMessage({ chatId: 'g', role: 'product', text: '不想做了' }); await flow.waitForIdle('g');
+  assert.deepEqual(buttons(cards.at(-1)).map(b => [b.text.content, b.type]), [['结束项目', 'danger'], ['继续做', 'default']]);
+  await flow.handleAction({ chatId: 'g', value: buttons(cards.at(-1))[1].value });
+  assert.match(patched.at(-1).card.elements[0].text.content, /点了“继续做”/);
+  assert.equal((await flow.getProject('g')).stage, 'clarifying');
+  chats.push({ reply: '按推荐提交？', proposal: { action: 'answer', detail: '都按推荐' } });
+  await flow.handleMessage({ chatId: 'g', role: 'product', text: '你看着办' }); await flow.waitForIdle('g');
+  const late = cards.at(-1);
+  await flow.handleAction({ chatId: 'g', value: answer(cards.findLast(card => card.schema === '2.0')) }); await flow.waitForIdle('g');
+  assert.equal((await flow.getProject('g')).stage, 'confirm_prd');
+  assert.match((await flow.handleAction({ chatId: 'g', value: buttons(late)[0].value })).toast.content, /过期/);
+  assert.match(messages.at(-1), /这张卡片已过期，现在在「确认 PRD」/);
 }));

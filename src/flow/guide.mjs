@@ -48,10 +48,10 @@ export function nextStep(p) {
   if (p.busy) return `${nameOf(roleFor(p.stage) ?? retryRole(p))}正在${stageNames[p.stage]}，做完会在群里发新卡片。`;
   if (p.error) return `这一步停下了：${p.errorBrief ?? briefOf(p.error)}。点“这一步停下了”卡片上的“重试”或“结束项目”，也可以 @${nameOf(retryRole(p))} 发送“重试”。`;
   switch (p.stage) {
-    case 'clarifying': return '现在等你回答 AI 产品经理的问题：在问题卡片里选好后点“提交回答”。';
-    case 'confirm_prd': return '现在等你确认 PRD：点卡片上的“确认 PRD”，要改就点“打回 PRD”。';
-    case 'confirm_design': return '现在等你确认设计：点卡片上的“确认设计”，要改就点“打回设计”。';
-    case 'accept': return '现在等你验收：打开网页看看，满意点“验收通过”，要改就点“打回网页”。';
+    case 'clarifying': return '现在等你回答 AI 产品经理的问题：在问题卡片里选好后点“提交回答”，也可以 @AI 产品经理 直接用文字回答。';
+    case 'confirm_prd': return '现在等你确认 PRD：点卡片上的“确认 PRD”；要改就 @AI 产品经理 说哪里要改。';
+    case 'confirm_design': return '现在等你确认设计：点卡片上的“确认设计”；要改就 @AI 设计 说哪里要改。';
+    case 'accept': return '现在等你验收：打开网页看看，满意点“验收通过”；要改就 @AI 程序员 说哪里要改。';
     case 'revise_prd': case 'revise_design': case 'revise_build': return `现在在「${stageNames[p.stage]}」：请 @${nameOf(roleFor(p.stage))} 说明要改什么。`;
     default: return `现在在「${stageNames[p.stage] ?? p.stage}」。`;
   }

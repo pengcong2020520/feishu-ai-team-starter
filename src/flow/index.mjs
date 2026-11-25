@@ -5,8 +5,9 @@ import { roles } from '../agents/roles.mjs';
 import { runAgent } from '../agents/run.mjs';
 import { validateQuestions, validatePrd, validateDesign, validateSite, validateWalkthrough } from './validate.mjs';
 import { nextStage, roleFor, stageNames, taskFor, timeLimits } from './stages.mjs';
-import { gateCard, questionCard, answeredCard, progressCard, resultCard, completeCard, stuckCard, confirmEndCard, closedCard, toast } from './cards.mjs';
+import { gateCard, questionCard, answeredCard, progressCard, resultCard, completeCard, stuckCard, confirmEndCard, closedCard, proposalCard, proposalTitle, proposalChoices, proposalButton, toast } from './cards.mjs';
 import { StepError, checkFailed, briefOf, shorten, gateRole, retryRole, nextStep, staleText } from './guide.mjs';
+import { allowedActions, checkProposal, chatPrompt, chatTimeoutMs, artifacts, tidy } from './chat.mjs';
 import { createSheet } from '../sheet.mjs';
 import { createOutline } from '../outline.mjs';
 import { cardView } from '../workbench/recorder.mjs';
@@ -23,13 +24,16 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   if (!feishu?.sendText || !feishu?.sendCard || !feishu?.patchCard) throw new Error('缺少消息适配器');
   const stateFile = path.join(root, 'data/state.json');
   const jobs = new Map();
-  let state = { groups: {}, archived: [] };
+  // 群聊对话：同一个群的对话按顺序一条条回，不占用项目的“干活中”
+  const talks = new Map();
+  let state = { groups: {}, archived: [], proposals: {} };
   let saves = Promise.resolve();
   const ready = (async () => {
     try { state = JSON.parse(await readFile(stateFile, 'utf8')); }
     catch (e) { if (e.code !== 'ENOENT') throw e; }
     state.groups ??= {};
     state.archived ??= [];
+    state.proposals ??= {};
     // 上次服务停掉时（电脑重启、睡眠、被关掉）还在干活的项目：标成出错并在群里说明，好让用户发“重试”接着做
     for (const project of Object.values(state.groups)) {
       if (project.busy && project.stage !== 'done' && !project.error) {
@@ -62,7 +66,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     patchCard: (messageId, card, role, chatId) => chatId?.startsWith('web:') ? recorder?.add(chatId, { kind: 'card_update', messageId, role, card: cardView(card), source: '工作台' }) : feishu.patchCard(messageId, card, role, chatId),
     sendFile: (chatId, file, role) => chatId.startsWith('web:') ? Promise.resolve() : feishu.sendFile?.(chatId, file, role),
   };
-  const sendText = (chatId, message) => delivery.sendText(chatId, message);
+  const sendText = (chatId, message, role) => delivery.sendText(chatId, message, role);
   const transition = async (p, to) => { p.stage = nextStage(p.stage, to); p.stageAt = new Date().toISOString(); p.currentFile = null; await save(); };
   // 停下了：记下完整原因，群里只发一张“这一步停下了”卡片（一句原因 + 重试 / 结束项目）
   const safeError = async (p, error) => {
@@ -284,33 +288,113 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     p.endMessageId = await delivery.sendCard(p.chatId, confirmEndCard({ name: p.name, projectId: p.id, stage: p.stage, cardId: p.endCardId }), 'product');
     await save();
   };
-  const handleMessage = async ({ chatId, text, role = 'product', senderType = 'user' }) => {
+  // 开项目：工作台“提需求”和提议卡上的“就按这个开始”都走这里
+  const begin = async (chatId, text) => {
+    const project = startProject(chatId, text);
+    const dir = projectDir(project);
+    await Promise.all(['docs', 'design', 'site'].map(name => mkdir(path.join(dir, name), { recursive: true })));
+    await transition(project, 'clarifying');
+    launch(project, () => run(project, 'clarifying', text));
+    return { projectId: project.id, stage: project.stage };
+  };
+  // 群聊对话：角色只读文件，回一句话；需要时提议一个动作，发成带按钮的卡片，由用户点了才执行
+  const converse = async ({ chatId, role, text }) => {
+    const p = await get(chatId);
+    const files = [];
+    if (p) for (const file of Object.keys(artifacts)) if (await exists(path.join(projectDir(p), file))) files.push(file);
+    const rows = ((await recorder?.list(chatId, { limit: 30 })) ?? []).filter(row => ['user', 'text', 'card'].includes(row.kind));
+    if (rows.at(-1)?.kind === 'user' && rows.at(-1).text === text) rows.pop();
+    let result;
+    try {
+      result = await agent({ role, mode: 'chat', prompt: chatPrompt({ p, role, text, recent: rows.slice(-8), files }),
+        projectDir: p ? projectDir(p) : path.join(root, 'data/chat-room'), timeoutMs: chatTimeoutMs });
+    } catch (error) { result = { ok: false, error: error.message }; }
+    const now = await get(chatId);
+    const reply = tidy(result?.structured?.reply);
+    if (!result?.ok || !reply) {
+      console.error(`${roles[role].name}对话没有结果：${result?.error ?? '回复为空'}`);
+      await sendText(chatId, `刚才没想好怎么回答。${nextStep(now)}`, role);
+      return;
+    }
+    const proposal = checkProposal(result.structured.proposal, allowedActions(now, role));
+    if (!proposal) { await sendText(chatId, reply, role); return; }
+    const old = state.proposals[chatId];
+    const offer = { cardId: id(), role, ...proposal, projectId: now?.id ?? 'none', stage: now?.stage ?? 'none' };
+    try { offer.messageId = await delivery.sendCard(chatId, proposalCard({ role, reply, ...offer }), role); }
+    catch (error) { console.error(`提议卡片没发出去：${errorText(error)}`); await sendText(chatId, reply, role); return; }
+    state.proposals[chatId] = offer;
+    await save();
+    // 一次只留最新的一条提议
+    if (old) await closeCard(chatId, old.messageId, proposalTitle(old.role, old.action), '这条建议已过期，以最新那条为准', old.role);
+  };
+  const talk = (chatId, role, text) => {
+    const entry = (talks.get(chatId) ?? Promise.resolve())
+      .then(() => converse({ chatId, role, text }))
+      .catch(error => console.error(`对话出错：${errorText(error)}`))
+      .finally(() => { if (talks.get(chatId) === entry) talks.delete(chatId); });
+    talks.set(chatId, entry);
+    return entry;
+  };
+  const gateTitle = p => `${roles[p.cardRole ?? gateRole(p.stage)].name} · ${p.stage === 'accept' ? '走查完成，请验收' : stageNames[p.stage]}`;
+  // 点了提议卡上的按钮：先核对提议还作数，再由代码执行
+  const decide = async (chatId, p, offer, value, actor) => {
+    const action = value.action;
+    if (!proposalChoices(offer.action).includes(action)) return stale(chatId, p, value);
+    delete state.proposals[chatId];
+    await save();
+    const declined = ['dismiss', 'keep'].includes(action);
+    const current = (p?.id ?? 'none') === offer.projectId && (p?.stage ?? 'none') === offer.stage && allowedActions(p, offer.role).includes(offer.action);
+    if (!declined && !current) {
+      await closeCard(chatId, offer.messageId, proposalTitle(offer.role, offer.action), '这条建议已过期', offer.role);
+      return stale(chatId, p, value);
+    }
+    await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
+    const detail = ['start', 'revise', 'answer'].includes(action) ? `：${offer.detail}` : '';
+    await closeCard(chatId, offer.messageId, proposalTitle(offer.role, offer.action), `✓ ${actor}点了“${proposalButton(offer.action, action)}”${detail}`, offer.role);
+    if (declined) return toast('好的');
+    if (action === 'start') { await begin(chatId, offer.detail); return toast('已开工'); }
+    if (action === 'retry') { await retry(p, actor); return toast('已重试'); }
+    if (action === 'end') { await endProject(p, actor); return toast('项目已结束'); }
+    if (action === 'answer') {
+      p.lastDetail = offer.detail;
+      p.cardId = null;
+      launch(p, () => run(p, 'clarifying', offer.detail));
+      return toast('已提交回答');
+    }
+    // revise：等于打回并带上修改意见，直接开始改
+    const target = { confirm_prd: 'revise_prd', confirm_design: 'revise_design', accept: 'revise_build' }[p.stage];
+    await closeCard(chatId, p.cardMessageId, gateTitle(p), `${actor}提了修改意见，正在修改`, p.cardRole ?? gateRole(p.stage));
+    p.cardId = null;
+    p.lastDetail = offer.detail;
+    if (target === 'revise_build') p.walkthroughDetail = offer.detail;
+    launch(p, async () => { await transition(p, target); await run(p, target, offer.detail); });
+    return toast('开始修改');
+  };
+  const handleMessage = async ({ chatId, text, role = 'product', senderType = 'user', intent }) => {
     await ready;
     if (senderType !== 'user') return { ignored: true };
     const p = await get(chatId);
     const said = text.trim();
-    if (p?.busy) { await sendText(chatId, nextStep(p)); return { busy: true }; }
-    if (!p || p.stage === 'done') {
-      if (['结束', '重试'].includes(said)) { await sendText(chatId, `群里现在没有进行中的项目。${nextStep(null)}`); return { waiting: true }; }
-      if (role !== 'product') return { ignored: true };
-      const project = startProject(chatId, text);
-      const dir = projectDir(project);
-      await Promise.all(['docs', 'design', 'site'].map(name => mkdir(path.join(dir, name), { recursive: true })));
-      await transition(project, 'clarifying');
-      launch(project, () => run(project, 'clarifying', text));
-      return { projectId: project.id, stage: project.stage };
+    const active = p && p.stage !== 'done';
+    // 工作台“提需求”是明确的需求，直接开工；群里的话先聊，点了提议卡才开工
+    if (intent === 'demand' && !active) return begin(chatId, text);
+    if (p?.busy && role === roleFor(p.stage)) { await sendText(chatId, nextStep(p), role); return { busy: true }; }
+    if (['重试', '结束'].includes(said)) {
+      if (!active) { await sendText(chatId, `群里现在没有进行中的项目。${nextStep(null)}`, role); return { waiting: true }; }
+      if (p.busy) { await sendText(chatId, nextStep(p), role); return { busy: true }; }
+      if (said === '结束') { await askToEnd(p); return { confirming: 'end' }; }
+      if (p.error) { await retry(p, '你'); return { retrying: true }; }
+      await sendText(chatId, `现在没有停下的步骤。${nextStep(p)}`, role);
+      return { waiting: true };
     }
-    if (p.error && said === '重试') { await retry(p, '你'); return { retrying: true }; }
-    if (said === '结束') { await askToEnd(p); return { confirming: 'end' }; }
-    if (p.error) { await sendText(chatId, nextStep(p)); return { waiting: true }; }
-    if (['revise_prd', 'revise_design', 'revise_build'].includes(p.stage) && role === roleFor(p.stage)) {
+    if (active && !p.busy && !p.error && ['revise_prd', 'revise_design', 'revise_build'].includes(p.stage) && role === roleFor(p.stage)) {
       p.lastDetail = text;
       if (p.stage === 'revise_build') p.walkthroughDetail = text;
       launch(p, () => run(p, p.stage, text));
       return { stage: p.stage };
     }
-    await sendText(chatId, nextStep(p));
-    return { waiting: true };
+    talk(chatId, role, text);
+    return { chatting: true };
   };
   const stale = async (chatId, p, value, reason = '过期卡片') => {
     await recorder?.add(chatId, { kind: 'action_result', action: value?.action, accepted: false, reason, value });
@@ -321,6 +405,8 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     await ready;
     const p = await get(chatId);
     if (value?.projectId === 'test') return toast('这是测试卡片，不会推动流程，请点正式卡片');
+    const offer = state.proposals[chatId];
+    if (offer && value?.cardId === offer.cardId) return decide(chatId, p, offer, value, actor);
     const action = value?.action;
     const ours = p && p.id === value?.projectId && p.stage === value?.stage && !p.busy;
     // 停下卡：重试或结束项目
@@ -414,5 +500,5 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     projects.forEach((p, index) => { p.number = index + 1; p.source = p.chatId?.startsWith('web:') ? '工作台项目' : '飞书群项目'; });
     return { groups, projects, colleagues };
   };
-  return { handleMessage, handleAction, getProject: get, getProjectById, waitForIdle: async chatId => { await ready; while (jobs.has(chatId)) await jobs.get(chatId); return get(chatId); }, getState };
+  return { handleMessage, handleAction, getProject: get, getProjectById, waitForIdle: async chatId => { await ready; while (jobs.has(chatId) || talks.has(chatId)) await (jobs.get(chatId) ?? talks.get(chatId)); return get(chatId); }, getState };
 }

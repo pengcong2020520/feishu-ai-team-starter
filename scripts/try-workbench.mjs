@@ -22,7 +22,9 @@ const put = async (dir, file, content) => { const full = path.join(dir, file); a
 const prd = ['# 活动报名页','## 产品概述','让访客在线报名活动。','## 目标用户与场景','访客在活动页面填写信息。','## 用户故事','假如打开页面，当提交报名，那么看到成功提示。','## 页面与状态','default：默认填写；success：成功提示。','## 边界情况','姓名为空时提示。','## 功能需求','FR-001 填写姓名并报名。','## 成功标准','SC-001 成功提交后看到提示。','## 假设','本地演示，不连接后台。','## 本期不做','支付。'].join('\n');
 const outline = { title: '活动报名页', blocks: [{ name: '介绍', content: '活动信息' }, { name: '报名', content: '输入姓名' }], states: [{ id: 'default', name: '填写报名', desc: '看到活动信息和报名表单' }, { id: 'success', name: '报名成功', desc: '看到成功提示' }] };
 const colors = Object.fromEntries(['background','surface','text','muted','border','primary','onPrimary','accent','success','warning','error','disabled'].map(key => [key, '#315fdb']));
-const agent = async ({ role, prompt, projectDir, onProgress }) => {
+const agent = async ({ role, prompt, projectDir, onProgress, mode }) => {
+  // 群聊对话：设计确认时用户提了修改意见，AI 设计提议“按这个改”
+  if (mode === 'chat') return { ok: true, text: '', structured: { reply: '可以，主色换成绿色，按钮和标题跟着变，布局不动。', proposal: { action: 'revise', detail: '主色换成绿色' } }, sessionId: 'chat-demo', stats: { turns: 1, durationMs: 100, inputTokens: 100, outputTokens: 50 } };
   if (role === 'product') {
     if (prompt.includes('会卡住')) {
       await put(projectDir, 'docs/questions.json', { round: 1, why: '缺少问题列表' });
@@ -51,9 +53,13 @@ const agent = async ({ role, prompt, projectDir, onProgress }) => {
 const flow = createFlow({ root, feishu, recorder, agent, id: () => `demo-${++sequence}`, previewBase: `http://127.0.0.1:${port + 1}`, workbenchBase: `http://127.0.0.1:${port}` });
 for (const [chatId, text] of [['demo-ended','做一个已结束的活动报名页'],['demo-clarify','做一个澄清中活动报名页'],['demo-prd','做一个等待 PRD 确认的活动报名页'],['demo-design','做一个等待设计确认的活动报名页'],['demo-accept','做一个等待验收的活动报名页'],['demo-stuck','做一个会卡住的活动报名页']]) {
   await recorder.add(chatId, { kind: 'user', role: 'product', text, source: '试用' });
-  await flow.handleMessage({ chatId, text }); await flow.waitForIdle(chatId);
+  await flow.handleMessage({ chatId, text, intent: 'demand' }); await flow.waitForIdle(chatId);
   if (['demo-design','demo-accept'].includes(chatId)) { let p = await flow.getProject(chatId); await flow.handleAction({ chatId, value: { action: 'confirm', stage: p.stage, projectId: p.id, cardId: p.cardId } }); await flow.waitForIdle(chatId); }
   if (chatId === 'demo-accept') { let p = await flow.getProject(chatId); await flow.handleAction({ chatId, value: { action: 'confirm', stage: p.stage, projectId: p.id, cardId: p.cardId } }); await flow.waitForIdle(chatId); }
+}
+{ // 确认设计时 @AI 设计 提修改意见：收到一张“要按这个改吗？”的提议卡
+  await recorder.add('demo-design', { kind: 'user', role: 'designer', text: '主色换成绿色吧', source: '试用' });
+  await flow.handleMessage({ chatId: 'demo-design', role: 'designer', text: '主色换成绿色吧' }); await flow.waitForIdle('demo-design');
 }
 { // 已结束的项目：澄清时用户说“结束”并确认
   await flow.handleMessage({ chatId: 'demo-ended', text: '结束' });
