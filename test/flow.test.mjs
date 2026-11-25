@@ -200,6 +200,56 @@ test('发问题卡片失败后只重发卡片，不重复调用智能体', () =>
   assert.equal((await local.getProject('card')).error, null);
 }));
 
+test('服务在智能体干活时停掉：重启后在群里说明，发“重试”接着做这一步', async () => {
+  const dir = await mkdtemp(path.join(root, 'test-flow-'));
+  try {
+    await put(dir, 'data/state.json', { groups: { g: { id: 'p1', chatId: 'g', name: '报名页', demand: '报名页', stage: 'clarifying', busy: true, error: null, questionRound: 2, walkthroughRound: 0, sessions: { product: 's2' }, cardId: null, cardMessageId: 'm2', lastDetail: '需要电话吗？：需要' } }, archived: [] });
+    const messages = [];
+    const calls = [];
+    const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async () => 'm3', patchCard: async () => {} }, agent: async ({ prompt, resume, projectDir }) => {
+      calls.push({ prompt, resume });
+      await put(projectDir, 'docs/prd.md', prd); await put(projectDir, 'docs/outline.json', outline);
+      await put(projectDir, 'docs/checklist.md', Array.from({ length: 14 }, (_, i) => `- [x] CHK${String(i + 1).padStart(3, '0')}`).join('\n'));
+      return { ok: true, text: '已写好 PRD', sessionId: 's3', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } };
+    } });
+    const p = await local.waitForIdle('g');
+    assert.equal(p.busy, false);
+    assert.match(p.error, /团队服务重启过/);
+    assert.match(messages.at(-1), /“澄清需求”出错：团队服务重启过，上一步没做完。请 @AI 产品经理 发送“重试”/);
+    assert.equal((JSON.parse(await readFile(path.join(dir, 'data/state.json'), 'utf8'))).groups.g.busy, false);
+    await local.handleMessage({ chatId: 'g', role: 'product', text: '重试' }); await local.waitForIdle('g');
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].prompt, /用户的回答：需要电话吗？：需要/);
+    assert.match(calls[0].prompt, /这是最后一轮/);
+    assert.equal(calls[0].resume, 's2');
+    const after = await local.getProject('g');
+    assert.equal(after.stage, 'confirm_prd');
+    assert.equal(after.error, null);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('确认卡片没发出去就停掉：重试只重发确认卡片，不再调用智能体', async () => {
+  const dir = await mkdtemp(path.join(root, 'test-flow-'));
+  try {
+    await put(dir, 'data/state.json', { groups: { g: { id: 'p1', chatId: 'g', name: '报名页', demand: '报名页', stage: 'confirm_prd', busy: true, error: null, questionRound: 3, walkthroughRound: 0, sessions: { product: 's3' }, cardId: null, cardMessageId: 'm2', lastDetail: '' } }, archived: [] });
+    await put(dir, 'workspace/p1/docs/prd.md', prd); await put(dir, 'workspace/p1/docs/outline.json', outline);
+    const messages = [];
+    const cards = [];
+    let agentCalls = 0;
+    const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { cards.push(card); return 'm3'; }, patchCard: async () => {} }, agent: async () => { agentCalls++; return { ok: false, error: '不该调用' }; } });
+    await local.waitForIdle('g');
+    assert.match(messages.at(-1), /请 @AI 产品经理 发送“重试”/);
+    await local.handleMessage({ chatId: 'g', role: 'product', text: '重试' }); await local.waitForIdle('g');
+    assert.equal(agentCalls, 0);
+    assert.equal(cards.length, 1);
+    assert.equal(value(cards[0]).stage, 'confirm_prd');
+    const after = await local.getProject('g');
+    assert.equal(after.stage, 'confirm_prd');
+    assert.equal(after.error, null);
+    assert.equal(after.cardId, value(cards[0]).cardId);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('智能体报错不自动重试，机器人消息不触发任务', () => fixture(async ({ flow, messages }) => {
   assert.deepEqual(await flow.handleMessage({ chatId: 'g', text: '机器人消息', senderType: 'bot' }), { ignored: true });
   await flow.handleMessage({ chatId: 'g', text: '报名页' }); await flow.waitForIdle('g');

@@ -12,6 +12,8 @@ import { cardView } from '../workbench/recorder.mjs';
 
 const exists = async file => { try { await readFile(file); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 const gateRole = stage => ({ confirm_prd: 'product', confirm_design: 'designer', accept: 'developer' })[stage];
+// 卡片还没发出去就被打断时，重试用这句话重发确认卡片
+const gateText = { confirm_prd: '请确认 PRD：docs/prd.md', confirm_design: '请确认线框与主题', accept: '走查已完成，请验收' };
 const errorText = error => {
   const detail = error?.response?.data;
   return detail?.code != null ? `${error.message ?? '飞书调用失败'}（code ${detail.code}，msg ${detail.msg ?? ''}）` : error?.message ?? String(error);
@@ -28,7 +30,15 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     catch (e) { if (e.code !== 'ENOENT') throw e; }
     state.groups ??= {};
     state.archived ??= [];
-    for (const project of Object.values(state.groups)) project.busy = false;
+    // 上次服务停掉时（电脑重启、睡眠、被关掉）还在干活的项目：标成出错并在群里说明，好让用户发“重试”接着做
+    for (const project of Object.values(state.groups)) {
+      if (project.busy && project.stage !== 'done' && !project.error) {
+        const notice = safeError(project, new Error('团队服务重启过，上一步没做完')).catch(error => console.error(`重启提示没发出去：${errorText(error)}`));
+        const entry = notice.finally(() => { if (jobs.get(project.chatId) === entry) jobs.delete(project.chatId); });
+        jobs.set(project.chatId, entry);
+      }
+      project.busy = false;
+    }
   })();
   const save = () => {
     saves = saves.then(async () => {
@@ -232,6 +242,8 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
           p.pendingAction = null;
           if (target !== 'done') await run(p, target);
         });
+      } else if (gateRole(p.stage)) {
+        launch(p, () => issueCard(p, gateText[p.stage], p.stage));
       } else launch(p, () => run(p, p.stage, p.lastDetail ?? text));
       return { retrying: true };
     }
@@ -331,5 +343,5 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     projects.forEach((p, index) => { p.number = index + 1; p.source = p.chatId?.startsWith('web:') ? '工作台项目' : '飞书群项目'; });
     return { groups, projects, colleagues };
   };
-  return { handleMessage, handleAction, getProject: get, getProjectById, waitForIdle: async chatId => { while (jobs.has(chatId)) await jobs.get(chatId); return get(chatId); }, getState };
+  return { handleMessage, handleAction, getProject: get, getProjectById, waitForIdle: async chatId => { await ready; while (jobs.has(chatId)) await jobs.get(chatId); return get(chatId); }, getState };
 }
