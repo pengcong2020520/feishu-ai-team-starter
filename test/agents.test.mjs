@@ -79,3 +79,18 @@ test('软链接不能越过项目边界', async () => {
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test('到时间还没做完就中止，返回 timedOut', async () => {
+  const project = await mkdtemp(path.join(root, 'test-project-'));
+  try {
+    let signal;
+    const slowQuery = async function* ({ options }) {
+      signal = options.abortController.signal;
+      yield { type: 'assistant', session_id: 's9', message: { content: [] } };
+      await new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    };
+    const result = await createRunAgent(slowQuery)({ role: 'designer', prompt: '画线框', projectDir: project, timeoutMs: 30 });
+    assert.equal(signal.aborted, true);
+    assert.deepEqual([result.ok, result.timedOut, result.sessionId], [false, true, 's9']);
+  } finally { await rm(project, { recursive: true, force: true }); }
+});

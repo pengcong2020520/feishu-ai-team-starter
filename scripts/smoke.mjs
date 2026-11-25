@@ -3,12 +3,15 @@ import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pickPort } from '../src/setup/service.mjs';
 
 const files = execFileSync('git', ['ls-files', '*.mjs'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
 for (const file of files) execFileSync(process.execPath, ['--check', file]);
 console.log(`✓ 语法检查 ${files.length} 个文件`);
 
-const child = spawn(process.execPath, ['scripts/try-workbench.mjs'], { stdio: ['ignore', 'pipe', 'pipe'] });
+// 挑一对空闲端口，免得本机正在跑的团队服务占着 4890 时误判通过
+const port = await pickPort(4950);
+const child = spawn(process.execPath, ['scripts/try-workbench.mjs'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, DEMO_PORT: String(port) } });
 let output = '';
 child.stdout.on('data', d => { output += d; });
 child.stderr.on('data', d => { output += d; });
@@ -17,8 +20,8 @@ try {
   let ok = false;
   while (!ok && Date.now() < end) {
     try {
-      const home = await fetch('http://127.0.0.1:4890/');
-      const state = await fetch('http://127.0.0.1:4890/api/state');
+      const home = await fetch(`http://127.0.0.1:${port}/`);
+      const state = await fetch(`http://127.0.0.1:${port}/api/state`);
       ok = home.ok && (await home.text()).includes('<') && state.ok;
     } catch {}
     if (!ok) await new Promise(r => setTimeout(r, 500));

@@ -129,8 +129,9 @@ test('忙时回复；交付文件错误后停住且可重试', () => fixture(asy
   let release;
   let count = 0;
   const gate = new Promise(resolve => { release = resolve; });
+  const sent = [];
   // 本用例用单独的编排来制造未完成的智能体调用。
-  const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async () => 'm', patchCard: async () => {} },
+  const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { sent.push(card); return 'm'; }, patchCard: async () => {} },
     agent: async ({ projectDir }) => {
       count++;
       if (count === 1) await gate;
@@ -139,10 +140,13 @@ test('忙时回复；交付文件错误后停住且可重试', () => fixture(asy
     } });
   await local.handleMessage({ chatId: 'busy', text: '报名页' });
   assert.equal((await local.handleMessage({ chatId: 'busy', text: '又发一次' })).busy, true);
-  assert.match(messages.at(-1), /正在处理上一步/);
+  assert.match(messages.at(-1), /AI 产品经理正在澄清需求，做完会在群里发新卡片/);
   release(); await local.waitForIdle('busy');
-  assert.equal((await local.getProject('busy')).stage, 'clarifying');
-  assert.match(messages.at(-1), /questions.json/);
+  const stuck = await local.getProject('busy');
+  assert.equal(stuck.stage, 'clarifying');
+  assert.match(stuck.error, /questions\.json/);
+  assert.equal(stuck.errorBrief, '交付的澄清问题没通过格式检查');
+  assert.equal(sent.at(-1).header.title.content, 'AI 产品经理 · 这一步停下了');
   await local.handleMessage({ chatId: 'busy', role: 'product', text: '重试' }); await local.waitForIdle('busy');
   assert.equal((await local.getProject('busy')).error, null);
 }));
@@ -193,10 +197,12 @@ test('发问题卡片失败后只重发卡片，不重复调用智能体', () =>
     return { ok: true, text: '', sessionId: 's', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } };
   } });
   await local.handleMessage({ chatId: 'card', text: '报名页' }); await local.waitForIdle('card');
-  assert.match(messages.at(-1), /code 123，msg 卡片格式错误/);
+  const stuck = await local.getProject('card');
+  assert.match(stuck.error, /code 123，msg 卡片格式错误/);
+  assert.equal(stuck.errorBrief, '飞书接口出错（code 123）');
   await local.handleMessage({ chatId: 'card', role: 'product', text: '重试' }); await local.waitForIdle('card');
   assert.equal(agentCalls, 1);
-  assert.equal(cardCalls, 2);
+  assert.equal(cardCalls, 3); // 问题卡、停下卡、重发的问题卡
   assert.equal((await local.getProject('card')).error, null);
 }));
 
@@ -207,7 +213,8 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
     await mkdir(path.join(dir, 'workspace/p1'), { recursive: true });
     const messages = [];
     const calls = [];
-    const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async () => 'm3', patchCard: async () => {} }, agent: async ({ prompt, resume, projectDir }) => {
+    const sent = [];
+    const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { sent.push(card); return 'm3'; }, patchCard: async () => {} }, agent: async ({ prompt, resume, projectDir }) => {
       calls.push({ prompt, resume });
       await put(projectDir, 'docs/prd.md', prd); await put(projectDir, 'docs/outline.json', outline);
       await put(projectDir, 'docs/checklist.md', Array.from({ length: 14 }, (_, i) => `- [x] CHK${String(i + 1).padStart(3, '0')}`).join('\n'));
@@ -216,7 +223,8 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
     const p = await local.waitForIdle('g');
     assert.equal(p.busy, false);
     assert.match(p.error, /团队服务重启过/);
-    assert.match(messages.at(-1), /“澄清需求”出错：团队服务重启过，上一步没做完。请 @AI 产品经理 发送“重试”/);
+    assert.equal(sent[0].header.title.content, 'AI 产品经理 · 这一步停下了');
+    assert.match(JSON.stringify(sent[0]), /团队服务重启过，这一步没做完/);
     const [listed] = (await local.getState()).projects;
     assert.deepEqual([listed.number, listed.waitingFor, listed.retryRole], [1, '重试', 'product']);
     assert.equal((JSON.parse(await readFile(path.join(dir, 'data/state.json'), 'utf8'))).groups.g.busy, false);
@@ -241,22 +249,102 @@ test('确认卡片没发出去就停掉：重试只重发确认卡片，不再�
     let agentCalls = 0;
     const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { cards.push(card); return 'm3'; }, patchCard: async () => {} }, agent: async () => { agentCalls++; return { ok: false, error: '不该调用' }; } });
     await local.waitForIdle('g');
-    assert.match(messages.at(-1), /请 @AI 产品经理 发送“重试”/);
+    assert.equal(cards[0].header.title.content, 'AI 产品经理 · 这一步停下了');
     await local.handleMessage({ chatId: 'g', role: 'product', text: '重试' }); await local.waitForIdle('g');
     assert.equal(agentCalls, 0);
-    assert.equal(cards.length, 1);
-    assert.equal(value(cards[0]).stage, 'confirm_prd');
+    assert.equal(cards.length, 2);
+    assert.equal(value(cards[1]).stage, 'confirm_prd');
     const after = await local.getProject('g');
     assert.equal(after.stage, 'confirm_prd');
     assert.equal(after.error, null);
-    assert.equal(after.cardId, value(cards[0]).cardId);
+    assert.equal(after.cardId, value(cards[1]).cardId);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('智能体报错不自动重试，机器人消息不触发任务', () => fixture(async ({ flow, messages }) => {
+test('智能体报错不自动重试，机器人消息不触发任务', () => fixture(async ({ flow, cards }) => {
   assert.deepEqual(await flow.handleMessage({ chatId: 'g', text: '机器人消息', senderType: 'bot' }), { ignored: true });
   await flow.handleMessage({ chatId: 'g', text: '报名页' }); await flow.waitForIdle('g');
-  assert.equal((await flow.getProject('g')).stage, 'clarifying');
-  assert.match(messages.at(-1), /重试/);
-  assert.match(messages.at(-1), /AI 产品经理执行失败/);
+  const p = await flow.getProject('g');
+  assert.equal(p.stage, 'clarifying');
+  assert.match(p.error, /AI 产品经理执行失败：模型暂不可用/);
+  assert.equal(p.errorBrief, 'AI 产品经理这一步没做完：模型暂不可用');
+  const stuck = cards.at(-1);
+  assert.equal(stuck.header.title.content, 'AI 产品经理 · 这一步停下了');
+  assert.deepEqual(stuck.elements.at(-1).actions.map(b => [b.text.content, b.value.action]), [['重试', 'retry'], ['结束项目', 'end']]);
 }, async () => ({ ok: false, text: '', sessionId: null, error: '模型暂不可用', stats: { turns: 0, durationMs: 1, inputTokens: 0, outputTokens: 0 } })));
+
+const stuckOf = cards => cards.filter(card => card.header?.title?.content?.endsWith('这一步停下了')).at(-1);
+const okResult = text => ({ ok: true, text, sessionId: 's', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } });
+
+test('交付检查没过：停下卡上点重试，智能体会收到没过的原因', () => fixture(async ({ flow, cards, dir }) => {
+  const prompts = [];
+  const local = createFlow({ root: dir, id: (() => { let n = 0; return () => `k${++n}`; })(), feishu: { sendText: async () => {}, sendCard: async (_, card) => { cards.push(card); return `m${cards.length}`; }, patchCard: async () => {} }, agent: async ({ prompt, projectDir }) => {
+    prompts.push(prompt);
+    await put(projectDir, 'docs/questions.json', prompts.length === 1 ? { round: 1 } : { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] });
+    return okResult('');
+  } });
+  await local.handleMessage({ chatId: 'c', text: '报名页' }); await local.waitForIdle('c');
+  const card = stuckOf(cards);
+  await local.handleAction({ chatId: 'c', value: card.elements.at(-1).actions[0].value, actor: '小王' }); await local.waitForIdle('c');
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /上次交付没通过检查：docs\/questions\.json/);
+  const p = await local.getProject('c');
+  assert.equal(p.error, null);
+  assert.equal(p.cardId !== null, true);
+  // 点过的停下卡再点就过期
+  assert.match((await local.handleAction({ chatId: 'c', value: card.elements.at(-1).actions[0].value })).toast.content, /过期/);
+}));
+
+test('结束项目：停下卡上直接结束；文字“结束”先确认，可选继续做', () => fixture(async ({ flow, cards, messages, dir }) => {
+  const local = createFlow({ root: dir, id: (() => { let n = 0; return () => `e${++n}`; })(), feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { cards.push(card); return `m${cards.length}`; }, patchCard: async () => {} }, agent: async () => ({ ok: false, error: '模型暂不可用', stats: {} }) });
+  await local.handleMessage({ chatId: 'x', text: '报名页' }); await local.waitForIdle('x');
+  await local.handleAction({ chatId: 'x', value: stuckOf(cards).elements.at(-1).actions[1].value });
+  assert.equal(await local.getProject('x'), null);
+  assert.match(messages.at(-1), /已结束「报名页」，文件都保留着/);
+  const state = await local.getState();
+  assert.equal(state.projects[0].ended, true);
+  assert.equal(state.projects[0].endedStage, 'clarifying');
+  assert.equal(state.projects[0].stage, 'done');
+  // 群里空出来了：新需求开新项目
+  await local.handleMessage({ chatId: 'x', text: '读书会' }); await local.waitForIdle('x');
+  assert.equal((await local.getProject('x')).demand, '读书会');
+  await local.handleMessage({ chatId: 'x', text: '结束' });
+  const confirm = cards.at(-1);
+  assert.equal(confirm.header.title.content, 'AI 产品经理 · 结束这个项目？');
+  // 有项目且出错时，文字“结束”同样先确认
+  await local.handleAction({ chatId: 'x', value: confirm.elements.at(-1).actions[1].value });
+  assert.match(messages.at(-1), /好的，继续做/);
+  assert.equal((await local.getProject('x')).demand, '读书会');
+  await local.handleMessage({ chatId: 'x', text: '结束' });
+  await local.handleAction({ chatId: 'x', value: cards.at(-1).elements.at(-1).actions[0].value });
+  assert.equal(await local.getProject('x'), null);
+  assert.equal((await local.getState()).projects.filter(p => p.ended).length, 2);
+  // 没有项目时说“结束”不会被当成需求
+  await local.handleMessage({ chatId: 'x', text: '结束' });
+  assert.equal(await local.getProject('x'), null);
+  assert.match(messages.at(-1), /群里现在没有进行中的项目/);
+}));
+
+test('出错后点旧卡片：提示这一步停下了和怎么继续；超时给出分钟数', () => fixture(async ({ cards, messages, dir }) => {
+  let n = 0;
+  const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { cards.push(card); return `m${cards.length}`; }, patchCard: async () => {} }, agent: async ({ projectDir, timeoutMs }) => {
+    n += 1;
+    if (n === 1) { assert.equal(timeoutMs, 10 * 60000); await put(projectDir, 'docs/questions.json', { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] }); return okResult(''); }
+    return { ok: false, timedOut: true, error: '超过 10 分钟没做完', stats: {} };
+  } });
+  await local.handleMessage({ chatId: 't', text: '报名页' }); await local.waitForIdle('t');
+  const question = cards.at(-1);
+  await local.handleAction({ chatId: 't', value: answer(question), formValue: { q: '0' } }); await local.waitForIdle('t');
+  assert.equal((await local.getProject('t')).errorBrief, 'AI 产品经理这一步超过 10 分钟还没做完，已经停下');
+  await local.handleAction({ chatId: 't', value: answer(question) });
+  assert.match(messages.at(-1), /这张卡片已过期。这一步停下了：AI 产品经理这一步超过 10 分钟还没做完/);
+  assert.match(messages.at(-1), /“重试”或“结束项目”/);
+}));
+
+test('验收时网页文件发不出去：说一句，项目照常完成', () => fixture(async ({ cards, messages, dir }) => {
+  await put(dir, 'data/state.json', { groups: { a: { id: 'pa', chatId: 'a', name: '报名页', demand: '报名页', stage: 'accept', busy: false, error: null, questionRound: 1, walkthroughRound: 1, sessions: {}, cardId: 'ca', cardMessageId: 'm0', cardRole: 'designer' } }, archived: [] });
+  const fresh = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { cards.push(card); return `m${cards.length}`; }, patchCard: async () => {}, sendFile: async () => { throw new Error('上传网页文件超过 60 秒没完成'); } }, agent: async () => okResult('') });
+  await fresh.handleAction({ chatId: 'a', value: { action: 'confirm', stage: 'accept', projectId: 'pa', cardId: 'ca' } }); await fresh.waitForIdle('a');
+  assert.equal((await fresh.getProject('a')).stage, 'done');
+  assert.match(messages.at(-1), /网页文件没能发到群里（上传网页文件超过 60 秒没完成）/);
+}));

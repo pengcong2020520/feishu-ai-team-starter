@@ -24,7 +24,14 @@ export async function withRetry(fn, { delays = [1000, 2000, 4000], sleep = ms =>
   }
 }
 
-export function createFeishu({ credentials, onMessage, onAction, recorder, logger = console }) {
+// 上传图片、文件可能经网络或代理挂住：最多等 60 秒，超时就当失败处理，不让流程一直卡着
+export const timed = (promise, ms, what) => {
+  let timer;
+  const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${what}超过 ${Math.round(ms / 1000)} 秒没完成`)), ms); });
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+};
+
+export function createFeishu({ credentials, onMessage, onAction, recorder, logger = console, uploadMs = 60000 }) {
   const clients = Object.fromEntries(names.map(role => [role, new Lark.Client({ ...credentials[role], loggerLevel: Lark.LoggerLevel.error })]));
   const sockets = [];
   const ids = new Map();
@@ -51,14 +58,14 @@ export function createFeishu({ credentials, onMessage, onAction, recorder, logge
     },
     async uploadImage(filePath, role = 'product') {
       const { createReadStream } = await import('node:fs');
-      const upload = await call(() => clients[role].im.v1.image.create({ data: { image_type: 'message', image: createReadStream(filePath) } }));
+      const upload = await timed(call(() => clients[role].im.v1.image.create({ data: { image_type: 'message', image: createReadStream(filePath) } })), uploadMs, '上传图片');
       const key = upload?.data?.image_key ?? upload?.image_key;
       if (!key) throw new Error('飞书上传图片成功但没有 image_key');
       return key;
     },
     async sendFile(chatId, filePath, role = 'product') {
       const { createReadStream } = await import('node:fs');
-      const upload = await call(() => clients[role].im.v1.file.create({ data: { file_type: 'stream', file_name: 'index.html', file: createReadStream(filePath) } }));
+      const upload = await timed(call(() => clients[role].im.v1.file.create({ data: { file_type: 'stream', file_name: 'index.html', file: createReadStream(filePath) } })), uploadMs, '上传网页文件');
       const r = await call(() => clients[role].im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'file', content: JSON.stringify({ file_key: upload.data?.file_key ?? upload.file_key }) } }));
       return r.data?.message_id;
     },

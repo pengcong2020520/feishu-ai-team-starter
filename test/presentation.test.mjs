@@ -88,3 +88,11 @@ test('旧格式消息只显示已有内容，动作中文化并从首条人发�
   ]);
   assert.deepEqual(updated.map(event => messageView(event).card.title), ['新标题', '仅存更新版']);
 });
+
+test('卡住和已结束的项目在流程栏里分别显示', () => {
+  assert.equal(flowStatus({ stage: 'designing', error: '超时', waitingFor: '重试' }, 1), '卡住了');
+  const ended = { stage: 'done', ended: true, endedStage: 'confirm_design' };
+  assert.deepEqual([0, 1, 2, 3, 4].map(i => flowStatus(ended, i)), ['完成', '已结束', '未开始', '未开始', '未开始']);
+  assert.equal(messageView({ kind: 'action', action: 'retry' }).text, '你点了重试');
+  assert.equal(messageView({ kind: 'action', action: 'end' }).text, '你点了结束项目');
+});

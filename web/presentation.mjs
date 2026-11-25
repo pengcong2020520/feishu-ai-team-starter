@@ -31,8 +31,13 @@ export const waitSince = (iso, now = Date.now()) => {
   return minutes < 1 ? '刚刚' : `已等 ${minutes} 分钟`;
 };
 export function flowStatus(project, index) {
+  if (project.ended) {
+    const reached = stageIndex(project.endedStage);
+    return index < reached ? '完成' : index === reached ? '已结束' : '未开始';
+  }
   const current = stageIndex(project.stage);
   if (project.stage === 'done' || index < current) return '完成';
+  if (index === current && project.error) return '卡住了';
   if (index > current) return '未开始';
   if (project.waitingFor) return index === 4 ? '等你验收' : `等你${project.waitingFor}`;
   return project.busy ? '进行中' : stageNames[project.stage];
@@ -56,7 +61,7 @@ export function messageView(event) {
   if (event.card) return { type: 'card', card: event.card, user: false };
   if ((event.kind === 'card' || event.kind === 'card_update') && event.title) return { type: 'card', card: { title: event.title }, user: false };
   if (event.kind === 'action') {
-    const label = { confirm: '你点了确认', reject: '你点了打回', answer: '你提交了回答' }[event.action] ?? '你点了卡片按钮';
+    const label = { confirm: '你点了确认', reject: '你点了打回', answer: '你提交了回答', retry: '你点了重试', end: '你点了结束项目', keep: '你选择继续做' }[event.action] ?? '你点了卡片按钮';
     return { type: 'text', text: label, user: true };
   }
   if (event.kind === 'action_result') return null;

@@ -5,6 +5,8 @@ import { startPreview } from '../src/preview.mjs';
 import { createRecorder, cardView } from '../src/workbench/recorder.mjs';
 
 const assetsRoot = process.cwd();
+// 试用工作台默认用 4890/4891；DEMO_PORT 可以换端口（冒烟测试用它挑空闲端口）
+const port = Number(process.env.DEMO_PORT || 4890);
 const root = path.join(assetsRoot, 'data/workbench-demo');
 await rm(root, { recursive: true, force: true });
 const recorder = createRecorder(root);
@@ -22,7 +24,10 @@ const outline = { title: '活动报名页', blocks: [{ name: '介绍', content: 
 const colors = Object.fromEntries(['background','surface','text','muted','border','primary','onPrimary','accent','success','warning','error','disabled'].map(key => [key, '#315fdb']));
 const agent = async ({ role, prompt, projectDir, onProgress }) => {
   if (role === 'product') {
-    if (prompt.includes('澄清中')) {
+    if (prompt.includes('会卡住')) {
+      await put(projectDir, 'docs/questions.json', { round: 1, why: '缺少问题列表' });
+      onProgress({ tool: 'Write', file: 'docs/questions.json' });
+    } else if (prompt.includes('澄清中') || prompt.includes('已结束')) {
       await put(projectDir, 'docs/questions.json', { round: 1, why: '确定报名形式', questions: [{ id: 'q1', question: '报名需要留下电话吗？', matters: '决定表单字段', options: ['需要', '不需要'], recommended: 0, reason: '方便联系' }] });
       onProgress({ tool: 'Write', file: 'docs/questions.json' });
     } else {
@@ -43,14 +48,19 @@ const agent = async ({ role, prompt, projectDir, onProgress }) => {
   }
   return { ok: true, text: '试用内容已生成', sessionId: `${role}-demo`, stats: { turns: 1, durationMs: 100, inputTokens: 100, outputTokens: 100 } };
 };
-const flow = createFlow({ root, feishu, recorder, agent, id: () => `demo-${++sequence}`, previewBase: 'http://127.0.0.1:4891', workbenchBase: 'http://127.0.0.1:4890' });
-for (const [chatId, text] of [['demo-clarify','做一个澄清中活动报名页'],['demo-prd','做一个等待 PRD 确认的活动报名页'],['demo-design','做一个等待设计确认的活动报名页'],['demo-accept','做一个等待验收的活动报名页']]) {
+const flow = createFlow({ root, feishu, recorder, agent, id: () => `demo-${++sequence}`, previewBase: `http://127.0.0.1:${port + 1}`, workbenchBase: `http://127.0.0.1:${port}` });
+for (const [chatId, text] of [['demo-ended','做一个已结束的活动报名页'],['demo-clarify','做一个澄清中活动报名页'],['demo-prd','做一个等待 PRD 确认的活动报名页'],['demo-design','做一个等待设计确认的活动报名页'],['demo-accept','做一个等待验收的活动报名页'],['demo-stuck','做一个会卡住的活动报名页']]) {
   await recorder.add(chatId, { kind: 'user', role: 'product', text, source: '试用' });
   await flow.handleMessage({ chatId, text }); await flow.waitForIdle(chatId);
   if (['demo-design','demo-accept'].includes(chatId)) { let p = await flow.getProject(chatId); await flow.handleAction({ chatId, value: { action: 'confirm', stage: p.stage, projectId: p.id, cardId: p.cardId } }); await flow.waitForIdle(chatId); }
   if (chatId === 'demo-accept') { let p = await flow.getProject(chatId); await flow.handleAction({ chatId, value: { action: 'confirm', stage: p.stage, projectId: p.id, cardId: p.cardId } }); await flow.waitForIdle(chatId); }
 }
-const preview = await startPreview({ root, assetsRoot, modelPort: 4891, workbenchPort: 4890, flow, feishu, recorder });
-console.log('试用工作台已启动：http://127.0.0.1:4890');
+{ // 已结束的项目：澄清时用户说“结束”并确认
+  await flow.handleMessage({ chatId: 'demo-ended', text: '结束' });
+  const p = await flow.getProject('demo-ended');
+  await flow.handleAction({ chatId: 'demo-ended', value: { action: 'end', stage: p.stage, projectId: p.id, cardId: p.endCardId } });
+}
+const preview = await startPreview({ root, assetsRoot, modelPort: port + 1, workbenchPort: port, flow, feishu, recorder });
+console.log(`试用工作台已启动：http://127.0.0.1:${port}`);
 console.log('全部数据位于 data/workbench-demo；按 Ctrl+C 停止。');
 for (const signal of ['SIGINT','SIGTERM']) process.on(signal, async () => { await preview.close(); process.exit(); });

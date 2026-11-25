@@ -67,6 +67,29 @@ export function progressCard({ title, task = '正在处理这一步', lines = []
   return { config, header: header(done ? `${roleNames[role]} · 完成` : title, role), elements };
 }
 
+// 某一步停下了：一句原因 + 下一步，按钮直接重试或结束项目
+export function stuckCard({ role, brief, projectId, stage, cardId }) {
+  const value = action => ({ action, stage, projectId, cardId });
+  return { config, header: header(`${roleNames[role]} · 这一步停下了`, role), elements: [
+    md(escape(brief)),
+    gray(`点“重试”让 ${roleNames[role]} 再做一次；不想做了就点“结束项目”，文件都会保留。`),
+    { tag: 'action', actions: [button('重试', value('retry'), 'primary'), button('结束项目', value('end'))] },
+  ] };
+}
+
+export function confirmEndCard({ name, projectId, stage, cardId }) {
+  const value = action => ({ action, stage, projectId, cardId });
+  return { config, header: header('AI 产品经理 · 结束这个项目？', 'product'), elements: [
+    md(escape(`结束后「${name}」的文件都会保留，工作台里能看到；群里可以重新提需求。`)),
+    { tag: 'action', actions: [button('结束项目', value('end'), 'danger'), button('继续做', value('keep'))] },
+  ] };
+}
+
+// 点过的卡片收起来：只留标题和一句结果，按钮去掉
+export function closedCard(title, text, role = roleOf(title)) {
+  return { config, header: header(title, role), elements: [md(escape(text))] };
+}
+
 export function completeCard({ url }) {
   return resultCard({ role: 'product', title: 'AI 产品经理 · 网页已完成', description: '网页已验收完成，index.html 文件见下一条消息。', points: ['网页：已可打开'], links: [{ label: '打开网页', url }] });
 }

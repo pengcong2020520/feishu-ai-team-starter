@@ -38,4 +38,7 @@ export function taskFor(stage, detail = '', round = 1) {
   }
 }
 
+// 每一步最多跑多久（分钟），超时就停下，交给用户重试或结束
+export const timeLimits = Object.freeze({ clarifying: 10, revise_prd: 10, designing: 15, revise_design: 15, building: 20, revise_build: 20, walkthrough: 15 });
+
 export const roleFor = stage => ({ clarifying: 'product', revise_prd: 'product', designing: 'designer', revise_design: 'designer', building: 'developer', revise_build: 'developer', walkthrough: 'designer' })[stage];
