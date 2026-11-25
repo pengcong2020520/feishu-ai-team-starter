@@ -12,6 +12,8 @@ import { cardView } from '../workbench/recorder.mjs';
 
 const exists = async file => { try { await readFile(file); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 const gateRole = stage => ({ confirm_prd: 'product', confirm_design: 'designer', accept: 'developer' })[stage];
+// 出错停下后该由谁发“重试”
+const retryRole = p => p.pendingAction?.role ?? gateRole(p.stage) ?? roleFor(p.stage);
 // 卡片还没发出去就被打断时，重试用这句话重发确认卡片
 const gateText = { confirm_prd: '请确认 PRD：docs/prd.md', confirm_design: '请确认线框与主题', accept: '走查已完成，请验收' };
 const errorText = error => {
@@ -67,7 +69,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   const safeError = async (p, error) => {
     p.error = errorText(error);
     await save();
-    try { await sendText(p.chatId, `“${stageNames[p.stage]}”出错：${p.error}。请 @${roles[p.pendingAction?.role ?? gateRole(p.stage) ?? roleFor(p.stage)]?.name ?? '对应角色'} 发送“重试”。`); }
+    try { await sendText(p.chatId, `“${stageNames[p.stage]}”出错：${p.error}。请 @${roles[retryRole(p)]?.name ?? '对应角色'} 发送“重试”。`); }
     catch (sendError) { p.error += `；报错消息发送失败：${errorText(sendError)}`; await save(); }
   };
   const launch = (p, fn) => {
@@ -230,7 +232,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
       launch(project, () => run(project, 'clarifying', text));
       return { projectId: project.id, stage: project.stage };
     }
-    if (p.error && text.trim() === '重试' && role === (p.pendingAction?.role ?? gateRole(p.stage) ?? roleFor(p.stage))) {
+    if (p.error && text.trim() === '重试' && role === retryRole(p)) {
       if (p.pendingCard) {
         launch(p, async () => { p.cardMessageId = await delivery.sendCard(p.chatId, p.pendingCard, p.cardRole); p.pendingCard = null; });
       } else if (p.pendingAction) {
@@ -248,7 +250,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
       return { retrying: true };
     }
     if (p.error) {
-      await sendText(chatId, `当前步骤已停下，请 @${roles[p.pendingAction?.role ?? gateRole(p.stage) ?? roleFor(p.stage)]?.name ?? '对应角色'} 发送“重试”。`);
+      await sendText(chatId, `当前步骤已停下，请 @${roles[retryRole(p)]?.name ?? '对应角色'} 发送“重试”。`);
       return { waiting: true };
     }
     if (['revise_prd', 'revise_design', 'revise_build'].includes(p.stage) && role === roleFor(p.stage)) {
@@ -331,6 +333,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
       for (const [key, file] of Object.entries({ prd: 'docs/prd.md', wireframe: 'design/wireframe.html', theme: 'design/theme.json', site: 'site/index.html', walkthrough: 'design/walkthrough.json' })) p.artifacts[key] = await exists(path.join(dir, file));
       p.waitingFor = p.error ? '重试' : p.busy ? null : ({ clarifying: '回答问题', confirm_prd: '确认 PRD', confirm_design: '确认设计', accept: '验收', revise_prd: '说明 PRD 修改意见', revise_design: '说明设计修改意见', revise_build: '说明网页修改意见' })[p.stage] ?? null;
       p.activeRole = p.busy ? roleFor(p.stage) : null;
+      p.retryRole = p.error ? retryRole(p) : null;
       const order = [['idle','clarifying','confirm_prd','revise_prd'], ['designing','confirm_design','revise_design'], ['building','revise_build'], ['walkthrough'], ['accept','done']];
       const current = order.findIndex(group => group.includes(p.stage));
       p.steps = ['澄清与 PRD','线框与主题','开发','走查','验收'].map((name, index) => ({ name, status: index < current || p.stage === 'done' ? '已完成' : index === current ? p.busy ? '进行中' : p.waitingFor ? '等你操作' : '当前阶段' : '未开始' }));

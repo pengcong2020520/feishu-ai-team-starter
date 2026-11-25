@@ -6,16 +6,18 @@ import { readProgress, saveProgress } from './progress.mjs';
 import { missingModel, missingBots, nextStage } from './state.mjs';
 import { anthropicEnv, checkModel } from './model.mjs';
 import { depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail } from './install.mjs';
-import { serviceStatus, startService, pickPort, portsFree } from './service.mjs';
+import { serviceStatus, startService, pickPort, portsFree, workbenchState, workbenchMessage } from './service.mjs';
 import { installRetry, registerMissing } from './register.mjs';
 import { createTeamGroup } from './group.mjs';
+import { stageNames } from '../flow/stages.mjs';
 
-const workbenchOf = env => `http://127.0.0.1:${env.PREVIEW_PORT || 4870}`;
+const portOf = env => Number(env.PREVIEW_PORT || 4870);
+const workbenchOf = env => `http://127.0.0.1:${portOf(env)}`;
 const LABEL = { MODEL_BASE_URL: '接口地址', MODEL_API_KEY: '密钥', MODEL_NAME: '模型名' };
 const MODEL_CMD = '用文件写入工具把密钥原样存成 data/model-key.txt（不要用 shell 命令写），再运行 node setup.mjs model --base-url <地址> --model <模型名> --key-file data/model-key.txt（读完会删掉这个文件）';
 
 const realDeps = {
-  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, pickPort, portsFree,
+  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, pickPort, portsFree, workbenchState, workbenchMessage,
   // 飞书 SDK 和 qrcode 要等依赖装好才能加载
   async loadFeishu() {
     const lark = await import('@larksuiteoapi/node-sdk');
@@ -37,6 +39,17 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   let serviceStarted = false;
   const serviceRunning = () => serviceStarted || d.serviceStatus(root).running;
   const [command, ...rest] = argv;
+  // 服务在跑时，列出停下来等“重试”的项目（电脑重启、服务被关掉时没做完的那一步，或出错停下的）
+  const stuckLines = async fileEnv => {
+    const snapshot = await d.workbenchState(portOf(fileEnv));
+    const projects = snapshot?.projects ?? [];
+    const stuck = projects.filter(p => p.waitingFor === '重试');
+    return [
+      serviceStarted && projects.length ? '告诉用户：团队服务已重新启动；服务停着时在群里 @ 过、点过卡片没反应的，再操作一次就行' : null,
+      stuck.length ? '有没做完的项目：问用户要不要接着做，要的话运行对应的命令（负责的同事会接着做这一步，群里会出现进度卡）' : null,
+      ...stuck.map(p => `   #${p.number} ${p.name}：「${stageNames[p.stage] ?? p.stage}」停下了（${String(p.error).slice(0, 80)}）→ node setup.mjs resume ${p.number}`),
+    ].filter(Boolean);
+  };
   const flag = name => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
   const finish = (code, lines) => {
     const fileEnv = readEnv(envFile);
@@ -75,8 +88,20 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     updateEnv(envFile, values);
     saveProgress(root, { modelOk: false });
     log(`已沿用终端变量 ${found.join('、')}，写入 .env：${Object.keys(values).join('、')}`);
+  } else if (command === 'resume') {
+    const fileEnv = readEnv(envFile);
+    if (!serviceRunning()) return finish(1, ['团队服务没在运行：先运行 node setup.mjs 把它拉起来，再接着做']);
+    const snapshot = await d.workbenchState(portOf(fileEnv));
+    if (!snapshot) return finish(1, [`连不上工作台 ${workbenchOf(fileEnv)}，看 data/service.log`]);
+    const p = snapshot.projects.find(x => x.number === Number(rest[0]));
+    if (!p) return finish(1, [`没有 #${rest[0] ?? ''} 这个项目。运行 node setup.mjs 看哪些项目没做完`]);
+    if (p.waitingFor !== '重试') return finish(1, [`#${p.number} ${p.name} 没有停下，不用接着做（现在：${stageNames[p.stage] ?? p.stage}${p.waitingFor ? `，等用户${p.waitingFor}` : ''}）`]);
+    const name = team.find(r => r.key === p.retryRole)?.name ?? '负责的同事';
+    try { await d.workbenchMessage(portOf(fileEnv), { chatId: p.chatId, role: p.retryRole, text: '重试' }); }
+    catch (error) { return finish(1, [`没能接着做：${error.message}`]); }
+    return finish(0, [`告诉用户：已让${name}接着做 #${p.number} ${p.name}「${stageNames[p.stage] ?? p.stage}」，去飞书群或工作台 ${workbenchOf(fileEnv)} 看进度卡`]);
   } else if (command && !['scan', 'status'].includes(command)) {
-    return finish(1, [`不认识的参数：${command}。可用：node setup.mjs、node setup.mjs scan、node setup.mjs status、node setup.mjs model …、node setup.mjs --use-anthropic-env`]);
+    return finish(1, [`不认识的参数：${command}。可用：node setup.mjs、node setup.mjs scan、node setup.mjs status、node setup.mjs resume <编号>、node setup.mjs model …、node setup.mjs --use-anthropic-env`]);
   }
 
   // 依赖不在、也没在装，就先在后台装：用户回答问题的同时装好
@@ -101,7 +126,11 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     const fileEnv = readEnv(envFile);
     const progress = readProgress(root);
     const stage = nextStage({ env: fileEnv, progress, depsReady: depsOk(), serviceRunning: serviceRunning() });
-    if (command === 'status') return finish(0, [stage === 'done' ? '都好了，不用再做什么' : '运行 node setup.mjs 继续']);
+    if (command === 'status') {
+      if (stage !== 'done') return finish(0, ['运行 node setup.mjs 继续']);
+      const stuck = await stuckLines(fileEnv);
+      return finish(0, stuck.length ? stuck : ['都好了，不用再做什么']);
+    }
 
     if (stage === 'model') {
       const missing = missingModel(fileEnv);
@@ -170,6 +199,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       continue;
     }
     return finish(0, [
+      ...await stuckLines(fileEnv),
       '都好了。告诉用户：',
       '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；之后按卡片提示点按钮',
       progress.ownerSet ? null : progress.joinLink ? `   还不在群里的话，先打开这个链接进群：${progress.joinLink}` : '   还不在群里的话：在飞书里新建一个群，把 3 个机器人拉进来（群设置 → 群机器人 → 添加机器人）',

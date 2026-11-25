@@ -66,3 +66,18 @@ export async function stopService(root, { timeoutMs = 5000 } = {}) {
   rmSync(pidFile, { force: true });
   return { stopped: true };
 }
+
+// 服务在跑时用工作台接口读项目状态、替用户给角色发话（和在飞书群里 @ 它走同一个处理函数）
+export async function workbenchState(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/state`, { signal: AbortSignal.timeout(5000) });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+export async function workbenchMessage(port, { chatId, role, text }) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ chatId, role, text }), signal: AbortSignal.timeout(10000) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `工作台返回 ${res.status}`);
+  return data;
+}

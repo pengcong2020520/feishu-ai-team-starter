@@ -17,7 +17,7 @@ function setupRoot(envText) {
 }
 
 function fakes(over = {}) {
-  const calls = { install: 0, scan: [], group: [], service: 0 };
+  const calls = { install: 0, scan: [], group: [], service: 0, messages: [] };
   let running = false;
   const deps = {
     depsReady: () => true,
@@ -31,6 +31,8 @@ function fakes(over = {}) {
     startService: async () => { calls.service += 1; running = true; return { ok: true, pid: 1 }; },
     portsFree: async () => true,
     pickPort: async start => start,
+    workbenchState: async () => null,
+    workbenchMessage: async (port, message) => { calls.messages.push({ port, ...message }); return { retrying: true }; },
     loadFeishu: async () => ({
       lark: { defaultHttpInstance: {}, LoggerLevel: { error: 0 }, Client: class { constructor(o) { this.appId = o.appId; } } },
       qrcode: {},
@@ -204,4 +206,50 @@ test('建群续跑：把上次保存的群号、群主状态、链接交给建�
   const { deps, calls } = fakes();
   await run(root, [], { deps });
   assert.deepEqual(calls.group[0].existing, { chatId: 'oc_half', ownerSet: false, joinLink: 'https://applink.test/j' });
+});
+
+const STUCK = { projects: [
+  { number: 1, name: '读书笔记', stage: 'done', waitingFor: null, error: null, chatId: 'oc_1', retryRole: null },
+  { number: 2, name: '个人专注力的小应用', stage: 'clarifying', waitingFor: '重试', error: '团队服务重启过，上一步没做完', chatId: 'oc_2', retryRole: 'product' },
+  { number: 3, name: '报名页', stage: 'confirm_design', waitingFor: '确认设计', error: null, chatId: 'oc_3', retryRole: null },
+] };
+const DONE = () => { const root = setupRoot(MODEL + BOTS); saveProgress(root, { modelOk: true, groupReady: true, chatId: 'oc', ownerSet: true }); return root; };
+
+test('服务停了：重跑 setup 拉起服务，提醒停机时的操作要再做一次，列出没做完的项目和接着做的命令', async () => {
+  const { deps, calls } = fakes({ workbenchState: async () => STUCK });
+  const { code, text } = await run(DONE(), [], { deps });
+  assert.equal(code, 0);
+  assert.equal(calls.service, 1);
+  assert.match(text, /团队服务已重新启动；服务停着时在群里 @ 过、点过卡片没反应的，再操作一次就行/);
+  assert.match(text, /#2 个人专注力的小应用：「澄清需求」停下了（团队服务重启过，上一步没做完）→ node setup.mjs resume 2/);
+  assert.doesNotMatch(text, /resume 1|resume 3/);
+});
+
+test('第一次搭好（还没有项目）不说“重新启动”；服务一直在跑也不说', async () => {
+  const fresh = await run(DONE(), [], { deps: fakes({ workbenchState: async () => ({ projects: [] }) }).deps });
+  assert.doesNotMatch(fresh.text, /重新启动|没做完/);
+  const running = await run(DONE(), [], { deps: fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => STUCK }).deps });
+  assert.doesNotMatch(running.text, /重新启动/);
+  assert.match(running.text, /resume 2/);
+  const status = await run(DONE(), ['status'], { deps: fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => STUCK }).deps });
+  assert.match(status.text, /resume 2/);
+  assert.doesNotMatch(status.text, /都好了/);
+});
+
+test('resume：替用户给负责的角色发“重试”；编号不对、没停下、服务没在跑都说明原因', async () => {
+  const root = DONE();
+  const ok = fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => STUCK });
+  const r = await run(root, ['resume', '2'], { deps: ok.deps });
+  assert.equal(r.code, 0);
+  assert.deepEqual(ok.calls.messages, [{ port: 4870, chatId: 'oc_2', role: 'product', text: '重试' }]);
+  assert.match(r.text, /已让AI 产品经理接着做 #2 个人专注力的小应用「澄清需求」/);
+  const waiting = await run(root, ['resume', '3'], { deps: ok.deps });
+  assert.equal(waiting.code, 1);
+  assert.match(waiting.text, /#3 报名页 没有停下，不用接着做（现在：确认设计，等用户确认设计）/);
+  assert.match((await run(root, ['resume', '9'], { deps: ok.deps })).text, /没有 #9 这个项目/);
+  assert.equal(ok.calls.messages.length, 1);
+  const down = await run(root, ['resume', '2'], { deps: fakes().deps });
+  assert.match(down.text, /团队服务没在运行：先运行 node setup\.mjs/);
+  const failed = await run(root, ['resume', '2'], { deps: fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => STUCK, workbenchMessage: async () => { throw new Error('角色无效'); } }).deps });
+  assert.match(failed.text, /没能接着做：角色无效/);
 });
