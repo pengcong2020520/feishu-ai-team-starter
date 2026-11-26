@@ -17,4 +17,5 @@ RUN mkdir -p data workspace .claude-agent-config \
 USER app
 ENV CHROME_PATH=/usr/bin/chromium
 EXPOSE 4870 4871
-CMD ["node", "src/main.mjs"]
+# 管理服务带着团队服务跑，团队服务的输出同时写进 data/service.log
+CMD ["node", "src/admin/main.mjs"]

@@ -4,7 +4,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { isOurProcess } from './proc.mjs';
 
-// 团队服务脱离启动它的进程常驻，不随 AI 助手这一轮对话结束被关
+// 团队服务脱离启动它的进程常驻，不随 AI 助手这一轮对话结束被关。
+// 后台跑的是管理服务（src/admin/main.mjs），由它带起团队服务（src/main.mjs）；旧的 pid 文件里记的是 src/main.mjs，照样认得
 const paths = root => ({ pid: path.join(root, 'data/service.pid'), log: path.join(root, 'data/service.log') });
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
 
@@ -27,7 +28,7 @@ export function serviceStatus(root) {
   return isOurProcess(pid, entry) ? { running: true, pid } : { running: false };
 }
 
-export async function startService(root, { entry = 'src/main.mjs', readyText = '3 个机器人已连上飞书', timeoutMs = 60000, intervalMs = 500 } = {}) {
+export async function startService(root, { entry = 'src/admin/main.mjs', readyText = '3 个机器人已连上飞书', timeoutMs = 60000, intervalMs = 500 } = {}) {
   const current = serviceStatus(root);
   if (current.running) return { ok: true, already: true, pid: current.pid };
   const { pid: pidFile, log } = paths(root);
@@ -55,7 +56,7 @@ export async function startService(root, { entry = 'src/main.mjs', readyText = '
   return { ok: false, pid: child.pid, error: `${timeoutMs / 1000} 秒内没看到“${readyText}”，看 data/service.log` };
 }
 
-export async function stopService(root, { timeoutMs = 5000, kill = (pid, signal) => process.kill(pid, signal) } = {}) {
+export async function stopService(root, { timeoutMs = 10000, kill = (pid, signal) => process.kill(pid, signal) } = {}) {
   const status = serviceStatus(root);
   const pidFile = paths(root).pid;
   if (!status.running) { rmSync(pidFile, { force: true }); return { stopped: false }; }
