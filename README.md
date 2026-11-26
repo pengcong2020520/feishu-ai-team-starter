@@ -1,5 +1,7 @@
 # 飞书 AI 团队 · 起步包
 
+> 本分支是历史上的三个同事教学版本，不包含当前管理员助手、后台管理服务和签字撤销。要运行当前四机器人与工作台，请使用 main 的完整代码及[复现指南](https://github.com/pengcong2020520/feishu-ai-team-starter/blob/main/docs/复现指南.md)。本分支保留从零练习，不代表当前发行版。
+
 用 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 搭一支飞书 AI 团队：AI 产品经理、AI 设计、AI 程序员 3 个同事在飞书群里协作，把一句话需求做成一个能用的网页；另有一个网页工作台，一屏看清所有项目。
 
 这个仓库不是现成的程序，而是一份"让你的 AI 编程助手（Codex 或 Claude Code）帮你搭出来"的起步包：
@@ -19,7 +21,7 @@
 
 ```
 mkdir my-feishu-team && cd my-feishu-team
-git clone https://github.com/pengcong2020520/feishu-ai-team-starter.git .
+git clone -b learn https://github.com/pengcong2020520/feishu-ai-team-starter.git .
 ```
 
 然后在这个目录里打开 Codex 或 Claude Code，照 [docs/动手搭建.md](docs/动手搭建.md) 从提示词 0 开始，一段做完、验收过了再给下一段。
