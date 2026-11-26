@@ -6,7 +6,7 @@ import path from 'node:path';
 export const READY_TEXT = '3 个机器人已连上飞书';
 const tail = text => text.trim().split('\n').slice(-5).join('\n');
 
-export function createSupervisor({ root, entry = 'src/main.mjs', readyText = READY_TEXT, readyMs = 60000, stopMs = 4000, logFile = null, echo = true, onExit = () => {} } = {}) {
+export function createSupervisor({ root, entry = 'src/main.mjs', env = process.env, readyText = READY_TEXT, readyMs = 60000, stopMs = 4000, logFile = null, echo = true, onExit = () => {} } = {}) {
   let child = null;
   let stopping = false;
   let state = { running: false, healthy: false, pid: null, startedAt: null, lastExit: null };
@@ -17,7 +17,7 @@ export function createSupervisor({ root, entry = 'src/main.mjs', readyText = REA
   // 拉起团队服务，等它说“已连上飞书”才算健康；没等到也不杀它，交给调用方决定
   const start = () => new Promise(resolve => {
     if (child) { resolve({ ok: true, already: true, pid: child.pid }); return; }
-    const proc = spawn(process.execPath, [entry], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    const proc = spawn(process.execPath, [entry], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
     child = proc;
     stopping = false;
     state = { running: true, healthy: false, pid: proc.pid, startedAt: new Date().toISOString(), lastExit: state.lastExit };
@@ -38,7 +38,8 @@ export function createSupervisor({ root, entry = 'src/main.mjs', readyText = REA
       if (child === proc) child = null;
       state = { ...state, running: false, healthy: false, pid: null, lastExit: { code, signal, at: new Date().toISOString(), expected } };
       finish({ ok: false, error: tail(seen) || `团队服务退出了（${signal ?? `退出码 ${code}`}）` });
-      if (!expected) onExit(state.lastExit);
+      // 通知里带上最后几行输出（不存进 status，免得到处传）
+      if (!expected) onExit({ ...state.lastExit, output: tail(seen) });
     });
   });
 

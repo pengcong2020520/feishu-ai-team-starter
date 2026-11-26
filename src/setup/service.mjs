@@ -77,8 +77,9 @@ export async function workbenchState(port) {
   } catch { return null; }
 }
 
-export async function workbenchMessage(port, { chatId, role, text }) {
-  const res = await fetch(`http://127.0.0.1:${port}/api/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ chatId, role, text }), signal: AbortSignal.timeout(10000) });
+// via: 'admin' 表示 AI 管理员助手代管理员说的，群里写“AI 管理员助手代你：……”
+export async function workbenchMessage(port, { chatId, role, text, via }) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ chatId, role, text, ...(via ? { via } : {}) }), signal: AbortSignal.timeout(10000) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `工作台返回 ${res.status}`);
   return data;

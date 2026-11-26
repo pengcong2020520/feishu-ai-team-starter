@@ -49,3 +49,8 @@ export async function createTeamGroup({ clients, appIds, team, ownerOpenId, exis
   }
   return { chatId, ownerSet, joinLink };
 }
+
+// 管理员助手建好后私聊管理员报到
+export async function greetAdmin({ client, openId, card }) {
+  await call(client.im.v1.message.create({ params: { receive_id_type: 'open_id' }, data: { receive_id: openId, msg_type: 'interactive', content: JSON.stringify(card) } }));
+}

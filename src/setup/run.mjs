@@ -1,14 +1,15 @@
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { team } from './team.mjs';
+import { admin, team } from './team.mjs';
 import { readEnv, ensureEnv, updateEnv } from './env-file.mjs';
 import { readProgress, saveProgress } from './progress.mjs';
-import { missingModel, missingBots, nextStage } from './state.mjs';
+import { missingModel, missingBots, missingAdmin, nextStage } from './state.mjs';
 import { anthropicEnv, checkModel } from './model.mjs';
 import { depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail } from './install.mjs';
-import { serviceStatus, startService, pickPort, portsFree, workbenchState, workbenchMessage } from './service.mjs';
+import { serviceStatus, startService, stopService, pickPort, portsFree, workbenchState, workbenchMessage } from './service.mjs';
 import { installRetry, registerMissing } from './register.mjs';
-import { createTeamGroup } from './group.mjs';
+import { createTeamGroup, greetAdmin } from './group.mjs';
+import { introCard as adminIntroCard } from '../admin/cards.mjs';
 import { stageNames } from '../flow/stages.mjs';
 
 const portOf = env => Number(env.PREVIEW_PORT || 4870);
@@ -17,12 +18,12 @@ const LABEL = { MODEL_BASE_URL: '接口地址', MODEL_API_KEY: '密钥', MODEL_N
 const MODEL_CMD = '用文件写入工具把密钥原样存成 data/model-key.txt（不要用 shell 命令写），再运行 node setup.mjs model --base-url <地址> --model <模型名> --key-file data/model-key.txt（读完会删掉这个文件）';
 
 const realDeps = {
-  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, pickPort, portsFree, workbenchState, workbenchMessage,
+  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, stopService, pickPort, portsFree, workbenchState, workbenchMessage,
   // 飞书 SDK 和 qrcode 要等依赖装好才能加载
   async loadFeishu() {
     const lark = await import('@larksuiteoapi/node-sdk');
     const { default: qrcode } = await import('qrcode');
-    return { lark, qrcode, installRetry, registerMissing, createTeamGroup };
+    return { lark, qrcode, installRetry, registerMissing, createTeamGroup, greetAdmin };
   },
 };
 
@@ -62,6 +63,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       `${mark(bots === team.length)} 飞书机器人 ${bots}/${team.length}`,
       `${mark(progress.groupReady)} 飞书群「AI 团队」`,
       `${mark(serviceRunning())} 团队服务`,
+      `${mark(!missingAdmin(fileEnv))} AI 管理员助手`,
       '', '== 下一步 ==', ...lines.filter(Boolean)].join('\n'));
     return code;
   };
@@ -122,14 +124,37 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   };
 
   let feishu = null;
+  const SCAN_LINE = '然后运行：node setup.mjs scan —— 它会等到扫完（最长 9 分钟）；把命令超时放宽到 10 分钟，或放到后台运行并查看输出；被打断就重跑，已建成的不用再扫';
+  // 扫码建机器人：每建成一个立即写进 .env；管理员助手建成后私聊扫码的人报到
+  const scan = async roles => {
+    feishu ??= await d.loadFeishu();
+    feishu.installRetry(feishu.lark.defaultHttpInstance, { log });
+    const results = await feishu.registerMissing({
+      lark: feishu.lark, qrcode: feishu.qrcode, roles, qrDir: path.join(root, 'qr'), log,
+      save: async (role, r) => {
+        if (role.key === 'admin') {
+          if (!r.openId) throw new Error('没拿到扫码人的身份（open_id）');
+          updateEnv(envFile, { [`${role.prefix}APP_ID`]: r.appId, [`${role.prefix}APP_SECRET`]: r.appSecret, [`${role.prefix}OPEN_ID`]: r.openId });
+          try { await feishu.greetAdmin({ client: new feishu.lark.Client({ appId: r.appId, appSecret: r.appSecret, loggerLevel: feishu.lark.LoggerLevel.error }), openId: r.openId, card: adminIntroCard() }); }
+          catch (error) { log(`AI 管理员助手的报到消息没发出去（${error.message}），不影响使用`); }
+          return;
+        }
+        updateEnv(envFile, { [`${role.prefix}APP_ID`]: r.appId, [`${role.prefix}APP_SECRET`]: r.appSecret });
+        if (role.key === 'product' && r.openId) saveProgress(root, { ownerOpenId: r.openId });
+      },
+    });
+    return results.filter(r => !r.ok);
+  };
+
   for (let round = 0; round < 10; round += 1) {
     const fileEnv = readEnv(envFile);
     const progress = readProgress(root);
     const stage = nextStage({ env: fileEnv, progress, depsReady: depsOk(), serviceRunning: serviceRunning() });
     if (command === 'status') {
-      if (stage !== 'done') return finish(0, ['运行 node setup.mjs 继续']);
+      if (!['done', 'admin'].includes(stage)) return finish(0, ['运行 node setup.mjs 继续']);
       const stuck = await stuckLines(fileEnv);
-      return finish(0, stuck.length ? stuck : ['都好了，不用再做什么']);
+      const extra = stage === 'admin' ? ['还没建 AI 管理员助手：运行 node setup.mjs 补扫一张码'] : [];
+      return finish(0, stuck.length || extra.length ? [...stuck, ...extra] : ['都好了，不用再做什么']);
     }
 
     if (stage === 'model') {
@@ -157,22 +182,14 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       continue;
     }
     if (stage === 'feishu') {
-      const names = missingBots(fileEnv).map(r => r.name).join('、');
+      // 第一次搭建时 3 个同事和管理员助手一起扫（4 张码）
+      const roles = [...missingBots(fileEnv), ...(missingAdmin(fileEnv) ? [admin] : [])];
       if (command !== 'scan') return finish(0, [
-        `接下来扫码创建飞书机器人（还差：${names}）`,
-        '先告诉用户：马上会在浏览器里弹出二维码页面，请用飞书手机版逐个扫码，并在手机上确认创建（大约 1 分钟）',
-        '然后运行：node setup.mjs scan —— 它会等到扫完（最长 9 分钟）；把命令超时放宽到 10 分钟，或放到后台运行并查看输出；被打断就重跑，已建成的不用再扫',
+        `接下来扫码创建飞书机器人（还差：${roles.map(r => r.name).join('、')}）`,
+        `先告诉用户：马上会在浏览器里弹出二维码页面，请用飞书手机版逐个扫码，并在手机上确认创建（大约 1 分钟）${roles.includes(admin) ? '；AI 管理员助手只在私聊里帮扫码的人照看团队，扫它的人就是管理员' : ''}`,
+        SCAN_LINE,
       ]);
-      feishu ??= await d.loadFeishu();
-      feishu.installRetry(feishu.lark.defaultHttpInstance, { log });
-      const results = await feishu.registerMissing({
-        lark: feishu.lark, qrcode: feishu.qrcode, roles: missingBots(fileEnv), qrDir: path.join(root, 'qr'), log,
-        save: async (role, r) => {
-          updateEnv(envFile, { [`${role.prefix}APP_ID`]: r.appId, [`${role.prefix}APP_SECRET`]: r.appSecret });
-          if (role.key === 'product' && r.openId) saveProgress(root, { ownerOpenId: r.openId });
-        },
-      });
-      const failed = results.filter(r => !r.ok);
+      const failed = await scan(roles);
       if (failed.length) return finish(0, [`还有 ${failed.length} 个没建成：${failed.map(f => `${f.role.name}（${why(f.error)}）`).join('、')}`, '重跑 node setup.mjs scan 会给没建成的出新码，已建成的不用再扫']);
       continue;
     }
@@ -198,13 +215,37 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       log('✓ 团队服务已在后台启动');
       continue;
     }
+    if (stage === 'admin') {
+      if (command !== 'scan') return finish(0, [
+        ...await stuckLines(fileEnv),
+        '接下来扫最后一张码，创建 AI 管理员助手：它只在飞书私聊里帮扫码的人照看团队（看现状、提醒停下的项目、重启服务），扫码的人就是管理员',
+        '先告诉用户：马上会在浏览器里弹出二维码页面，请用飞书手机版扫码，并在手机上确认创建',
+        SCAN_LINE,
+      ]);
+      const failed = await scan([admin]);
+      if (failed.length) return finish(0, [`AI 管理员助手没建成（${why(failed[0].error)}）`, '重跑 node setup.mjs scan 会出一张新码']);
+      // 团队服务要重启一次，管理员助手才会上线；有项目在干活就不打断它
+      const busy = (await d.workbenchState(portOf(fileEnv)))?.projects?.filter(p => p.busy) ?? [];
+      const later = '告诉用户：AI 管理员助手建好了，团队服务重启一次它才会上线；';
+      if (busy.length) return finish(0, [`${later}${busy.map(p => `#${p.number} ${p.name}`).join('、')}正在干活，等这一步做完后运行 npm stop && npm start`]);
+      // 这次刚起的服务却查不到进程（比如沙箱里看不到）：不冒险再起一份，请用户自己重启
+      if (!d.serviceStatus(root).running) return finish(0, [`${later}请用户运行 npm stop && npm start`]);
+      const stopped = await d.stopService(root);
+      if (stopped.denied) return finish(0, [`${later}请用户在自己的终端里进入项目目录运行 npm stop && npm start（助手这里没有权限停止团队服务）`]);
+      const r = await d.startService(root);
+      if (!r.ok) return finish(1, [`团队服务没起来：${r.error}`, '日志在 data/service.log；修好后运行 npm start']);
+      serviceStarted = true;
+      log('✓ 已重启团队服务，AI 管理员助手上线了');
+      continue;
+    }
     return finish(0, [
       ...await stuckLines(fileEnv),
       '都好了。告诉用户：',
       '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；它回一张“要开始做吗？”卡片，点“就按这个开始”才开工，之后按卡片提示点按钮',
       progress.ownerSet ? null : progress.joinLink ? `   还不在群里的话，先打开这个链接进群：${progress.joinLink}` : '   还不在群里的话：在飞书里新建一个群，把 3 个机器人拉进来（群设置 → 群机器人 → 添加机器人）',
       `2. 本机工作台：${workbenchOf(readEnv(envFile))}`,
-      '3. 想改某个角色或技能，直接说（照 AGENTS.md「改角色和技能」改）',
+      '3. 飞书里私聊「AI 管理员助手」：发“状态”看团队现状；项目停下、团队服务出问题时它会私聊提醒',
+      '4. 想改某个角色或技能，直接说（照 AGENTS.md「改角色和技能」改）',
       '停止服务 npm stop；查看状态 npm run status',
     ]);
   }

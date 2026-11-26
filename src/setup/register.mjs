@@ -9,6 +9,9 @@ export const ADDONS = {
   callbacks: { items: ['card.action.trigger'] },
 };
 
+// 管理员助手只在私聊里说话：多要一个读私聊消息的权限
+export const ADMIN_ADDONS = { ...ADDONS, scopes: { tenant: ['im:message', 'im:message:send_as_bot', 'im:message.p2p_msg:readonly'] } };
+
 const NETWORK = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|ECONNABORTED|socket hang up/i;
 
 // SDK 的扫码轮询遇到网络错误直接失败；在它用的 axios 实例上加重试
@@ -30,7 +33,7 @@ export function installRetry(http, { retries = 5, delayMs = 1000, log = () => {}
 }
 
 export async function registerRole({ lark, role, signal, onQr }) {
-  const result = await lark.registerApp({ createOnly: true, signal, appPreset: { name: role.name, desc: role.desc }, addons: ADDONS, onQRCodeReady: onQr });
+  const result = await lark.registerApp({ createOnly: true, signal, appPreset: { name: role.name, desc: role.desc }, addons: role.p2p ? ADMIN_ADDONS : ADDONS, onQRCodeReady: onQr });
   return { appId: result.client_id, appSecret: result.client_secret, openId: result.user_info?.open_id ?? null };
 }
 

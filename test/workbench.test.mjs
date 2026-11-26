@@ -46,7 +46,8 @@ test('工作台读取接口、安全约束和写接口共用编排入口', async
   await writeFile(path.join(root, 'workspace/demo/docs/prd.md'), '# 演示');
   const calls = [];
   const flow = { getState: async () => ({ groups: { group: project } }), getProject: async () => project, handleMessage: async input => { calls.push(input); return { ok: true }; }, handleAction: async input => { calls.push(input); return { toast: { content: '完成' } }; } };
-  const feishu = { listChats: async () => [{ chat_id: 'group', name: '演示' }], sendText: async () => {} };
+  const sent = [];
+  const feishu = { listChats: async () => [{ chat_id: 'group', name: '演示' }], sendText: async (...args) => { sent.push(args); } };
   const recorder = createRecorder(root);
   let server;
   try {
@@ -62,6 +63,11 @@ test('工作台读取接口、安全约束和写接口共用编排入口', async
     assert.equal((await write({ 'Content-Type': 'application/json', 'X-Workbench': '1' }, { chatId: 'group', role: 'designer', text: '你好' })).status, 200);
     assert.equal(calls[0].role, 'designer');
     assert.equal(calls[0].user, '你（工作台）');
+    assert.deepEqual(sent[0], ['group', '来自工作台：你好', 'designer']);
+    // AI 管理员助手代管理员说话：群里写明是它代你
+    assert.equal((await write({ 'Content-Type': 'application/json', 'X-Workbench': '1' }, { chatId: 'group', role: 'developer', text: '重试', via: 'admin' })).status, 200);
+    assert.deepEqual(sent[1], ['group', 'AI 管理员助手代你：重试', 'developer']);
+    assert.equal(calls[1].user, 'AI 管理员助手（代你）');
   } finally { if (server) await server.close(); await rm(root, { recursive: true, force: true }); }
 });
 
