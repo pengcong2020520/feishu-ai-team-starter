@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { classify, createChanges } from '../src/admin/changes.mjs';
 import { createDeploy } from '../src/admin/deploy.mjs';
+import { createAssistant } from '../src/admin/assistant.mjs';
 
 const flush = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -99,6 +100,41 @@ test('线上目录有别人没提交的改动：不上线', async () => {
   assert.match(m.error, /README\.md/);
 });
 
+test('草稿期间线上已更新：提交前拦下，不把别人的新规则覆盖回旧稿，并保留草稿', async () => {
+  const root = repo();
+  const changes = createChanges({ root, runTests: async () => ({ ok: true, output: '' }) });
+  await changes.ensure();
+  edit(root, 'prompts/developer.md', '管理员的新草稿\n');
+  writeFileSync(path.join(root, 'prompts/designer.md'), '别人已上线的新规则\n');
+  git(root, 'add', 'prompts/designer.md');
+  git(root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', '更新设计规则');
+  const before = git(changes.work, 'rev-parse', 'HEAD');
+  const c = await changes.prepare({ title: '只加开发规则', why: '管理员要求' });
+  assert.equal(c.ok, false);
+  assert.match(c.error, /线上代码.*变化.*草稿已保留/);
+  assert.equal(live(root, 'prompts/designer.md'), '别人已上线的新规则\n');
+  assert.equal(readFileSync(path.join(changes.work, 'prompts/developer.md'), 'utf8'), '管理员的新草稿\n');
+  assert.equal(git(changes.work, 'rev-parse', 'HEAD'), before);
+  assert.equal(git(changes.work, 'diff', '--cached', '--name-only'), '');
+});
+
+test('有新草稿时撤销已上线改动：后续提交不能把撤销结果偷偷带回去', async () => {
+  const root = repo();
+  const changes = createChanges({ root, runTests: async () => ({ ok: true, output: '' }) });
+  await changes.ensure();
+  edit(root, 'prompts/designer.md', '临时设计规则\n');
+  const c = await changes.prepare({ title: '临时改规则', why: '验证撤销' });
+  await changes.test(c);
+  await changes.merge(c);
+  edit(root, 'prompts/developer.md', '正在写的新草稿\n');
+  assert.equal((await changes.revert(c)).ok, true);
+  const next = await changes.prepare({ title: '交新草稿', why: '管理员要求' });
+  assert.equal(next.ok, false);
+  assert.equal(live(root, 'prompts/designer.md'), '设计说明\n');
+  assert.equal(readFileSync(path.join(changes.work, 'prompts/developer.md'), 'utf8'), '正在写的新草稿\n');
+  assert.equal(changes.lastChange(), null);
+});
+
 function rig({ busy = [], restartOk = [true], testsOk = true } = {}) {
   const root = repo();
   const sent = [];
@@ -117,6 +153,34 @@ function rig({ busy = [], restartOk = [true], testsOk = true } = {}) {
 }
 const valueOf = (card, label) => card.elements.at(-1).actions.find(a => a.text.content === label).value;
 const text = card => JSON.stringify(card);
+
+test('首次管理员私聊改角色：先准备真实工作副本，模型可以读取修改并提交生效', async () => {
+  const r = rig();
+  const bot = { sendCard: async () => 'om_first', patchCard: async () => {} };
+  const steward = { run: async () => {
+    assert.ok(existsSync(path.join(r.changes.work, '.git')));
+    assert.equal(readFileSync(path.join(r.changes.work, 'prompts/designer.md'), 'utf8'), '设计说明\n');
+    edit(r.root, 'prompts/designer.md', '设计说明\n补充手机触控检查\n');
+    assert.match(await r.deploy.submit({ title: '补充设计规则', why: '首次私聊要求' }), /已生效/);
+    return { ok: true, text: '已改好', stats: {} };
+  } };
+  const assistant = createAssistant({ root: r.root, bot, steward, changes: r.changes });
+  await assistant.onMessage({ text: '请修改设计角色说明' });
+  assert.equal(live(r.root, 'prompts/designer.md'), '设计说明\n补充手机触控检查\n');
+  assert.equal(r.changes.lastChange().level, 'text');
+});
+
+test('只读诊断不创建工作副本', async () => {
+  const r = rig();
+  let ran = false;
+  const assistant = createAssistant({ root: r.root, changes: r.changes,
+    bot: { sendCard: async () => 'om_readonly', patchCard: async () => {} },
+    steward: { run: async ({ readOnly }) => { ran = true; assert.equal(readOnly, true); assert.equal(existsSync(r.changes.work), false); return { ok: true, text: '只查了原因', stats: {} }; } },
+  });
+  await assistant.runSteward('只查不改', '查原因', { readOnly: true });
+  assert.equal(ran, true);
+  assert.equal(existsSync(r.changes.work), false);
+});
 
 test('交文字类改动：测试过了直接生效，私聊发“改好了”卡带撤销按钮', async () => {
   const r = rig();
