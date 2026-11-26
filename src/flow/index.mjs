@@ -254,32 +254,48 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
         void patchProgress();
       } }); }
     finally { clearInterval(ticker); clearTimeout(pending); completed = true; live.delete(p.chatId); }
-    const outcome = result?.ok ? '✅ 已完成' : result?.stopped ? '⏹ 已停下' : '⚠️ 没做完';
-    if (progressId) await delivery.patchCard(progressId, progressCard({ title, task, steps, guides, stats: result?.stats ?? {}, done: true, ok: Boolean(result?.ok), outcome }), role, p.chatId);
+    let hasPrd = false, questions, report, deliveryError;
+    // SDK 正常返回只代表这一轮结束，文件契约通过后才能告诉用户“已完成”。
+    if (result?.ok) {
+      try {
+        if (stage === 'clarifying') {
+          hasPrd = await exists(path.join(dir, 'docs/prd.md'));
+          if (!hasPrd && round >= 3) throw checkFailed(['docs/prd.md：第 3 轮必须写出 PRD']);
+          const check = await (hasPrd ? validatePrd(dir) : validateQuestions(dir));
+          if (!check.ok) throw checkFailed(check.errors);
+          if (!hasPrd) {
+            questions = JSON.parse(await readFile(path.join(dir, 'docs/questions.json'), 'utf8'));
+            if (questions.round !== round) throw checkFailed([`docs/questions.json.round 应为 ${round}`]);
+          }
+        } else {
+          const check = await ({ revise_prd: validatePrd, designing: validateDesign, revise_design: validateDesign,
+            building: validateSite, revise_build: validateSite, walkthrough: validateWalkthrough })[stage](dir);
+          if (!check.ok) throw checkFailed(check.errors);
+          if (stage === 'walkthrough') {
+            report = JSON.parse(await readFile(path.join(dir, 'design/walkthrough.json'), 'utf8'));
+            if (report.round !== round) throw checkFailed([`design/walkthrough.json.round 应为 ${round}`]);
+          }
+        }
+      } catch (error) { deliveryError = error; }
+    }
+    const delivered = Boolean(result?.ok) && !deliveryError;
+    const outcome = delivered ? '✅ 已完成' : result?.stopped ? '⏹ 已停下' : '⚠️ 没做完';
+    if (progressId) await delivery.patchCard(progressId, progressCard({ title, task, steps, guides, stats: result?.stats ?? {}, done: true, ok: delivered, outcome }), role, p.chatId);
     const process = { reads: reads.size, writes: writes.size, stats: result?.stats };
     if (result?.stopped) { const who = p.stoppedBy ?? '你'; p.stoppedBy = null; throw new StepError(`${who}让 ${roles[role].name}停下了这一步`, { kind: 'stopped' }); }
     if (result?.timedOut) throw new StepError(`${roles[role].name}这一步超过 ${timeLimits[stage]} 分钟还没做完，已经停下`, { kind: 'timeout', detail: `${roles[role].name}执行超时：${result.error}` });
     if (!result?.ok) throw new StepError(`${roles[role].name}这一步没做完：${shorten(result?.error ?? '没有返回结果', 30)}`, { kind: 'agent', detail: `${roles[role].name}执行失败：${result?.error ?? '没有返回结果'}` });
     if (stage !== 'walkthrough' && result.sessionId) p.sessions[role] = result.sessionId;
+    if (deliveryError) throw deliveryError;
     if (stage === 'clarifying') {
-      if (await exists(path.join(dir, 'docs/prd.md'))) {
-        const check = await validatePrd(dir);
-        if (!check.ok) throw checkFailed(check.errors);
+      if (hasPrd) {
         await transition(p, 'confirm_prd');
         await issueCard(p, result.text || '请确认 PRD：docs/prd.md', 'confirm_prd', process);
       } else {
-        if (round >= 3) throw checkFailed(['docs/prd.md：第 3 轮必须写出 PRD']);
-        const check = await validateQuestions(dir);
-        if (!check.ok) throw checkFailed(check.errors);
-        const questions = JSON.parse(await readFile(path.join(dir, 'docs/questions.json'), 'utf8'));
-        if (questions.round !== round) throw checkFailed([`docs/questions.json.round 应为 ${round}`]);
         p.questionRound = round;
         await issueCard(p, questions, 'clarifying');
       }
     } else {
-      const check = await ({ revise_prd: validatePrd, designing: validateDesign, revise_design: validateDesign,
-        building: validateSite, revise_build: validateSite, walkthrough: validateWalkthrough })[stage](dir);
-      if (!check.ok) throw checkFailed(check.errors);
       if (stage === 'revise_prd') { await transition(p, 'confirm_prd'); await issueCard(p, result.text || '请再次确认 PRD：docs/prd.md', 'confirm_prd', process); }
       if (stage === 'designing' || stage === 'revise_design') { await transition(p, 'confirm_design'); await issueCard(p, result.text || '请确认线框与主题', 'confirm_design', process); }
       if (stage === 'building' || stage === 'revise_build') {
@@ -289,8 +305,6 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
         p.walkthroughDetail = null;
       }
       if (stage === 'walkthrough') {
-        const report = JSON.parse(await readFile(path.join(dir, 'design/walkthrough.json'), 'utf8'));
-        if (report.round !== round) throw checkFailed([`design/walkthrough.json.round 应为 ${round}`]);
         p.walkthroughRound = round;
         await transition(p, 'accept');
         await issueCard(p, `${report.conclusion}：${report.summary}`, 'accept', process);
@@ -476,9 +490,10 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     // 干活中也能点：进度卡和排队卡上的“停下”、排队卡上的“现在引导”
     const queued = mine ? p.queued?.find(item => item.cardId === value?.cardId) : null;
     if (mine && p.busy && action === 'stop' && (queued || value.cardId === p.progressCardId)) {
+      if (queued) p.queued = p.queued.filter(item => item !== queued);
       await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
       if (queued) {
-        p.queued = p.queued.filter(item => item !== queued); await save();
+        await save();
         await closeCard(chatId, queued.messageId, queuedTitle(queued.role), `✓ ${actor}点了“停下这一步”`, queued.role);
       }
       return toast(await stopStep(p, actor) ? '正在停下' : '这一步正在收尾，停不下来了');
@@ -486,8 +501,9 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     if (queued && p.busy && action === 'steer') {
       const entry = live.get(chatId);
       if (entry?.role === queued.role && entry.control.steer?.(queued.text)) {
+        p.queued = p.queued.filter(item => item !== queued);
         await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
-        p.queued = p.queued.filter(item => item !== queued); await save();
+        await save();
         entry.guide(queued.text);
         await closeCard(chatId, queued.messageId, queuedTitle(queued.role), `↪ 已插进这一步：${queued.text}`, queued.role);
         return toast('已插进这一步');
@@ -496,13 +512,14 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     }
     // 结束确认卡（干活中点“停下并结束”：先停下，这一步收尾后结束）
     if (mine && p.endCardId && value.cardId === p.endCardId && p.busy && ['end', 'keep'].includes(action)) {
+      p.endCardId = null;
+      if (action === 'end') p.ending = actor;
       await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
       if (action === 'keep') {
         await closeCard(chatId, p.endMessageId, 'AI 产品经理 · 结束这个项目？', `✓ ${actor}选择继续做`, 'product');
         p.endCardId = null; p.endMessageId = null; await save();
         return toast('继续做');
       }
-      p.ending = actor;
       await closeCard(chatId, p.endMessageId, 'AI 产品经理 · 结束这个项目？', `✓ ${actor}点了“停下并结束”，这一步停下后结束`, 'product');
       p.endCardId = null; p.endMessageId = null; await save();
       const entry = live.get(chatId);
@@ -512,6 +529,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     const ours = p && p.id === value?.projectId && p.stage === value?.stage && !p.busy;
     // 停下卡：重试或结束项目
     if (ours && p.error && p.stuckCardId && value.cardId === p.stuckCardId && ['retry', 'end'].includes(action)) {
+      p.stuckCardId = null; // 先消费按钮，再记录/更新飞书，避免同时重试或结束两次。
       await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
       if (action === 'retry') { await retry(p, actor); return toast('已重试'); }
       await endProject(p, actor);
@@ -519,6 +537,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     }
     // 结束确认卡
     if (ours && p.endCardId && value.cardId === p.endCardId && ['end', 'keep'].includes(action)) {
+      p.endCardId = null;
       await recorder?.add(chatId, { kind: 'action_result', action, accepted: true, value });
       if (action === 'end') { await endProject(p, actor); return toast('项目已结束'); }
       await closeCard(chatId, p.endMessageId, 'AI 产品经理 · 结束这个项目？', `✓ ${actor}选择继续做`, 'product');
@@ -529,6 +548,8 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     if (!ours || p.error || p.cardId !== value?.cardId) return stale(chatId, p, value);
     if (p.stage === 'clarifying' && action === 'answer') {
       const questions = JSON.parse(await readFile(path.join(projectDir(p), 'docs/questions.json'), 'utf8'));
+      // 读文件期间另一份提交可能已消费这张卡；重新核对，再同步清卡并派活。
+      if (state.groups[chatId] !== p || p.busy || p.stage !== value.stage || p.cardId !== value.cardId) return stale(chatId, p, value);
       const answers = [];
       for (const q of questions.questions) {
         const selected = formValue[q.id] ?? String(q.recommended);

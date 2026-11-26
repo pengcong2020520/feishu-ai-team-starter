@@ -99,7 +99,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode, contro
 
 | 选项 | 取值 |
 |---|---|
-| `systemPrompt` | `{ type: 'custom', prompt: shared.md + 角色说明 }`，每次运行重新读文件 |
+| `systemPrompt` | `{ type: 'custom', prompt: shared.md + 角色说明 + 本次调用模式 }`，每次运行重新读文件；模式由代码明确是只读群聊还是已经确认的正式派活，防止开工后再次只提议 start |
 | `tools` | `['Read', 'Write', 'Edit', 'Glob', 'Skill']`，不给命令行；不列 `Skill` 模型就看不到技能 |
 | `plugins` | `[{ type: 'local', path: 'team-skills 目录的绝对路径' }]` |
 | `skills` | 这个角色的技能，如 `['team:clarify', 'team:prd-spec', 'team:spec-checklist']` |
@@ -230,7 +230,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode, contro
 - 一个持续的会话：会话号存在 `data/admin/session.json`，管理服务重启后接着用，上下文长了靠 SDK 自动压缩；没有多会话、没有"新话题"。一次只做一件事：做事时进度卡和角色干活时一样（一行在做什么 + [停下]），管理员再说的话以 `priority: 'now'` 插进当前这一步（进度卡多一行"↪ 你插话：……"），插不进去的排队；做完把进度卡改成回复 + 用时和 token。每次最多 15 分钟。
 - 选项：`systemPrompt` 读 `src/admin/prompt.md`；`tools` 是 `['Read', 'Glob', 'Grep', 'Write', 'Edit']`，没有命令行；`mcpServers` 是 `createSdkMcpServer({ name: 'admin', alwaysLoad: true, tools })`（参数用 zod 写）；`cwd` 是仓库根目录；`settingSources: []`；`env` 和 `runAgent` 一样只传模型变量；`maxTurns` 60。
 - 看：整个仓库能读，`.env*`、`data/model-key.txt`、`.claude-agent-config/`、`qr/` 拒绝；Grep 不能从根目录或 `data/` 本身搜，必须指定更具体的子目录。改：Write、Edit 只能写工作副本 `.admin-work/`（`git worktree`，已在 `.gitignore`），而且只能是下面允许改的地方；"看看原因"时连自定义工具也只放行 `team_status`、`ask_colleague`。
-- 工具（MCP，`mcp__admin__*`）：`team_status` 看现状；`ask_colleague` 用某个角色的对话模式在项目目录里只读回答，答案只给管家；`tell_colleague` 代管理员在群里对角色说话（工作台 `POST /api/message`，`via: 'admin'`）；`press_button` 代点关口的确认或打回（工作台 `POST /api/action`，只接受管理员本次运行亲口说过且至少 2 字的原话片段；诊断和测试交回无管理员原话，不能代点）；`submit_change` 交改动；`restart_team` 重启（有项目在干活时拒绝）；`revert_change` 撤销。
+- 工具（MCP，`mcp__admin__*`）：`team_status` 看现状；`ask_colleague` 用某个角色的对话模式在项目目录里只读回答，答案只给管家；`tell_colleague` 代管理员在群里对角色说话（工作台 `POST /api/message`，`via: 'admin'`）；`press_button` 代点关口的确认或打回（工作台 `POST /api/action`，只接受最新一条完整且明确的短指令，如“确认 #3 设计”“打回 #3 网页”；动作、项目、关口须匹配，一条消息只能代点一次；多个项目在等同类关口时须带编号；诊断和测试交回无管理员原话，不能代点）；`submit_change` 交改动；`restart_team` 重启（有项目在干活时拒绝）；`revert_change` 撤销。
 - 改动分级（`changes.mjs`，代码算实际改动的文件，不信模型说的）：只动 `prompts/`、`team-skills/`、`docs/` 是文字类；动了 `src/`、`web/`、`test/` 是代码类；禁区 `src/flow/stages.mjs`、`src/agents/run.mjs`、`setup.mjs`、`src/setup/`、`.env*`、`src/admin/`、`package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml`、`.github/`、`data/`、`workspace/`，以及没列为能改的地方（如 `README.md`、`scripts/`），碰到一个整次作废、工作副本清空，管家改写一段开发任务交给管理员。
 - 文字类：工作副本里压成一个提交（作者"AI 管理员助手"，信息"管理员助手：……"）→ 跑测试 → 线上目录 `git merge --ff-only` → 私聊"改好了"卡 [撤销这次改动]。不重启，同事下次干活就用上。
 - 代码类：发签字卡（改了什么、为什么、改动文件、怎么撤销）[上线][不要]。**点"上线"后才跑测试**：模型写的代码（包括测试）在管理员同意之前一行都不执行。测试过了 → 有项目在干活就等它这一步做完（巡检时再上线）→ 快进合并 → 重启团队服务 → 60 秒内连上飞书且工作台接口能访问才算健康；不健康自动 `git revert` 再重启，撤销失败必须说明线上仍是这次改动并提醒团队服务停了。签字只对那一个提交有效：之后工作副本又变了，旧卡作废。

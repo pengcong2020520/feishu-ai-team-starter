@@ -13,6 +13,22 @@ const reply = text => ({ content: [{ type: 'text', text }] });
 const fail = text => ({ content: [{ type: 'text', text }], isError: true });
 const label = p => `#${p.number}「${p.name}」`;
 
+// 代点属于关口授权：只识别完整、明确的短指令，不从自由文本里截取“确认”二字。
+function gateConsent(text) {
+  let command = text.normalize('NFKC').replace(/\s+/g, '').replace(/[。!！]+$/, '');
+  command = command.replace(/^(?:设计|网页|页面|PRD|需求)?(?:没问题|没有问题)[,，;；。]/i, '');
+  command = command.replace(/^(?:请(?:你)?(?:帮我|替我)?|帮我|替我|我)/, '');
+  const targets = [...command.matchAll(/(?:项目#?|#)([1-9]\d*)(?:的)?/g)];
+  if (targets.length > 1) return null;
+  command = command.replace(/(?:项目#?|#)([1-9]\d*)(?:的)?/g, '');
+  const match = command.match(/^(验收通过|确认|通过|打回)(PRD|需求|设计|网页|页面)?$/i);
+  if (!match) return null;
+  const subject = match[2]?.toLowerCase();
+  if (match[1] === '验收通过' && subject && !['网页', '页面'].includes(subject)) return null;
+  const stage = match[1] === '验收通过' ? 'accept' : ({ prd: 'confirm_prd', '需求': 'confirm_prd', '设计': 'confirm_design', '网页': 'accept', '页面': 'accept' })[subject];
+  return { action: match[1] === '打回' ? 'reject' : 'confirm', stage, project: targets[0] ? Number(targets[0][1]) : null };
+}
+
 export function statusText({ service, snapshot, changes }) {
   const lines = [serviceLine(service)];
   if (!snapshot) lines.push('读不到项目（工作台接口连不上）');
@@ -34,6 +50,7 @@ export function statusText({ service, snapshot, changes }) {
 }
 
 export function buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords = () => [] }) {
+  const usedConsents = new WeakMap(); // 每次管家运行有独立的原话数组；一条消息只授权一次代点。
   const findProject = async number => {
     const snapshot = await workbench.state();
     if (!snapshot) throw new Error('团队服务没在运行，读不到项目');
@@ -74,16 +91,31 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       return reply(`已代管理员对${roles[role].name}说：“${text}”。${what}。`);
     })),
 
-    tool('press_button', '代管理员点关口卡片上的按钮（确认 PRD、确认设计、验收时的“确认”或“打回”）。只有管理员明确说了要确认或打回时才能用，admin_words 填管理员的原话。', {
+    tool('press_button', '代管理员点关口的确认或打回。只接受最新完整的明确指令，如“确认 #3 设计”“打回 #3 网页”“验收通过 #3”。多个项目等确认时必须带项目编号；admin_words 不可截取片段。', {
       project: z.number().int(),
       action: z.enum(['confirm', 'reject']),
-      admin_words: z.string().min(1).describe('管理员要你这样做的原话'),
+      admin_words: z.string().min(1).describe('管理员最新一条消息的完整原话，不可截取或改写'),
     }, guard(async ({ project, action, admin_words }) => {
       const words = admin_words?.trim();
-      if (!words || [...words].length < 2 || !adminWords().some(said => said.includes(words))) return fail('管理员这次没说过这句话，不能代点。先问管理员。');
-      const p = await findProject(project);
+      const originals = adminWords();
+      const consentIndex = originals.length - 1;
+      if (!words || [...words].length < 2 || originals.at(-1)?.trim() !== words) return fail('管理员这次没说过这句话，不能代点。必须引用最新一条完整原话。');
+      const consent = gateConsent(words);
+      if (!consent || consent.action !== action) return fail('这句话没有明确授权这个动作，不能代点。请管理员点正式卡片，或发“确认 #3 设计”“打回 #3 网页”这样的完整指令。');
+      const snapshot = await workbench.state();
+      if (!snapshot) return fail('团队服务没在运行，读不到项目');
+      const p = snapshot.projects.find(x => x.number === project);
+      if (!p) return fail(`没有 #${project} 这个项目`);
       const role = gateRole(p.stage);
       if (!role || p.busy || p.error || !p.cardId) return fail(`${label(p)} 现在在「${stageNames[p.stage] ?? p.stage}」，不在等人确认的关口，没有按钮可点`);
+      if ((consent.project !== null && consent.project !== project) || (consent.stage && consent.stage !== p.stage)) return fail('原话指定的项目或关口与要点的按钮不一致，不能代点。');
+      const eligible = snapshot.projects.filter(x => gateRole(x.stage) && !x.busy && !x.error && x.cardId && (!consent.stage || x.stage === consent.stage));
+      if (consent.project === null && eligible.length !== 1) return fail('有多个项目等确认，请管理员在指令中写明项目编号，不能代选。');
+      if (adminWords() !== originals || originals.length - 1 !== consentIndex || originals.at(-1)?.trim() !== words) return fail('管理员的指令已经更新，不能再按之前的话代点。');
+      const used = usedConsents.get(originals) ?? new Set();
+      if (used.has(consentIndex)) return fail('这条指令已经用于代点，不能重复使用；下一关需要新的明确指令。');
+      used.add(consentIndex);
+      usedConsents.set(originals, used);
       const result = await workbench.action({ chatId: p.chatId, role, value: { action, stage: p.stage, projectId: p.id, cardId: p.cardId }, via: 'admin' });
       if (result.toast?.content !== '已收到操作') return fail(`没点成：${result.toast?.content ?? '请看最新的项目状态'}`);
       const buttons = { confirm_prd: ['确认 PRD', '打回 PRD', 'AI 设计开始画线框', 'AI 产品经理'], confirm_design: ['确认设计', '打回设计', 'AI 程序员会开始做网页', 'AI 设计'], accept: ['验收通过', '打回网页', '项目完成', 'AI 程序员'] };

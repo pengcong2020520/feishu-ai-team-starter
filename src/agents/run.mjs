@@ -154,8 +154,12 @@ export function createRunAgent(queryImpl = query) {
       }
       const shared = await readFile(path.join(root, 'prompts/shared.md'), 'utf8');
       const rolePrompt = await readFile(path.join(root, 'prompts', roles[role].promptFile), 'utf8');
+      // 调用方已经决定是聊天还是派活，不能让模型从需求措辞猜模式。
+      const modePrompt = chat
+        ? '本次是群聊对话：只读、不写文件，按结构化格式返回 reply 和 proposal。'
+        : '本次是已获确认的正式任务，编排已经派你开工。请按角色说明调用技能并实际写出这一步要求的文件；产品经理澄清时，信息不足就写问题文件，信息充分就交付 PRD 及配套文件。不要再次提议 start、等待开工按钮或仅口头承诺。最后只简述已交付的内容。';
       const options = {
-        systemPrompt: { type: 'custom', prompt: `${shared}\n\n${rolePrompt}` },
+        systemPrompt: { type: 'custom', prompt: `${shared}\n\n${rolePrompt}\n\n## 本次调用\n${modePrompt}` },
         tools: [...allowed],
         ...(chat ? { outputFormat: { type: 'json_schema', schema: chatSchema } } : { plugins: [{ type: 'local', path: path.join(root, 'team-skills') }], skills: [...roles[role].skills] }),
         canUseTool: (tool, input) => permissionFor(role, cwd, tool, input, allowed),

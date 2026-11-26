@@ -142,7 +142,7 @@ function toolRig(words = [], snapshot = SNAP) {
   const runAgent = async args => { calls.agent.push(args); return { ok: true, structured: { reply: '线框按 PRD 画了 4 屏' } }; };
   const supervisor = { status: () => ({ running: true, healthy: true, startedAt: new Date().toISOString() }) };
   const tools = Object.fromEntries(buildTools({ supervisor, workbench, changes, deploy, runAgent, root: '/repo', adminWords: () => words }).map(t => [t.name, t]));
-  return { tools, calls };
+  return { tools, calls, workbench };
 }
 const out = r => r.content[0].text;
 
@@ -169,11 +169,12 @@ test('管家的工具：看现状、问同事（只读）、代你说话、只�
 });
 
 test('代点只接受本次管理员原话，按关口说明按钮和下一步', async () => {
-  const words = ['设计没问题，确认', '颜色太暗了，打回设计'];
+  const words = ['设计没问题，确认'];
   const { tools, calls } = toolRig(words);
   const act = (action, admin_words) => tools.press_button.handler({ project: 3, action, admin_words });
-  assert.match(out(await act('confirm', '确认')), /已代你点了“确认设计”。AI 程序员会开始做网页/);
-  assert.match(out(await act('reject', '颜色太暗了，打回设计')), /已代你点了“打回设计”。这只是退回修改，修改意见还没发出去/);
+  assert.match(out(await act('confirm', '设计没问题，确认')), /已代你点了“确认设计”。AI 程序员会开始做网页/);
+  words.push('打回设计');
+  assert.match(out(await act('reject', '打回设计')), /已代你点了“打回设计”。这只是退回修改，修改意见还没发出去/);
   assert.equal(calls.action.length, 2);
   for (const admin_words of ['确', '请上线', '  ']) {
     const r = await act('confirm', admin_words);
@@ -185,10 +186,60 @@ test('代点只接受本次管理员原话，按关口说明按钮和下一步',
     ['accept', '验收通过', '打回网页', '项目完成'],
   ]) {
     const snapshot = { projects: [{ ...SNAP.projects[0], stage }] };
-    const gate = toolRig(['我确认', '打回', '修改这里'], snapshot).tools.press_button;
+    const current = ['我确认'];
+    const gate = toolRig(current, snapshot).tools.press_button;
     assert.match(out(await gate.handler({ project: 3, action: 'confirm', admin_words: '我确认' })), new RegExp(`已代你点了“${confirm}”。${next}`));
+    current.push('打回');
     assert.match(out(await gate.handler({ project: 3, action: 'reject', admin_words: '打回' })), new RegExp(`已代你点了“${reject}”。这只是退回修改`));
   }
+});
+
+test('代点拒绝截取、否定、条件句、反向动作、旧授权和错项目关口', async () => {
+  const cases = [
+    [['先不要确认，只改文案'], 'confirm', '确认'],
+    [['先不要确认，只改文案'], 'confirm', '先不要确认，只改文案'],
+    [['帮我看看设计稿的颜色'], 'confirm', '帮我看看设计稿的颜色'],
+    [['设计没问题，确认'], 'reject', '设计没问题，确认'],
+    [['如果没有问题就确认设计'], 'confirm', '如果没有问题就确认设计'],
+    [['说明一下“确认设计”'], 'confirm', '说明一下“确认设计”'],
+    [['确认设计', '先别确认'], 'confirm', '确认设计'],
+    [['确认 #4 设计'], 'confirm', '确认 #4 设计'],
+    [['确认 #3 PRD'], 'confirm', '确认 #3 PRD'],
+  ];
+  for (const [words, action, admin_words] of cases) {
+    const { tools, calls } = toolRig(words);
+    assert.equal((await tools.press_button.handler({ project: 3, action, admin_words })).isError, true, admin_words);
+    assert.equal(calls.action.length, 0, admin_words);
+  }
+  const multiple = { projects: [SNAP.projects[0], { ...SNAP.projects[0], id: 'p5', number: 5, chatId: 'oc_5' }] };
+  const words = ['确认设计'];
+  const { tools, calls } = toolRig(words, multiple);
+  assert.equal((await tools.press_button.handler({ project: 3, action: 'confirm', admin_words: words.at(-1) })).isError, true);
+  words.push('请确认 #3 的设计');
+  assert.equal((await tools.press_button.handler({ project: 3, action: 'confirm', admin_words: words.at(-1) })).isError, undefined);
+  assert.equal(calls.action.length, 1);
+  words.push('打回项目3的设计');
+  assert.equal((await tools.press_button.handler({ project: 3, action: 'reject', admin_words: words.at(-1) })).isError, undefined);
+  assert.equal(calls.action.length, 2);
+});
+
+test('一条管理员指令只能代点一次，读取项目期间的新指令可撤销旧授权', async () => {
+  const words = ['确认设计'];
+  const { tools, calls } = toolRig(words);
+  const input = { project: 3, action: 'confirm', admin_words: '确认设计' };
+  const results = await Promise.all([tools.press_button.handler(input), tools.press_button.handler(input)]);
+  assert.equal(results.filter(x => !x.isError).length, 1);
+  assert.equal(calls.action.length, 1);
+  assert.equal((await tools.press_button.handler(input)).isError, true);
+  words.push('确认设计');
+  assert.equal((await tools.press_button.handler(input)).isError, undefined);
+  assert.equal(calls.action.length, 2);
+
+  const revocable = ['确认设计'];
+  const rig = toolRig(revocable);
+  rig.workbench.state = async () => { revocable.push('先不要确认'); return SNAP; };
+  assert.equal((await rig.tools.press_button.handler(input)).isError, true);
+  assert.equal(rig.calls.action.length, 0);
 });
 
 test('同事工具按编排返回逐一告诉管理员', async () => {
@@ -272,6 +323,25 @@ test('管家在忙：管理员的话插进这一步，“停下”让它停；�
   assert.equal((await d.assistant.onAction({ value, messageId: 'om_1' })).toast.content, '正在查原因');
 });
 
+test('文字或按钮停下管家时，先撤销尚未使用的代点原话', async () => {
+  for (const method of ['text', 'button']) {
+    let observed;
+    const r = assistantRig({ run: async ({ control }) => new Promise(resolve => {
+      control.stop = async () => { observed = r.assistant.adminWords().length; resolve({ ok: false, stopped: true }); };
+    }) });
+    const work = r.assistant.onMessage({ text: '确认设计' });
+    await flush();
+    assert.equal(r.assistant.adminWords().length, 1);
+    if (method === 'text') await r.assistant.onMessage({ text: '停下' });
+    else {
+      const value = r.sent[0].elements.at(-1).actions.find(a => a.value.action === 'stop_steward').value;
+      await r.assistant.onAction({ value, messageId: 'om_1' });
+    }
+    await work;
+    assert.equal(observed, 0, method);
+  }
+});
+
 test('管家失败只给人看固定中文说明，原始错误写日志；排队和停下有回应', async () => {
   let release;
   const dir = root();
@@ -330,6 +400,6 @@ test('查原因失败或被停下后仍能重新查', async () => {
 test('角色说明写明签字后测试、打回后发意见和中文回复', () => {
   const prompt = readFileSync('src/admin/prompt.md', 'utf8');
   assert.match(prompt, /代码类先发签字卡，管理员点“上线”之后才跑测试/);
-  assert.match(prompt, /打回”只是退回修改，接着要用 `tell_colleague`/);
+  assert.match(prompt, /打回”只是退回修改[^\n]*`tell_colleague`/);
   assert.match(prompt, /不要出现提交编号、英文标识/);
 });
