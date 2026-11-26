@@ -92,6 +92,9 @@ export function createChanges({ root, runTests: runTestsImpl } = {}) {
       await api.ensure();
       if (state.pending && ['testing', 'waiting', 'going'].includes(state.pending.status)) return { ok: false, error: `上一次改动「${state.pending.title}」正在${state.pending.status === 'testing' ? '跑测试' : '等上线'}，等它处理完再交` };
       const head = await liveHead();
+      // 草稿必须基于当前线上代码；不能把旧副本的整棵树压到新的线上提交上，覆盖别人的更新或撤销结果。
+      const basedOnLive = await git(work, ['merge-base', '--is-ancestor', head, 'HEAD']);
+      if (basedOnLive.code) return { ok: false, error: '线上代码在草稿准备期间发生了变化。草稿已保留，没有提交或上线；请让本机的 AI 编程助手把草稿合并到当前代码后再提交。' };
       await must(work, ['add', '-A']);
       await must(work, ['reset', '-q', '--soft', head]);
       const files = (await must(work, ['diff', '--cached', '--name-only', head])).split('\n').filter(Boolean);

@@ -1,5 +1,6 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { cardView } from './workbench/recorder.mjs';
+import { createFeishuLogger } from './feishu-logger.mjs';
 
 const names = ['product', 'designer', 'developer'];
 const err = e => {
@@ -32,7 +33,8 @@ export const timed = (promise, ms, what) => {
 };
 
 export function createFeishu({ credentials, onMessage, onAction, recorder, logger = console, uploadMs = 60000 }) {
-  const clients = Object.fromEntries(names.map(role => [role, new Lark.Client({ ...credentials[role], loggerLevel: Lark.LoggerLevel.error })]));
+  const sdkLogger = createFeishuLogger(logger);
+  const clients = Object.fromEntries(names.map(role => [role, new Lark.Client({ ...credentials[role], logger: sdkLogger })]));
   const sockets = [];
   const ids = new Map();
   const seen = new Set();
@@ -77,7 +79,7 @@ export function createFeishu({ credentials, onMessage, onAction, recorder, logge
       for (const role of names) {
         const bot = await call(() => clients[role].request({ method: 'GET', url: '/open-apis/bot/v3/info' }));
         ids.set(role, bot.bot?.open_id ?? bot.data?.bot?.open_id);
-        const dispatcher = new Lark.EventDispatcher({}).register({
+        const dispatcher = new Lark.EventDispatcher({ logger: sdkLogger }).register({
           'im.message.receive_v1': async data => {
             try {
               const m = data.message ?? {};
@@ -108,7 +110,7 @@ export function createFeishu({ credentials, onMessage, onAction, recorder, logge
             catch (e) { logger.error(err(e).message); return { toast: { type: 'error', content: '操作失败，请查看服务日志' } }; }
           },
         });
-        const socket = new Lark.WSClient({ ...credentials[role], loggerLevel: Lark.LoggerLevel.error });
+        const socket = new Lark.WSClient({ ...credentials[role], logger: sdkLogger });
         await socket.start({ eventDispatcher: dispatcher });
         sockets.push(socket);
       }

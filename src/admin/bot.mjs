@@ -1,9 +1,11 @@
 // AI 管理员助手的长连接：只在私聊里、只听管理员一个人（扫第 4 张码的人）
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { withRetry } from '../feishu.mjs';
+import { createFeishuLogger } from '../feishu-logger.mjs';
 
 export function createAdminBot({ appId, appSecret, adminOpenId, onMessage, onAction, logger = console, lark = Lark }) {
-  const client = new lark.Client({ appId, appSecret, loggerLevel: lark.LoggerLevel.error });
+  const sdkLogger = createFeishuLogger(logger);
+  const client = new lark.Client({ appId, appSecret, logger: sdkLogger });
   const seen = new Set();
   let socket = null;
   const create = (type, id, msgType, content) => withRetry(() => client.im.v1.message.create({ params: { receive_id_type: type }, data: { receive_id: id, msg_type: msgType, content: JSON.stringify(content) } })).then(r => r.data?.message_id);
@@ -35,8 +37,8 @@ export function createAdminBot({ appId, appSecret, adminOpenId, onMessage, onAct
     async start() {
       // 先查一次机器人信息：凭证不对在这里就报出来
       await withRetry(() => client.request({ method: 'GET', url: '/open-apis/bot/v3/info' }));
-      socket = new lark.WSClient({ appId, appSecret, loggerLevel: lark.LoggerLevel.error });
-      await socket.start({ eventDispatcher: new lark.EventDispatcher({}).register(api.handlers) });
+      socket = new lark.WSClient({ appId, appSecret, logger: sdkLogger });
+      await socket.start({ eventDispatcher: new lark.EventDispatcher({ logger: sdkLogger }).register(api.handlers) });
     },
     close() { socket?.close(); },
   };

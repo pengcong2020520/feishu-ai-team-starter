@@ -11,6 +11,7 @@ import { installRetry, registerMissing } from './register.mjs';
 import { createTeamGroup, greetAdmin } from './group.mjs';
 import { introCard as adminIntroCard } from '../admin/cards.mjs';
 import { stageNames } from '../flow/stages.mjs';
+import { createFeishuLogger } from '../feishu-logger.mjs';
 
 const portOf = env => Number(env.PREVIEW_PORT || 4870);
 const workbenchOf = env => `http://127.0.0.1:${portOf(env)}`;
@@ -135,7 +136,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
         if (role.key === 'admin') {
           if (!r.openId) throw new Error('没拿到扫码人的身份，请用飞书手机版重扫这一张码');
           updateEnv(envFile, { [`${role.prefix}APP_ID`]: r.appId, [`${role.prefix}APP_SECRET`]: r.appSecret, [`${role.prefix}OPEN_ID`]: r.openId });
-          try { await feishu.greetAdmin({ client: new feishu.lark.Client({ appId: r.appId, appSecret: r.appSecret, loggerLevel: feishu.lark.LoggerLevel.error }), openId: r.openId, card: adminIntroCard() }); }
+          try { await feishu.greetAdmin({ client: new feishu.lark.Client({ appId: r.appId, appSecret: r.appSecret, logger: createFeishuLogger({ error: log }) }), openId: r.openId, card: adminIntroCard() }); }
           catch (error) { log(`AI 管理员助手的报到消息没发出去（${error.message}），不影响使用`); }
           return;
         }
@@ -197,7 +198,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       await ensurePort(fileEnv);
       feishu ??= await d.loadFeishu();
       const appIds = Object.fromEntries(team.map(r => [r.key, fileEnv[`${r.prefix}APP_ID`]]));
-      const clients = Object.fromEntries(team.map(r => [r.key, new feishu.lark.Client({ appId: fileEnv[`${r.prefix}APP_ID`], appSecret: fileEnv[`${r.prefix}APP_SECRET`], loggerLevel: feishu.lark.LoggerLevel.error })]));
+      const clients = Object.fromEntries(team.map(r => [r.key, new feishu.lark.Client({ appId: fileEnv[`${r.prefix}APP_ID`], appSecret: fileEnv[`${r.prefix}APP_SECRET`], logger: createFeishuLogger({ error: log }) })]));
       try {
         const g = await feishu.createTeamGroup({ clients, appIds, team, ownerOpenId: progress.ownerOpenId, existing: progress.chatId ? { chatId: progress.chatId, ownerSet: Boolean(progress.ownerSet), joinLink: progress.joinLink ?? null } : null, onChat: info => saveProgress(root, info), workbench: workbenchOf(fileEnv), log });
         saveProgress(root, { chatId: g.chatId, ownerSet: g.ownerSet, joinLink: g.joinLink, groupReady: true });

@@ -72,6 +72,9 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
         timer = setTimeout(() => { timer = null; last = Date.now(); void patch(messageId, render()); }, Math.max(0, 2000 - (Date.now() - last)));
       };
       clock = setInterval(current.refresh, 15000);
+      // 首次私聊也要先准备工作副本，否则模型没有可读、可改的角色和技能文件。
+      // 诊断只查不改，不为它创建或同步工作副本。
+      if (!readOnly) await changes?.ensure?.();
       const r = await steward.run({ prompt, control, readOnly, onProgress: event => { view.steps += 1; view.activity = stewardActivity(event, root); current.refresh(); } });
       clearInterval(clock);
       clearTimeout(timer);

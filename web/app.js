@@ -47,7 +47,7 @@ function renderRoles(){
   for(const p of candidates){const option=el('option',`#${p.number} ${p.name} · ${p.source}`);option.value=p.id;select.append(option);}
   if(app.roleProject)select.value=app.roleProject;
   const updateCompose=()=>{
-    const p=project(app.roleProject),disabled=!candidates.length;
+    const p=project(app.roleProject),disabled=!(candidates.length||(app.role==='product'&&app.roleProject==='new'));
     $('#role-project-hint').textContent=app.roleProject==='new'?roleProjectHint(null,app.role):p?roleProjectHint(p,app.role):'';
     $('#role-input').disabled=disabled;
     $('#role-form button').disabled=disabled;
