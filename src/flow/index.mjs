@@ -428,7 +428,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     launch(p, async () => { await transition(p, target); await run(p, target, offer.detail); });
     return toast('开始修改');
   };
-  const handleMessage = async ({ chatId, text, role = 'product', senderType = 'user', intent }) => {
+  const handleMessage = async ({ chatId, text, role = 'product', senderType = 'user', intent, actor = '你' }) => {
     await ready;
     if (senderType !== 'user') return { ignored: true };
     const p = await get(chatId);
@@ -437,7 +437,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     // 工作台“提需求”是明确的需求，直接开工；群里的话先聊，点了提议卡才开工
     if (intent === 'demand' && !active) return begin(chatId, text);
     if (['停止', '停下'].includes(said)) {
-      if (p?.busy) { await stopStep(p, '你', role); return { stopping: true }; }
+      if (p?.busy) { await stopStep(p, actor, role); return { stopping: true }; }
       await sendText(chatId, `现在没有正在干活的同事。${nextStep(active ? p : null)}`, role);
       return { waiting: true };
     }
@@ -445,7 +445,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
       if (!active) { await sendText(chatId, `群里现在没有进行中的项目。${nextStep(null)}`, role); return { waiting: true }; }
       if (said === '结束') { await askToEnd(p); return { confirming: 'end' }; }
       if (p.busy) { await sendText(chatId, nextStep(p), role); return { busy: true }; }
-      if (p.error) { await retry(p, '你'); return { retrying: true }; }
+      if (p.error) { await retry(p, actor); return { retrying: true }; }
       await sendText(chatId, `现在没有停下的步骤。${nextStep(p)}`, role);
       return { waiting: true };
     }

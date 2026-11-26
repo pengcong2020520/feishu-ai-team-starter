@@ -15,8 +15,8 @@ export function createSupervisor({ root, entry = 'src/main.mjs', env = process.e
   const write = (stream, chunk) => { if (echo) stream.write(chunk); log?.write(chunk); };
 
   // 拉起团队服务，等它说“已连上飞书”才算健康；没等到也不杀它，交给调用方决定
-  const start = () => new Promise(resolve => {
-    if (child) { resolve({ ok: true, already: true, pid: child.pid }); return; }
+  const startNow = () => new Promise(resolve => {
+    if (child) { resolve(state.healthy ? { ok: true, already: true, pid: child.pid } : { ok: false, pid: child.pid, error: '团队服务还没连上飞书' }); return; }
     const proc = spawn(process.execPath, [entry], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
     child = proc;
     stopping = false;
@@ -44,7 +44,7 @@ export function createSupervisor({ root, entry = 'src/main.mjs', env = process.e
   });
 
   // 先礼后兵：SIGTERM 让它收好长连接，过 stopMs 还没退就强制结束
-  const stop = async () => {
+  const stopNow = async () => {
     const proc = child;
     if (!proc) return { stopped: false };
     stopping = true;
@@ -56,6 +56,17 @@ export function createSupervisor({ root, entry = 'src/main.mjs', env = process.e
     if (late) { proc.kill('SIGKILL'); await exited; }
     return { stopped: true };
   };
-  const restart = async () => { await stop(); return start(); };
+  let chain = Promise.resolve();
+  let starting = null;
+  const serial = fn => { const next = chain.then(fn, fn); chain = next.catch(() => {}); return next; };
+  const start = () => {
+    if (starting) return starting;
+    const task = serial(startNow);
+    starting = task;
+    void task.then(() => { if (starting === task) starting = null; }, () => { if (starting === task) starting = null; });
+    return task;
+  };
+  const stop = () => serial(stopNow);
+  const restart = () => serial(async () => { await stopNow(); return startNow(); });
   return { start, stop, restart, status: () => ({ ...state }), close: () => log?.end() };
 }

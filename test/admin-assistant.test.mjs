@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createAssistant, HELP } from '../src/admin/assistant.mjs';
+import { createAssistant, NO_MODEL } from '../src/admin/assistant.mjs';
 import { createAdminBot } from '../src/admin/bot.mjs';
-import { projectLine, serviceLine, statusCard } from '../src/admin/cards.mjs';
+import { cleanReply, projectLine, serviceDownCard, serviceLine, signCard, statusCard, stewardCard, stuckCard } from '../src/admin/cards.mjs';
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 20));
 const text = card => JSON.stringify(card);
@@ -31,7 +31,7 @@ function setup({ projects = [STUCK], healthy = true, restartOk = true } = {}) {
   const snapshot = { projects };
   const workbench = { state: async () => (service.healthy ? snapshot : null), message: async m => { messages.push(m); return {}; } };
   const assistant = createAssistant({ root, bot, supervisor, workbench, logger: { error() {}, log() {} } });
-  return { root, assistant, sent, patched, messages, service, supervisor, snapshot };
+  return { root, assistant, sent, patched, messages, service, supervisor, snapshot, workbench };
 }
 
 test('巡检：新停下的项目私聊提醒一次，管理服务重启后也不重报；项目好了收起提醒卡', async () => {
@@ -61,7 +61,7 @@ test('点“接着做”：经工作台接口让负责的角色重试，群里�
   assert.equal(r.toast.content, '正在让同事接着做');
   await flush();
   assert.deepEqual(s.messages, [{ chatId: 'oc_1', role: 'developer', text: '重试', via: 'admin' }]);
-  assert.match(text(s.patched.at(-1).card), /已让AI 程序员接着做 #3 番茄钟「开发网页」/);
+  assert.match(text(s.patched.at(-1).card), /已让 AI 程序员接着做 #3 番茄钟「开发网页」，到飞书群看进度卡/);
   const twice = await s.assistant.onAction({ value: { action: 'retry', cardId }, messageId: 'om_1' });
   assert.equal(twice.toast.content, '这张卡片已经处理过了');
   assert.equal(s.messages.length, 1);
@@ -75,7 +75,7 @@ test('点“接着做”时项目已经不在停下状态：按过期处理，�
   await s.assistant.onAction({ value: { action: 'retry', cardId }, messageId: 'om_1' });
   await flush();
   assert.equal(s.messages.length, 0);
-  assert.match(text(s.patched.at(-1).card), /这张提醒过期了：#3 番茄钟 现在在「走查网页」，有同事在干活/);
+  assert.match(text(s.patched.at(-1).card), /这张提醒过期了：#3 番茄钟 现在在「走查网页」，请到群里点最新那张卡片/);
 
   const t = setup();
   await t.assistant.tick();
@@ -138,7 +138,7 @@ test('私聊指令：“状态”出现状卡；“重启”有项目在干活�
   assert.match(s.sent[1], /#4 读书笔记（AI 设计在画线框与主题）正在干活/);
   assert.equal(s.supervisor.restarts, 0);
   await s.assistant.onMessage({ text: '你好' });
-  assert.equal(s.sent[2], HELP);
+  assert.equal(s.sent[2], NO_MODEL);
 });
 
 test('团队服务没在运行时的现状卡：读不到项目，带重启按钮', () => {
@@ -170,4 +170,110 @@ test('管理员机器人只听管理员、只在私聊：别人私聊回“我�
   assert.equal((await bot.handlers['card.action.trigger']({ operator: { open_id: 'ou_admin' }, action: { value: {} } })).toast.content, 'ok');
   await bot.sendText('你好');
   assert.deepEqual([created[1].params, created[1].data.receive_id], [{ receive_id_type: 'open_id' }, 'ou_admin']);
+  const broken = createAdminBot({ appId: 'cli', appSecret: 's', adminOpenId: 'ou_admin', lark, onMessage: async () => {}, onAction: async () => { throw new Error('内部故障'); }, logger: { error() {} } });
+  assert.equal((await broken.handlers['card.action.trigger']({ operator: { open_id: 'ou_admin' } })).toast.content, '没点成。请再发“状态”看一下；还不行，让搭团队的助手看 data/service.log。');
+});
+
+test('卡片时间、输出和回复用中文可读格式', () => {
+  const now = Date.parse('2026-01-01T03:00:00.000Z');
+  assert.equal(serviceLine({ healthy: true, startedAt: new Date(now - 1000).toISOString() }, now), '✅ 团队服务在运行（刚刚启动）');
+  assert.equal(serviceLine({ healthy: true, startedAt: new Date(now - 120 * 60000).toISOString() }, now), '✅ 团队服务在运行（已运行 2 小时）');
+  assert.equal(serviceLine({ running: false, lastExit: { code: 1, at: new Date(now - 1000).toISOString() } }, now), '⚠️ 团队服务没在运行（退出码 1，刚刚）');
+  assert.match(serviceLine({ running: false, lastExit: { code: null, signal: 'SIGTERM', at: new Date(now - 1000).toISOString() } }, now), /被系统停下了/);
+  assert.match(projectLine({ number: 1, name: '计划', stage: 'confirm_prd', waitingFor: '确认 PRD', stageAt: new Date(now - 1000).toISOString() }, now), /等你确认 PRD（刚刚）/);
+  assert.equal(cleanReply('# 标题\n> **内容** [链接] `代码` <尖括号>'), '标题\n内容 链接 代码 尖括号');
+  assert.match(text(stewardCard({ task: '看看', activity: '', steps: 1, elapsedMs: 1, done: true, outcome: 'ok', reply: '# 标题\n> **内容**' })), /标题\\n内容/);
+  const down = serviceDownCard({ exit: { code: 1 }, error: Array.from({ length: 7 }, (_, i) => `> **第${i}行**`).join('\n'), cardId: 'x', lastChange: { title: '改卡片', sha: 'abc' } });
+  assert.equal(down.elements.filter(e => e.text?.content?.includes('第')).length, 5);
+  assert.match(text(down), /撤销上一次改动/);
+  assert.doesNotMatch(text(down), /第0行/);
+  const sign = signCard({ change: { sha: 'abc', title: '改卡片', why: '要求', files: ['src/a.mjs'], stat: '1 个文件，增加 2 行，删除 1 行' }, cardId: 'x' });
+  assert.match(text(sign), /1 个文件，增加 2 行，删除 1 行/);
+  assert.match(text(sign), /点“上线”后：先跑测试/);
+  assert.match(text(stuckCard({ p: STUCK, cardId: 's' })), /只查不改，要稍等一会儿/);
+});
+
+test('同一阶段换了停下卡会再提醒，并收起旧提醒', async () => {
+  const s = setup({ projects: [{ ...STUCK, stuckCardId: 'first' }] });
+  await s.assistant.tick();
+  s.snapshot.projects = [{ ...STUCK, stuckCardId: 'second' }];
+  await s.assistant.tick();
+  assert.equal(s.sent.length, 2);
+  assert.match(text(s.patched.at(-1).card), /这一步又停下了一次，看新的提醒/);
+});
+
+test('工作台项目的停下提醒指向工作台，先不管和接着做都说清下一步', async () => {
+  const project = { ...STUCK, chatId: 'web:local', stuckCardId: 's1' };
+  const s = setup({ projects: [project] });
+  await s.assistant.tick();
+  const actions = s.sent[0].elements.at(-1).actions;
+  await s.assistant.onAction({ value: actions[0].value, messageId: 'om_1' });
+  await flush();
+  assert.match(text(s.patched.at(-1).card), /到工作台看进度卡/);
+  const t = setup({ projects: [project] });
+  await t.assistant.tick();
+  await t.assistant.onAction({ value: t.sent[0].elements.at(-1).actions[2].value, messageId: 'om_1' });
+  await flush();
+  assert.match(text(t.patched.at(-1).card), /先不管 #3 番茄钟了。之后想接着做，在工作台对 AI 程序员发“重试”/);
+});
+
+test('先不管立即回 toast，工作台稍后返回时再收起卡片', async () => {
+  const s = setup();
+  await s.assistant.tick();
+  let release;
+  s.workbench.state = () => new Promise(resolve => { release = resolve; });
+  const value = s.sent[0].elements.at(-1).actions[2].value;
+  let timer;
+  try {
+    const result = await Promise.race([
+      s.assistant.onAction({ value, messageId: 'om_1' }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('回调等待了工作台')), 1000); }),
+    ]);
+    assert.equal(result.toast.content, '好的，先不管');
+    assert.equal(s.patched.length, 0);
+  } finally { clearTimeout(timer); release(s.snapshot); }
+  await flush();
+  assert.match(text(s.patched.at(-1).card), /先不管 #3 番茄钟了/);
+});
+
+test('管理员测试卡的所有按钮只给提示，不执行任何操作', async () => {
+  const s = setup({ healthy: false });
+  for (const action of ['restart', 'golive', 'reject_change', 'revert', 'retry', 'diagnose', 'ignore', 'stop_steward']) {
+    const r = await s.assistant.onAction({ value: { action, projectId: 'test', cardId: 'test' }, messageId: 'test' });
+    assert.equal(r.toast.content, '这是测试卡片，不会推动流程，请点正式卡片');
+  }
+  assert.equal(s.supervisor.restarts, 0);
+  assert.deepEqual([s.sent, s.patched, s.messages], [[], [], []]);
+});
+
+test('没配模型时查原因也会复位，下次点击仍有回应', async () => {
+  const s = setup();
+  await s.assistant.tick();
+  const value = s.sent[0].elements.at(-1).actions[1].value;
+  for (let i = 0; i < 2; i++) {
+    assert.equal((await s.assistant.onAction({ value, messageId: 'om_1' })).toast.content, '正在查原因');
+    await flush();
+    assert.equal(s.sent.at(-1), NO_MODEL);
+  }
+});
+
+test('状态读不到时巡检跳过，私聊重启拒绝；只有整句才算固定指令', async () => {
+  const s = setup();
+  s.service.healthy = true;
+  const bot = { sendCard: async c => s.sent.push(c), sendText: async t => s.sent.push(t), patchCard: async () => {} };
+  const workbench = { state: async () => null };
+  const a = createAssistant({ root: s.root, bot, supervisor: s.supervisor, workbench, logger: { error() {} } });
+  await a.tick();
+  assert.equal(s.sent.length, 0);
+  await a.onMessage({ text: '重启' });
+  assert.equal(s.sent.at(-1), '读不到项目状态，先不重启，过一会儿再试');
+  assert.equal(s.supervisor.restarts, 0);
+  await a.onMessage({ text: '重启会影响正在做的项目吗？' });
+  assert.equal(s.sent.at(-1), NO_MODEL);
+});
+
+test('说明文档使用管理员助手的最新操作文案', () => {
+  const readme = readFileSync('README.md', 'utf8');
+  assert.match(readme, /项目停下时点“接着做”；团队服务停了时点“重启团队服务”/);
+  assert.match(readme, /点“撤销这次改动”，也可以私聊发“撤销”/);
 });

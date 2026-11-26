@@ -133,7 +133,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       lark: feishu.lark, qrcode: feishu.qrcode, roles, qrDir: path.join(root, 'qr'), log,
       save: async (role, r) => {
         if (role.key === 'admin') {
-          if (!r.openId) throw new Error('没拿到扫码人的身份（open_id）');
+          if (!r.openId) throw new Error('没拿到扫码人的身份，请用飞书手机版重扫这一张码');
           updateEnv(envFile, { [`${role.prefix}APP_ID`]: r.appId, [`${role.prefix}APP_SECRET`]: r.appSecret, [`${role.prefix}OPEN_ID`]: r.openId });
           try { await feishu.greetAdmin({ client: new feishu.lark.Client({ appId: r.appId, appSecret: r.appSecret, loggerLevel: feishu.lark.LoggerLevel.error }), openId: r.openId, card: adminIntroCard() }); }
           catch (error) { log(`AI 管理员助手的报到消息没发出去（${error.message}），不影响使用`); }
@@ -226,7 +226,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       if (failed.length) return finish(0, [`AI 管理员助手没建成（${why(failed[0].error)}）`, '重跑 node setup.mjs scan 会出一张新码']);
       // 团队服务要重启一次，管理员助手才会上线；有项目在干活就不打断它
       const busy = (await d.workbenchState(portOf(fileEnv)))?.projects?.filter(p => p.busy) ?? [];
-      const later = '告诉用户：AI 管理员助手建好了，团队服务重启一次它才会上线；';
+      const later = '告诉用户：AI 管理员助手建好了。团队服务要重启一次，之后才能在飞书私聊里找到它；';
       if (busy.length) return finish(0, [`${later}${busy.map(p => `#${p.number} ${p.name}`).join('、')}正在干活，等这一步做完后运行 npm stop && npm start`]);
       // 这次刚起的服务却查不到进程（比如沙箱里看不到）：不冒险再起一份，请用户自己重启
       if (!d.serviceStatus(root).running) return finish(0, [`${later}请用户运行 npm stop && npm start`]);
@@ -235,7 +235,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       const r = await d.startService(root);
       if (!r.ok) return finish(1, [`团队服务没起来：${r.error}`, '日志在 data/service.log；修好后运行 npm start']);
       serviceStarted = true;
-      log('✓ 已重启团队服务，AI 管理员助手上线了');
+      log('✓ 已重启团队服务，可以私聊 AI 管理员助手了');
       continue;
     }
     return finish(0, [

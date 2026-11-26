@@ -288,7 +288,7 @@ test('补扫管理员助手：只扫这一张，写进 3 个变量，私聊报�
   assert.equal(calls.greet[0].openId, 'ou_me');
   assert.match(JSON.stringify(calls.greet[0].card), /AI 管理员助手 · 报到/);
   assert.deepEqual([calls.stop, calls.service], [1, 1]);
-  assert.match(text, /AI 管理员助手上线了/);
+  assert.match(text, /可以私聊 AI 管理员助手了/);
   assert.match(text, /✓ AI 管理员助手/);
   assert.match(text, /私聊「AI 管理员助手」/);
   assert.doesNotMatch(text, /new-secret/);
@@ -298,6 +298,7 @@ test('补扫管理员助手时有项目在干活、或没有权限停服务：�
   const busy = fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => ({ projects: [{ number: 4, name: '番茄钟', busy: true }] }) });
   const r1 = await run(NO_ADMIN(), ['scan'], { deps: busy.deps });
   assert.equal(busy.calls.stop, 0);
+  assert.match(r1.text, /AI 管理员助手建好了。团队服务要重启一次，之后才能在飞书私聊里找到它/);
   assert.match(r1.text, /#4 番茄钟正在干活，等这一步做完后运行 npm stop && npm start/);
   const denied = fakes({ serviceStatus: () => ({ running: true }), stopService: async () => ({ stopped: false, denied: true }) });
   const r2 = await run(NO_ADMIN(), ['scan'], { deps: denied.deps });
@@ -316,5 +317,5 @@ test('扫管理员助手的码没拿到扫码人的身份：不写半截配置�
   const root = NO_ADMIN();
   const { text } = await run(root, ['scan'], { deps });
   assert.doesNotMatch(env0(root), /FEISHU_ADMIN_APP_ID/);
-  assert.match(text, /AI 管理员助手没建成（没拿到扫码人的身份（open_id））/);
+  assert.match(text, /AI 管理员助手没建成（没拿到扫码人的身份，请用飞书手机版重扫这一张码）/);
 });

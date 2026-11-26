@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { classify, createChanges } from '../src/admin/changes.mjs';
@@ -104,14 +104,16 @@ function rig({ busy = [], restartOk = [true], testsOk = true } = {}) {
   const sent = [];
   const patched = [];
   const handed = [];
+  const down = [];
   let restarts = 0;
+  let readable = true;
   const projects = [...busy];
   const changes = createChanges({ root, runTests: async () => ({ ok: testsOk, output: testsOk ? '' : '✖ 失败了\nℹ fail 1' }) });
-  const supervisor = { restart: async () => { const ok = restartOk[Math.min(restarts, restartOk.length - 1)]; restarts += 1; return ok ? { ok: true } : { ok: false, error: 'SyntaxError: 起不来' }; } };
-  const workbench = { state: async () => ({ projects }) };
+  const supervisor = { status: () => ({ running: true }), restart: async () => { const ok = restartOk[Math.min(restarts, restartOk.length - 1)]; restarts += 1; return ok ? { ok: true } : { ok: false, error: '起不来' }; } };
+  const workbench = { state: async () => readable ? { projects } : null };
   const bot = { sendCard: async card => { sent.push(card); return `om_${sent.length}`; }, patchCard: async (id, card) => { patched.push({ id, card }); } };
-  const deploy = createDeploy({ changes, supervisor, workbench, bot, logger: { error() {} }, handBack: async text => handed.push(text) });
-  return { root, changes, deploy, sent, patched, handed, projects, restarts: () => restarts };
+  const deploy = createDeploy({ changes, supervisor, workbench, bot, logger: { error() {} }, handBack: async text => handed.push(text), serviceDown: async (...args) => down.push(args) });
+  return { root, changes, deploy, sent, patched, handed, down, projects, readable: value => { readable = value; }, restarts: () => restarts };
 }
 const valueOf = (card, label) => card.elements.at(-1).actions.find(a => a.text.content === label).value;
 const text = card => JSON.stringify(card);
@@ -153,7 +155,7 @@ test('点上线时有项目在干活：测试过了先等着，巡检发现空�
   await r.deploy.submit({ title: '改卡片', why: '要求' });
   await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   await flush(300);
-  assert.match(text(r.patched.at(-1).card), /#3 番茄钟 正在干活，等这一步做完再上线/);
+  assert.match(text(r.patched.at(-1).card), /#3 番茄钟 正在干活，我不打断它。做完后我会自动上线，不用再点/);
   assert.equal(r.restarts(), 0);
   await r.deploy.tick();
   assert.equal(r.restarts(), 0);
@@ -172,7 +174,7 @@ test('上线后团队服务起不来：自动 git revert 再重启，卡片说�
   await flush(400);
   assert.equal(r.restarts(), 2);
   assert.equal(live(r.root, 'src/flow/cards.mjs'), 'export const a = 1;\n');
-  assert.match(text(r.patched.at(-1).card), /上线后团队服务起不来（SyntaxError: 起不来），已自动回退。团队服务已恢复/);
+  assert.match(text(r.patched.at(-1).card), /上线后团队服务起不来（起不来），已自动撤销。团队服务已恢复/);
   assert.match(git(r.root, 'log', '-1', '--format=%an|%s'), /AI 管理员助手\|Revert/);
 });
 
@@ -183,9 +185,9 @@ test('点“不要”丢弃改动；管家又交了新改动时旧签字卡作�
   await r.deploy.submit({ title: '第一次', why: '要求' });
   edit(r.root, 'src/flow/cards.mjs', 'export const a = 3;\n');
   await r.deploy.submit({ title: '第二次', why: '要求' });
-  assert.match(text(r.patched.at(-1).card), /这张已作废：管家又交了新的改动「第二次」/);
+  assert.match(text(r.patched.at(-1).card), /这张已作废：我又准备了新的改动「第二次」，请看新的那张卡片/);
   assert.equal(await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' }), '这张卡片已过期');
-  assert.equal(await r.deploy.onSign({ ...valueOf(r.sent[1], '不要'), messageId: 'om_2' }), '已丢弃这次改动');
+  assert.equal(await r.deploy.onSign({ ...valueOf(r.sent[1], '不要'), messageId: 'om_2' }), '不上线了');
   assert.equal(readFileSync(path.join(r.root, '.admin-work/src/flow/cards.mjs'), 'utf8'), 'export const a = 1;\n');
 
   const f = rig({ testsOk: false });
@@ -195,7 +197,7 @@ test('点“不要”丢弃改动；管家又交了新改动时旧签字卡作�
   await f.deploy.onSign({ ...valueOf(f.sent[0], '上线'), messageId: 'om_1' });
   await flush(300);
   assert.equal(f.restarts(), 0);
-  assert.match(text(f.patched.at(-1).card), /测试没通过，没有上线。已交回给管家修改/);
+  assert.match(text(f.patched.at(-1).card), /测试没通过，没有上线。我接着改/);
   assert.match(f.handed[0], /在管理员同意后跑测试，测试没过（第 1 次，最多 3 次）[\s\S]*✖ 失败了/);
 });
 
@@ -212,7 +214,103 @@ test('回退：代码类有项目在干活时不回退；空闲时回退并重�
   r.projects.length = 0;
   const ok = await r.deploy.revert();
   assert.equal(ok.ok, true);
-  assert.match(ok.text, /已回退「改卡片」，团队服务重启好了/);
+  assert.match(ok.text, /已撤销「改卡片」，团队服务已重启/);
   assert.equal(live(r.root, 'src/flow/cards.mjs'), 'export const a = 1;\n');
-  assert.match((await r.deploy.revert()).error, /还没有可以回退的改动/);
+  assert.match((await r.deploy.revert()).error, /没找到这次改动/);
+});
+
+test('代码测试只读签字提交，测试失败也移除临时副本并把改动交回', async () => {
+  const root = repo();
+  let seen;
+  const changes = createChanges({ root, runTests: async cwd => { seen = { cwd, code: readFileSync(path.join(cwd, 'src/flow/cards.mjs'), 'utf8') }; return { ok: false, output: '✖ 没通过\nℹ fail 1' }; } });
+  await changes.ensure();
+  edit(root, 'src/flow/cards.mjs', 'export const a = 2;\n');
+  const c = await changes.prepare({ title: '改卡片', why: '要求' });
+  edit(root, 'src/flow/cards.mjs', 'export const a = 3;\n');
+  assert.equal((await changes.test(c)).ok, false);
+  assert.deepEqual(seen, { cwd: path.join(root, '.admin-test'), code: 'export const a = 2;\n' });
+  assert.equal(existsSync(path.join(root, '.admin-test')), false);
+  assert.match(git(path.join(root, '.admin-work'), 'status', '--porcelain'), /src\/flow\/cards\.mjs/);
+  assert.match(c.stat, /1 个文件，增加 1 行，删除 1 行/);
+});
+
+test('项目状态不可读时不重启、不上线、不撤销代码', async () => {
+  const r = rig();
+  await r.changes.ensure();
+  edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
+  await r.deploy.submit({ title: '改卡片', why: '要求' });
+  r.readable(false);
+  assert.match((await r.deploy.restart()).error, /读不到项目状态，先不重启/);
+  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
+  await flush(300);
+  assert.match(text(r.patched.at(-1).card), /读不到项目状态，先不上线/);
+  assert.equal(r.restarts(), 0);
+  r.readable(true);
+  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
+  await flush(300);
+  r.readable(false);
+  assert.match((await r.deploy.revert()).error, /读不到项目状态，先不撤销/);
+  assert.equal(r.restarts(), 1);
+});
+
+test('上线失败且自动撤销失败时说明线上仍是这次改动并提醒服务停了', async () => {
+  const r = rig({ restartOk: [false] });
+  await r.changes.ensure();
+  edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
+  await r.deploy.submit({ title: '改卡片', why: '要求' });
+  r.changes.revert = async () => ({ ok: false, error: '撤销冲突' });
+  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
+  await flush(350);
+  assert.match(text(r.patched.at(-1).card), /自动撤销也没成功，线上还是这次改动。请让搭团队的助手看 data\/service.log/);
+  assert.equal(r.down.length, 1);
+  assert.equal(live(r.root, 'src/flow/cards.mjs'), 'export const a = 2;\n');
+});
+
+test('撤销冲突只给管理员中文建议，原始错误只进日志', async () => {
+  const root = repo();
+  const logs = [];
+  const changes = createChanges({ root, runTests: async () => ({ ok: true, output: '' }) });
+  await changes.ensure();
+  edit(root, 'prompts/designer.md', '第一版\n');
+  const change = await changes.prepare({ title: '改设计', why: '要求' });
+  await changes.test(change);
+  await changes.merge(change);
+  writeFileSync(path.join(root, 'prompts/designer.md'), '后来又改了\n');
+  git(root, 'add', 'prompts/designer.md');
+  git(root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'later');
+  const r = await changes.revert(change, { error: value => logs.push(value) });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, '这次改动和后来的改动改到了同一处，没有撤销。跟我说一声，我按现在的代码处理。');
+  assert.ok(logs.length > 0);
+  assert.doesNotMatch(r.error, /CONFLICT|git/);
+});
+
+test('多个项目干活时通过测试也等它们做完', async () => {
+  const r = rig({ busy: [{ number: 3, name: '番茄钟', busy: true }, { number: 4, name: '读书笔记', busy: true }] });
+  await r.changes.ensure();
+  edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
+  await r.deploy.submit({ title: '改卡片', why: '要求' });
+  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
+  await flush(300);
+  assert.match(text(r.patched.at(-1).card), /#3 番茄钟、#4 读书笔记 正在干活，我不打断它们。做完后我会自动上线，不用再点/);
+});
+
+test('线上有未提交文件或提交已变化时签字卡说清没有上线', async () => {
+  for (const kind of ['dirty', 'ahead']) {
+    const r = rig();
+    await r.changes.ensure();
+    edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
+    await r.deploy.submit({ title: '改卡片', why: '要求' });
+    if (kind === 'dirty') writeFileSync(path.join(r.root, 'README.md'), '别人改的\n');
+    else {
+      writeFileSync(path.join(r.root, 'README.md'), '别人提交的\n');
+      git(r.root, 'add', 'README.md');
+      git(r.root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'later');
+    }
+    await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
+    await flush(350);
+    const card = text(r.patched.at(-1).card);
+    assert.match(card, kind === 'dirty' ? /没上线：线上目录里有人改了还没提交的文件（README.md），先处理掉再上线。这次改动已取消，线上没变/ : /没上线：线上代码在这期间变了，没法直接合并。跟我说一声，我按现在的代码再改一次。这次改动已取消，线上没变/);
+    assert.equal(r.restarts(), 0);
+  }
 });

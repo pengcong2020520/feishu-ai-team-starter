@@ -8,4 +8,5 @@ workspace
 *.pid
 .sheet-test
 .admin-work
+.admin-test
 qr

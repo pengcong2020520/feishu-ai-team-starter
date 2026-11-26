@@ -29,9 +29,13 @@ async function resolved(target) {
 }
 const deny = message => ({ behavior: 'deny', message });
 
-export async function stewardPermission(root, tool, input = {}) {
-  if (tool === 'StructuredOutput' || tool.startsWith('mcp__admin__')) return { behavior: 'allow' };
+export async function stewardPermission(root, tool, input = {}, readOnly = false) {
+  if (tool === 'StructuredOutput' || tool.startsWith('mcp__admin__')) {
+    if (readOnly && !['mcp__admin__team_status', 'mcp__admin__ask_colleague', 'StructuredOutput'].includes(tool)) return deny('这次只查不改');
+    return { behavior: 'allow' };
+  }
   if (![...READ_TOOLS, ...WRITE_TOOLS].includes(tool)) return deny('这个工具不能用');
+  if (readOnly && WRITE_TOOLS.includes(tool)) return deny('这次只查不改');
   if (tool === 'Glob' && (typeof input.pattern !== 'string' || path.isAbsolute(input.pattern) || input.pattern.split(/[\\/]/).includes('..') || /\.env/.test(input.pattern))) return deny('搜索范围越界');
   if (tool === 'Grep' && /\.env|model-key/.test(`${input.glob ?? ''} ${input.path ?? ''}`)) return deny('不能搜密钥文件');
   const supplied = tool === 'Read' || WRITE_TOOLS.includes(tool) ? input.file_path : (input.path ?? '.');
@@ -40,8 +44,8 @@ export async function stewardPermission(root, tool, input = {}) {
   const target = await resolved(path.resolve(root, supplied));
   if (!inside(real, target)) return deny('文件超出仓库');
   const rel = path.relative(real, target).split(path.sep).join('/');
-  // Grep 不许从仓库根目录整个搜（会扫到 .env）：指定 src、data 之类的子目录
-  if (tool === 'Grep' && rel === '') return deny('请指定要搜的子目录，比如 src、prompts、data');
+  // Grep 不许从仓库根目录或 data 整个搜：指定 src、data/messages 之类的子目录
+  if (tool === 'Grep' && (rel === '' || rel === 'data')) return deny('请指定更具体的子目录，比如 src、prompts、data/messages');
   if (SECRET.some(rule => rule.test(rel))) return deny('密钥和配置文件不能看');
   if (WRITE_TOOLS.includes(tool)) {
     if (!rel.startsWith(`${WORK_DIR}/`)) return deny(`只能改工作副本 ${WORK_DIR}/ 里的文件`);
@@ -54,12 +58,12 @@ export async function stewardPermission(root, tool, input = {}) {
 }
 
 export function stewardActivity({ tool, input = {} }, root) {
-  const rel = value => { const text = String(value ?? ''); return path.isAbsolute(text) ? path.relative(root, text) : text; };
+  const rel = value => { const text = String(value ?? ''); return (path.isAbsolute(text) ? path.relative(root, text) : text).replace(/[*`<>\[\]]/g, ''); };
   const names = { product: 'AI 产品经理', designer: 'AI 设计', developer: 'AI 程序员' };
   switch (tool) {
     case 'Read': return `📖 在看 ${rel(input.file_path)}`;
-    case 'Glob': return `🔍 在找文件 ${input.pattern ?? ''}`;
-    case 'Grep': return `🔍 在搜 ${String(input.pattern ?? '').slice(0, 30)}`;
+    case 'Glob': return '🔍 在找文件';
+    case 'Grep': return '🔍 在搜仓库';
     case 'Write': case 'Edit': return `✏️ 在改 ${rel(input.file_path).replace(`${WORK_DIR}/`, '')}`;
     case 'mcp__admin__team_status': return '📋 在看团队现状';
     case 'mcp__admin__ask_colleague': return `💬 在问${names[input.role] ?? '同事'}`;
@@ -67,7 +71,7 @@ export function stewardActivity({ tool, input = {} }, root) {
     case 'mcp__admin__press_button': return '👆 在代你点按钮';
     case 'mcp__admin__submit_change': return '🧪 在检查、测试改动';
     case 'mcp__admin__restart_team': return '🔄 在重启团队服务';
-    case 'mcp__admin__revert_change': return '↩️ 在回退改动';
+    case 'mcp__admin__revert_change': return '↩️ 在撤销改动';
     default: return '💭 在思考';
   }
 }
@@ -107,7 +111,7 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
   };
 
   return {
-    async run({ prompt, onProgress, control, timeoutMs = STEWARD_TIMEOUT_MS }) {
+    async run({ prompt, onProgress, control, readOnly = false, timeoutMs = STEWARD_TIMEOUT_MS }) {
       const started = Date.now();
       const stats = { turns: 0, durationMs: 0, inputTokens: 0, outputTokens: 0 };
       const abortController = new AbortController();
@@ -130,10 +134,10 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
         for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY', 'MODEL_NAME']) if (!process.env[name]) throw new Error(`缺少配置：${name}`);
         const configDir = path.join(root, '.claude-agent-config');
         mkdirSync(configDir, { recursive: true });
-        const check = (tool, input) => stewardPermission(root, tool, input);
+        const check = (tool, input) => stewardPermission(root, tool, input, readOnly);
         const options = {
           systemPrompt: { type: 'custom', prompt: readFileSync(path.join(root, 'src/admin/prompt.md'), 'utf8') },
-          tools: [...READ_TOOLS, ...WRITE_TOOLS],
+          tools: readOnly ? READ_TOOLS : [...READ_TOOLS, ...WRITE_TOOLS],
           mcpServers: { admin: createServer({ name: 'admin', version: '1.0.0', alwaysLoad: true, tools }) },
           canUseTool: check,
           hooks: { PreToolUse: [{ hooks: [async input => {

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const WORK_DIR = '.admin-work';
+export const TEST_DIR = '.admin-test';
 // 文字类：改了下次干活就生效，测试过了直接上线
 export const TEXT_AREAS = ['prompts/', 'team-skills/', 'docs/'];
 // 代码类：要管理员签字，上线后重启团队服务
@@ -103,13 +104,25 @@ export function createChanges({ root, runTests: runTestsImpl } = {}) {
       }
       await must(work, [...AUTHOR, 'commit', '-q', '--no-verify', '-m', `管理员助手：${title}\n\n${why}`]);
       const sha = await must(work, ['rev-parse', 'HEAD']);
-      const stat = await must(work, ['diff', '--stat', head, sha]);
+      const numstat = await must(work, ['diff', '--numstat', head, sha]);
+      const counts = numstat.split('\n').filter(Boolean).reduce((sum, row) => {
+        const [added, deleted] = row.split('\t');
+        sum.added += Number(added) || 0; sum.deleted += Number(deleted) || 0;
+        return sum;
+      }, { added: 0, deleted: 0 });
+      const stat = `${files.length} 个文件，增加 ${counts.added} 行，删除 ${counts.deleted} 行`;
       return { ok: true, sha, base: head, files, level, title, why, stat };
     },
 
     // 跑测试；没过就把提交拆回成改动，管家能接着改
     async test(change) {
-      const r = await runTests(work);
+      const testDir = path.join(root, TEST_DIR);
+      let r;
+      if (change.level === 'code') {
+        await must(root, ['worktree', 'add', '--detach', '-q', TEST_DIR, change.sha]);
+        try { r = await runTests(testDir); }
+        finally { await must(root, ['worktree', 'remove', '--force', TEST_DIR]); }
+      } else r = await runTests(work);
       if (r.ok) { state.tries = 0; save(); return { ok: true }; }
       state.tries = (state.tries ?? 0) + 1;
       save();
@@ -128,9 +141,9 @@ export function createChanges({ root, runTests: runTestsImpl } = {}) {
     // 上线：线上目录没有别人的改动、能快进，才合并
     async merge(change) {
       const dirty = await dirtyFiles();
-      if (dirty.length) return { ok: false, error: `线上目录有没提交的改动（${dirty.slice(0, 5).join('、')}），先处理掉再上线` };
+      if (dirty.length) return { ok: false, error: `线上目录里有人改了还没提交的文件（${dirty.slice(0, 5).join('、')}），先处理掉再上线。这次改动已取消，线上没变。` };
       const r = await git(root, ['merge', '-q', '--ff-only', change.sha]);
-      if (r.code) return { ok: false, error: '线上代码在这期间变了，没法直接合并；请让管家按现在的线上代码重新改一次' };
+      if (r.code) return { ok: false, error: '线上代码在这期间变了，没法直接合并。跟我说一声，我按现在的代码再改一次。这次改动已取消，线上没变。' };
       state.history = [...(state.history ?? []), { sha: change.sha, title: change.title, level: change.level, files: change.files, at: new Date().toISOString() }].slice(-50);
       state.pending = null;
       save();
@@ -141,12 +154,13 @@ export function createChanges({ root, runTests: runTestsImpl } = {}) {
     find: sha => (state.history ?? []).find(c => c.sha === sha) ?? null,
 
     // 回退：在线上目录 git revert 这次提交（作者也是管理员助手）
-    async revert(change) {
-      if ((await dirtyFiles()).length) return { ok: false, error: '线上目录有没提交的改动，先处理掉再回退' };
+    async revert(change, logger = console) {
+      if ((await dirtyFiles()).length) return { ok: false, error: '线上目录有没提交的改动，先处理掉再撤销' };
       const r = await git(root, [...AUTHOR, 'revert', '--no-edit', change.sha]);
       if (r.code) {
+        logger.error(`撤销冲突：${(r.stderr || r.stdout).trim()}`);
         await git(root, ['revert', '--abort']);
-        return { ok: false, error: `git revert 冲突了（之后的改动动过同样的地方），没有回退：${(r.stderr || r.stdout).trim().slice(0, 200)}` };
+        return { ok: false, error: '这次改动和后来的改动改到了同一处，没有撤销。跟我说一声，我按现在的代码处理。' };
       }
       const entry = state.history.find(c => c.sha === change.sha);
       if (entry) entry.revertedBy = await liveHead();

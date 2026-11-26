@@ -486,11 +486,12 @@ test('干活时：“现在引导”插进这一步；进度卡“停下”和�
   assert.match(text(final), /↪ 你的引导：加上电话字段/);
   // 文字“停止”
   await local.handleMessage({ chatId: 'w', role: 'product', text: '重试' }); await started();
-  assert.deepEqual(await local.handleMessage({ chatId: 'w', role: 'designer', text: '停止' }), { stopping: true });
+  assert.deepEqual(await local.handleMessage({ chatId: 'w', role: 'designer', text: '停止', actor: 'AI 管理员助手（代你）' }), { stopping: true });
   await local.waitForIdle('w');
-  assert.equal((await local.getProject('w')).errorBrief, '你让 AI 产品经理停下了这一步');
+  assert.equal((await local.getProject('w')).errorBrief, 'AI 管理员助手（代你）让 AI 产品经理停下了这一步');
   // 干活中说“结束”：确认卡是“停下并结束”，点了不发停下卡，直接结束
-  await local.handleMessage({ chatId: 'w', role: 'product', text: '重试' }); await started();
+  await local.handleMessage({ chatId: 'w', role: 'product', text: '重试', actor: '你（工作台）' }); await started();
+  assert.ok(patches.some(x => /你（工作台）点了重试/.test(text(x.card))));
   await local.handleMessage({ chatId: 'w', role: 'product', text: '结束' });
   const confirm = sent.at(-1);
   assert.deepEqual(buttons(confirm).map(b => b.text.content), ['停下并结束', '继续做']);

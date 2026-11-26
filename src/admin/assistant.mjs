@@ -5,11 +5,10 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { roles } from '../agents/roles.mjs';
 import { stageNames } from '../flow/stages.mjs';
-import { closedCard, serviceDownCard, statusCard, stewardCard, stuckCard } from './cards.mjs';
+import { cleanReply, closedCard, serviceDownCard, statusCard, stewardCard, stuckCard } from './cards.mjs';
 import { stewardActivity } from './steward.mjs';
 
-export const HELP = '我现在能做的：发“状态”看团队现状；发“重启”重启团队服务。项目停下、团队服务出问题时，我会私聊提醒你。';
-export const NO_MODEL = '模型没配好，我只能做固定的事：发“状态”看团队现状、发“重启”重启团队服务、发“回退”撤销上一次改动。';
+export const NO_MODEL = '模型没配好，我现在只能做这几件：发“状态”看团队现状，发“重启”重启团队服务，发“撤销”撤销上一次改动，发“停下”让我停止正在做的事。项目停下或团队服务出问题时，我会私聊提醒你。';
 const toast = (content, type = 'info') => ({ toast: { type, content } });
 const name = p => `#${p.number} ${p.name}`;
 
@@ -50,16 +49,20 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
   // 管家一次只做一件事；它在做时，管理员的话插进当前这一步，插不进去的排队
   let current = null;
   const waiting = [];
-  const runSteward = async (prompt, task) => {
-    if (!steward) { await bot.sendText(NO_MODEL); return; }
-    if (current) { waiting.push({ prompt, task }); return; }
+  const runSteward = async (prompt, task, { words = [], readOnly = false, alertKey = null } = {}) => {
+    if (!steward) {
+      if (alertKey && alerts[alertKey]) { alerts[alertKey].diagnosing = false; save(); }
+      await bot.sendText(NO_MODEL); return;
+    }
+    if (current) { waiting.push({ prompt, task, options: { words, readOnly, alertKey } }); await bot.sendText('这句话先记下了，这次做完我接着处理。'); return; }
     const control = {};
     const cardId = randomUUID();
     const view = { task, activity: '💭 在想', steps: 0, guides: [], started: now() };
     const render = (extra = {}) => stewardCard({ ...view, elapsedMs: now() - view.started, cardId, ...extra });
-    current = { control, cardId, view, refresh: () => {} };
+    current = { control, cardId, view, words: [...words], refresh: () => {} };
     let messageId = null;
     let timer = null;
+    let clock = null;
     let last = 0;
     try {
       messageId = await bot.sendCard(render()).catch(error => { logger.error(`管理员助手发进度卡没成功：${error.message}`); return null; });
@@ -68,18 +71,28 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
         if (timer) return;
         timer = setTimeout(() => { timer = null; last = Date.now(); void patch(messageId, render()); }, Math.max(0, 2000 - (Date.now() - last)));
       };
-      const clock = setInterval(current.refresh, 15000);
-      const r = await steward.run({ prompt, control, onProgress: event => { view.steps += 1; view.activity = stewardActivity(event, root); current.refresh(); } });
+      clock = setInterval(current.refresh, 15000);
+      const r = await steward.run({ prompt, control, readOnly, onProgress: event => { view.steps += 1; view.activity = stewardActivity(event, root); current.refresh(); } });
       clearInterval(clock);
       clearTimeout(timer);
-      const reply = r.ok ? r.text : r.stopped ? '⏹ 已停下' : `⚠️ 没做完：${r.error}`;
+      if (!r.ok && !r.stopped) logger.error(`管理员助手做事没成功：${r.error}`);
+      const reply = r.ok ? r.text : r.stopped ? '⏹ 已停下' : r.timedOut ? '超过 15 分钟没做完。把要求再说一次，或拆成更小的一步。' : '没做完。把要求再说一次；还不行，让搭团队的助手看 data/service.log。';
       if (messageId) await patch(messageId, render({ done: true, outcome: r.ok ? 'ok' : r.stopped ? 'stopped' : 'failed', reply, stats: r.stats }));
+      else await bot.sendText(cleanReply(reply));
+    } catch (error) {
+      clearInterval(clock);
+      clearTimeout(timer);
+      logger.error(`管理员助手做事出错：${error.message}`);
+      const reply = '没做完。把要求再说一次；还不行，让搭团队的助手看 data/service.log。';
+      if (messageId) await patch(messageId, render({ done: true, outcome: 'failed', reply }));
       else await bot.sendText(reply);
     } finally {
+      clearInterval(clock);
       clearTimeout(timer);
       current = null;
+      if (alertKey && alerts[alertKey]) { alerts[alertKey].diagnosing = false; save(); }
       const next = waiting.shift();
-      if (next) void runSteward(next.prompt, next.task).catch(error => logger.error(`管家出错：${error.message}`));
+      if (next) void runSteward(next.prompt, next.task, next.options).catch(error => logger.error(`管家出错：${error.message}`));
     }
   };
   const diagnosePrompt = p => [
@@ -92,13 +105,17 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
     restarting = true;
     try {
       const before = alerts.service?.cardId;
-      const r = await supervisor.restart();
+      const r = await (deploy?.restart?.() ?? supervisor.restart());
       // 重启时又崩了，退出通知已经发了一张新的提醒卡，不再重复发
       const fresh = Boolean(alerts.service) && alerts.service.cardId !== before;
       if (alerts.service && !fresh) { alerts.service.closed = true; save(); }
       if (r.ok) {
         await settle('service', '团队服务停了', '✓ 团队服务已恢复');
         await patch(messageId, closedCard('重启团队服务', '✓ 团队服务重启好了，3 个机器人已连上飞书'));
+        return;
+      }
+      if (supervisor.status().running) {
+        await patch(messageId, closedCard('重启团队服务', `没有重启：${r.error}`));
         return;
       }
       await patch(messageId, closedCard('重启团队服务', '重启没成功，原因见下一张卡片'));
@@ -112,41 +129,48 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
     serviceDown,
     runSteward,
     busy: () => Boolean(current),
+    adminWords: () => current?.words ?? [],
 
     async onMessage({ text }) {
       const t = text.trim();
-      if (/^(状态|现状|看看)$/.test(t)) {
+      if (/^(状态|现状)$/.test(t)) {
         await bot.sendCard(statusCard({ service: supervisor.status(), snapshot: supervisor.status().running ? await workbench.state() : null, now: now(), cardId: randomUUID() }));
         return;
       }
       if (/^(停下|停止)$/.test(t)) {
-        if (current) { await current.control.stop?.(); return; }
+        if (current) { await current.control.stop?.(); await bot.sendText('正在停下。'); return; }
         await bot.sendText('我现在没在做事。');
         return;
       }
       if (/^(回退|撤销)$/.test(t) && deploy) {
         const r = await deploy.revert();
-        await bot.sendText(r.ok ? `✓ ${r.text}` : `没有回退：${r.error}`);
+        await bot.sendText(r.ok ? `✓ ${r.text}` : `没有撤销：${r.error}`);
         return;
       }
-      if (/^重启/.test(t)) {
+      if (/^(重启|重启团队服务)$/.test(t)) {
         if (restarting) { await bot.sendText('正在重启，请稍等'); return; }
-        const busy = (await workbench.state())?.projects.filter(p => p.busy) ?? [];
-        if (busy.length) { await bot.sendText(busyText(busy)); return; }
+        if (supervisor.status().running) {
+          const snapshot = await workbench.state();
+          if (!snapshot) { await bot.sendText('读不到项目状态，先不重启，过一会儿再试'); return; }
+          const working = snapshot.projects.filter(p => p.busy);
+          if (working.length) { await bot.sendText(busyText(working)); return; }
+        }
         const messageId = await bot.sendCard(closedCard('重启团队服务', '正在重启团队服务…'));
         await restart(messageId);
         return;
       }
-      if (current?.control.steer?.(t)) { current.view.guides.push(t); current.refresh(); return; }
-      if (steward) { await runSteward(`管理员说：${t}`, t); return; }
-      await bot.sendText(HELP);
+      if (current?.control.steer?.(t)) { current.words.push(t); current.view.guides.push(t); current.refresh(); return; }
+      if (steward) { await runSteward(`管理员说：${t}`, t, { words: [t] }); return; }
+      await bot.sendText(NO_MODEL);
     },
 
     // 回调要在 3 秒内返回：先回 toast，真正的活放到后台
     async onAction({ value = {}, messageId }) {
+      if (value.projectId === 'test') return toast('这是测试卡片，不会推动流程，请点正式卡片');
       if (value.action === 'restart') {
         if (restarting) return toast('正在重启，请稍等');
         if (supervisor.status().healthy) { void patch(messageId, closedCard('团队现状', '团队服务在正常运行，不用重启。发“状态”看最新情况')); return toast('团队服务在正常运行，不用重启'); }
+        restarting = true;
         void patch(messageId, closedCard('重启团队服务', '正在重启团队服务…')).then(() => restart(messageId)).catch(error => logger.error(`重启团队服务出错：${error.message}`));
         return toast('正在重启团队服务');
       }
@@ -159,8 +183,8 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
       if (value.action === 'revert' && deploy) {
         const alerted = Object.values(alerts).find(a => a.cardId === value.cardId);
         if (alerted) { alerted.closed = true; save(); }
-        void deploy.revert({ sha: value.sha }).then(r => patch(messageId, closedCard('撤销改动', r.ok ? `✓ ${r.text}` : `没有回退：${r.error}`))).catch(error => logger.error(`回退出错：${error.message}`));
-        return toast('正在回退');
+        void deploy.revert({ sha: value.sha }).then(r => patch(messageId, closedCard('撤销改动', r.ok ? `✓ ${r.text}` : `没有撤销：${r.error}`))).catch(error => logger.error(`撤销出错：${error.message}`));
+        return toast('正在撤销');
       }
       const entry = Object.entries(alerts).find(([, a]) => a.cardId === value.cardId);
       if (entry && value.action === 'diagnose') {
@@ -170,9 +194,9 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
         save();
         void (async () => {
           const p = (await workbench.state())?.projects.find(x => x.id === a.projectId);
-          if (!p) { await bot.sendText('读不到这个项目，发“状态”看最新情况'); return; }
-          await runSteward(diagnosePrompt(p), `看看 #${p.number} ${p.name} 为什么停下了`);
-        })().catch(error => logger.error(`查原因出错：${error.message}`));
+          if (!p) { a.diagnosing = false; save(); await bot.sendText('读不到这个项目，发“状态”看最新情况'); return; }
+          await runSteward(diagnosePrompt(p), `看看 #${p.number} ${p.name} 为什么停下了`, { readOnly: true, alertKey: entry[0] });
+        })().catch(error => { a.diagnosing = false; save(); logger.error(`查原因出错：${error.message}`); });
         return toast('正在查原因');
       }
       if (!entry || entry[1].closed) { void patch(messageId, closedCard('提醒', '这张提醒已经处理过了。发“状态”看最新情况')); return toast('这张卡片已经处理过了'); }
@@ -180,18 +204,23 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
       a.closed = true;
       save();
       if (value.action === 'ignore') {
-        void patch(messageId, closedCard('有项目停下了', '✓ 先不管了。之后想接着做，在群里 @ 负责的同事发“重试”'));
+        void (async () => {
+          const p = (await workbench.state())?.projects.find(x => x.id === a.projectId);
+          const who = roles[p?.retryRole]?.name ?? '负责的同事';
+          const where = p?.chatId?.startsWith('web:') ? `在工作台对 ${who}发“重试”` : `在群里 @${who} 发“重试”`;
+          await patch(messageId, closedCard('有项目停下了', `✓ 先不管 ${p ? name(p) : '这个项目'}了。之后想接着做，${where}。`));
+        })().catch(error => logger.error(`收起提醒出错：${error.message}`));
         return toast('好的，先不管');
       }
       if (value.action === 'retry') {
         void (async () => {
           const p = (await workbench.state())?.projects.find(x => x.id === a.projectId);
-          if (!p || p.waitingFor !== '重试' || p.stage !== a.stage) {
-            await patch(messageId, closedCard('有项目停下了', p ? `这张提醒过期了：${name(p)} 现在在「${stageNames[p.stage] ?? p.stage}」${p.busy ? '，有同事在干活' : ''}` : '这张提醒过期了：读不到这个项目，发“状态”看最新情况'));
+          if (!p || p.waitingFor !== '重试' || p.stage !== a.stage || p.stuckCardId !== a.stuckCardId) {
+            await patch(messageId, closedCard('有项目停下了', p ? `这张提醒过期了：${name(p)} 现在在「${stageNames[p.stage] ?? p.stage}」，${p.chatId?.startsWith('web:') ? '请到工作台看最新那张卡片' : '请到群里点最新那张卡片'}。` : '这张提醒过期了：读不到这个项目，发“状态”看最新情况'));
             return;
           }
           await workbench.message({ chatId: p.chatId, role: p.retryRole, text: '重试', via: 'admin' });
-          await patch(messageId, closedCard('有项目停下了', `✓ 已让${roles[p.retryRole]?.name ?? '负责的同事'}接着做 ${name(p)}「${stageNames[p.stage] ?? p.stage}」，群里会出现进度卡`));
+          await patch(messageId, closedCard('有项目停下了', `✓ 已让 ${roles[p.retryRole]?.name ?? '负责的同事'}接着做 ${name(p)}「${stageNames[p.stage] ?? p.stage}」，到${p.chatId?.startsWith('web:') ? '工作台' : '飞书群'}看进度卡。`));
         })().catch(async error => {
           a.closed = false;
           save();
@@ -206,15 +235,15 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
     async tick() {
       const service = supervisor.status();
       if (!service.healthy) return;
-      await deploy?.tick();
-      await settle('service', '团队服务停了', '✓ 团队服务已恢复');
       const snapshot = await workbench.state();
       if (!snapshot) return;
-      const stuck = new Map(snapshot.projects.filter(p => p.waitingFor === '重试').map(p => [`stuck:${p.id}:${p.stage}`, p]));
-      for (const [key, p] of stuck) await alert(key, cardId => stuckCard({ p, cardId }), { kind: 'stuck', projectId: p.id, stage: p.stage });
+      await deploy?.tick();
+      await settle('service', '团队服务停了', '✓ 团队服务已恢复');
+      const stuck = new Map(snapshot.projects.filter(p => p.waitingFor === '重试').map(p => [`stuck:${p.id}:${p.stage}:${p.stuckCardId ?? ''}`, p]));
+      for (const [key, p] of stuck) await alert(key, cardId => stuckCard({ p, cardId }), { kind: 'stuck', projectId: p.id, stage: p.stage, stuckCardId: p.stuckCardId });
       for (const key of Object.keys(alerts).filter(k => k.startsWith('stuck:') && !stuck.has(k))) {
         const p = snapshot.projects.find(x => x.id === alerts[key].projectId);
-        const text = !p ? '✓ 这个项目已经不在了' : p.stage === 'done' ? `✓ ${name(p)} 已${p.ended ? '结束' : '完成'}` : `✓ ${name(p)} 已经接着在做了（现在在「${stageNames[p.stage] ?? p.stage}」）`;
+        const text = !p ? '✓ 这个项目已经不在了' : p.waitingFor === '重试' ? '这一步又停下了一次，看新的提醒' : p.stage === 'done' ? `✓ ${name(p)} 已${p.ended ? '结束' : '完成'}` : `✓ ${name(p)} 已经接着在做了（现在在「${stageNames[p.stage] ?? p.stage}」）`;
         await settle(key, '有项目停下了', text);
       }
     },
