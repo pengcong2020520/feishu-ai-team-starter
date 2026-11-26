@@ -12,6 +12,7 @@ services:
       PUBLIC_WORKBENCH_BASE: http://127.0.0.1:4880
       PUBLIC_PREVIEW_BASE: http://127.0.0.1:4881
       CHROME_PATH: /usr/bin/chromium
+      SERVICE_LOG_FILE: data/service.log
     ports:
       - "127.0.0.1:4880:4870"
       - "127.0.0.1:4881:4871"

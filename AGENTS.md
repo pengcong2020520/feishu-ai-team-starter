@@ -10,7 +10,7 @@
 4. 扫完后它自动建群「AI 团队」（用户当群主）、3 个机器人发报到卡片、后台启动团队服务。最后告诉用户去群里 @AI 产品经理 说一句需求：它先回一张"要开始做吗？"卡片，点"就按这个开始"才开工。
 5. 需要联网：Codex 先切到能联网、能运行命令的模式（默认沙箱不能联网）。
 
-日常：`npm start` 后台启动团队服务（日志 `data/service.log`），`npm stop` 停止，`npm run status` 查看；`node setup.mjs status` 看搭到哪了；`npm test` 跑离线测试。工作台端口是 `.env` 的 `PREVIEW_PORT`（默认 4870，被占用时 setup 会自动换）。同一组机器人只能有一处在连飞书，启动前先 `npm run status`。用户说飞书没反应、点卡片提示"目标回调服务不在线"、电脑重启或合过盖、工作台打不开时，运行 `node setup.mjs`：它会把服务拉起来，并列出停下来没做完的项目；照它的"下一步"问用户要不要接着做，要就运行它给的 `node setup.mjs resume <编号>`。
+日常：`npm start` 后台启动团队服务（实际起的是管理服务 `src/admin/main.mjs`，由它带起团队服务 `src/main.mjs`；日志 `data/service.log`），`npm stop` 停止，`npm run status` 查看；`node setup.mjs status` 看搭到哪了；`npm test` 跑离线测试。工作台端口是 `.env` 的 `PREVIEW_PORT`（默认 4870，被占用时 setup 会自动换）。同一组机器人只能有一处在连飞书，启动前先 `npm run status`。用户说飞书没反应、点卡片提示"目标回调服务不在线"、电脑重启或合过盖、工作台打不开时，运行 `node setup.mjs`：它会把服务拉起来，并列出停下来没做完的项目；照它的"下一步"问用户要不要接着做，要就运行它给的 `node setup.mjs resume <编号>`。
 
 ## 改角色和技能
 
@@ -63,6 +63,7 @@ src/feishu.mjs          接入层（飞书调用遇到限频自动退避重试�
 src/preview.mjs         预览服务与工作台接口
 src/workbench/          消息记录
 src/main.mjs            团队服务入口
+src/admin/              管理服务：supervisor.mjs 带着团队服务跑（拉起、重启、停下），main.mjs 是 npm start 和容器的入口
 web/                    工作台前端
 scripts/                服务管理（service.mjs）、试跑与冒烟脚本
 test/                   离线测试（node:test）
