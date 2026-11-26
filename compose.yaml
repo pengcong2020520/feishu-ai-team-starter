@@ -16,7 +16,10 @@ services:
     ports:
       - "127.0.0.1:4880:4870"
       - "127.0.0.1:4881:4871"
+    # 服务器上的 git 工作区整个挂进来：管家改的代码重启团队服务就生效，不用重建镜像（改依赖、Dockerfile 才要重建）。
+    # 工作区属主要是容器里的 app 用户：chown -R 10001:10001 <工作区>
     volumes:
+      - .:/app
+      # 空的匿名卷挡住宿主机上的 node_modules（平台不同），依赖用镜像里的 /node_modules
+      - /app/node_modules
       - ./.env:/app/.env:ro
-      - ./data:/app/data
-      - ./workspace:/app/workspace

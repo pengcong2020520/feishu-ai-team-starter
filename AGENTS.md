@@ -236,6 +236,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode, contro
 - 测试在工作副本里跑（`node --test test/*.test.mjs`），环境变量只给 `PATH`、`HOME`、`LANG`，不带密钥；没过就把提交拆回成改动，失败摘要交回管家改，最多 3 次，还不过就停下告诉管理员。
 - 线上目录有别人没提交的改动、或线上在这期间往前走了：不上线，说清原因。回退用 `git revert`（作者也是管理员助手），代码类回退要重启，有项目在干活时拒绝。改动记录在 `data/admin/changes.json`。提交只在本地，不推送；之后从上游 `git pull` 和这些本地提交冲突时，按普通 git 冲突处理（或先让管家回退）。
 - 管家的模型费用：一次简单问答约 1 万 token；读 AGENTS.md 再改一处角色说明约 10 万 token（实测豆包 31 秒）。
+- 服务器（`compose.yaml`）：服务器上的 git 工作区整个挂进容器（`.:/app`，`.env` 另外只读挂），属主是容器里的 app 用户（`chown -R 10001:10001 <工作区>`；宿主机上用 root 跑 git 前先 `git config --global --add safe.directory <工作区>`）。依赖装在镜像的 `/node_modules`，`/app/node_modules` 用空的匿名卷挡住宿主机上的；镜像装了 git。管家的改动重启团队服务就生效，不用重建镜像；改依赖、Dockerfile 才要 `docker compose up -d --build`。从上游更新：`git pull` 后 `docker compose up -d --build`；管家在服务器上有本地提交时，`git pull` 会生成合并提交，冲突时先让管家回退对应改动，或手动解决。
 
 ## 8. 预览服务与工作台
 
