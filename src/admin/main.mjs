@@ -5,7 +5,7 @@ import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSupervisor } from './supervisor.mjs';
-import { workbenchMessage, workbenchState } from '../setup/service.mjs';
+import { workbenchAction, workbenchMessage, workbenchState } from '../setup/service.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 // 团队服务用启动时的环境，自己去读 .env：重启时能读到 .env 的新内容
@@ -47,11 +47,23 @@ if (config) {
   try {
     const { createAdminBot } = await import('./bot.mjs');
     const { createAssistant } = await import('./assistant.mjs');
+    const { createChanges } = await import('./changes.mjs');
+    const { createDeploy } = await import('./deploy.mjs');
     const port = Number(process.env.PREVIEW_PORT || 4870);
-    const workbench = { state: () => workbenchState(port), message: message => workbenchMessage(port, message) };
+    const workbench = { state: () => workbenchState(port), message: message => workbenchMessage(port, message), action: action => workbenchAction(port, action) };
     let ready = null;
     bot = createAdminBot({ ...config, logger, onMessage: event => ready.onMessage(event), onAction: event => ready.onAction(event) });
-    ready = createAssistant({ root, bot, supervisor, workbench, logger });
+    const changes = createChanges({ root });
+    const deploy = createDeploy({ changes, supervisor, workbench, bot, logger, handBack: text => ready.runSteward(text, '测试没过，交回管家修改') });
+    // 模型配好了才有管家；没配时只做固定的事
+    let steward = null;
+    if (['MODEL_BASE_URL', 'MODEL_API_KEY', 'MODEL_NAME'].every(k => process.env[k])) {
+      const { createSteward } = await import('./steward.mjs');
+      const { buildTools } = await import('./tools.mjs');
+      const { runAgent } = await import('../agents/run.mjs');
+      steward = createSteward({ root, tools: buildTools({ supervisor, workbench, changes, deploy, runAgent, root }) });
+    }
+    ready = createAssistant({ root, bot, supervisor, workbench, steward, deploy, changes, logger });
     await bot.start();
     assistant = ready;
     logger.log('AI 管理员助手已连上飞书');

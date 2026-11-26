@@ -23,7 +23,7 @@
 | 新增技能、调整某角色能用哪些技能 | 新建 `team-skills/skills/<名字>/SKILL.md`（开头 frontmatter 写 `name`、`description`），在 `src/agents/roles.mjs` 给角色的 `skills` 加 `team:<名字>` | `npm stop && npm start` |
 | 新增角色 | 照 `docs/动手搭建.md` 拓展 A：新机器人、角色说明、`roles.mjs`、阶段表 | 重启 |
 
-改完跑 `npm test`（会检查角色引用的说明和技能文件都存在）。想看效果可以 `node scripts/try-agent.mjs <角色> <项目目录> <任务>` 试跑一次，会花模型费用，先告诉用户。改完告诉用户：`git diff` 能看到改了什么，`git checkout -- <文件>` 能还原。
+用户也可以私聊 AI 管理员助手让它改（见 7.2）：它在工作副本里改，文字类测试过了直接生效，代码类要用户点"上线"。改完跑 `npm test`（会检查角色引用的说明和技能文件都存在）。想看效果可以 `node scripts/try-agent.mjs <角色> <项目目录> <任务>` 试跑一次，会花模型费用，先告诉用户。改完告诉用户：`git diff` 能看到改了什么，`git checkout -- <文件>` 能还原。
 
 ## 1. 要做什么
 
@@ -63,7 +63,7 @@ src/feishu.mjs          接入层（飞书调用遇到限频自动退避重试�
 src/preview.mjs         预览服务与工作台接口
 src/workbench/          消息记录
 src/main.mjs            团队服务入口
-src/admin/              管理服务与 AI 管理员助手：main.mjs（npm start 和容器的入口）、supervisor.mjs（带着团队服务跑）、bot.mjs（私聊长连接）、assistant.mjs（指令、按钮、巡检）、cards.mjs
+src/admin/              管理服务与 AI 管理员助手：main.mjs（npm start 和容器的入口）、supervisor.mjs（带着团队服务跑）、bot.mjs（私聊长连接）、assistant.mjs（指令、按钮、巡检）、cards.mjs、steward.mjs 与 tools.mjs 与 prompt.md（管家）、changes.mjs 与 deploy.mjs（工作副本、分级、上线、回退）
 web/                    工作台前端
 scripts/                服务管理（service.mjs）、试跑与冒烟脚本
 test/                   离线测试（node:test）
@@ -75,7 +75,7 @@ workspace/<项目号>/     每个项目的工作区：docs/ design/ site/（不�
 ## 3. 技术约定
 
 - Node.js 24，ES 模块（`.mjs`，package.json 里 `"type": "module"`），测试用 `node:test`（`npm test`）。
-- 依赖只用 `@anthropic-ai/claude-agent-sdk`、`@larksuiteoapi/node-sdk`、`qrcode`。确实需要别的依赖先问用户；不要手写这些库的替代实现。
+- 依赖只用 `@anthropic-ai/claude-agent-sdk`、`@larksuiteoapi/node-sdk`、`qrcode`，以及管家自定义工具要用的 `zod`（Agent SDK 的 peer 依赖）。确实需要别的依赖先问用户；不要手写这些库的替代实现。
 - `.env`（权限 600）里的变量：`FEISHU_PRODUCT_APP_ID`、`FEISHU_PRODUCT_APP_SECRET`，DESIGNER、DEVELOPER 同理；`MODEL_BASE_URL`、`MODEL_API_KEY`、`MODEL_NAME`；可选 `PREVIEW_PORT`（工作台端口，默认 4870）、`CHROME_PATH`；部署时另有 `PREVIEW_HOST`、`PUBLIC_WORKBENCH_BASE`、`PUBLIC_PREVIEW_BASE`（compose.yaml 里设）。用 `process.loadEnvFile()` 读取。
 - 密钥只在 `.env`：不写进代码、日志、命令行参数、截图；任何输出都不打印密钥，报错只写变量名；检查 `.env` 时只看变量名在不在。
 - 服务只监听 127.0.0.1；在容器里才监听 0.0.0.0，并且只发布到宿主的 127.0.0.1。
@@ -131,7 +131,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode, contro
 - **澄清与 PRD**（产品经理，同一个会话）：信息不够时它写 `docs/questions.json`，编排发问题卡片；用户回答后把回答发给它，它再问一轮或写 PRD。最多 3 轮，第 3 轮必须写 PRD。写出 `docs/prd.md` 后进入"确认 PRD"。
 - **确认 PRD** → 设计画线框、选主题 → **确认设计** → 程序员写网页 → **自动**进入走查（设计开新会话） → **验收**。
 - 打回：对应角色在群里请用户 @ 它说要改什么；改完回到同一个关口。验收时打回，程序员修改后自动再走查一轮（回归走查）。
-- 只有人（消息、按钮）和编排代码能让智能体开始干活；机器人发的消息一律不理，智能体之间不直接对话。AI 管理员助手按管理员点的按钮代为操作（见 7.2），走工作台同一套入口，群里写明"AI 管理员助手代你：……"。
+- 只有人（消息、按钮）和编排代码能让智能体开始干活；机器人发的消息一律不理，智能体之间不直接对话。AI 管理员助手按管理员的话或按钮代为操作（见 7.2），走工作台同一套入口，阶段表照旧、不能跳步，群里写明"AI 管理员助手代你：……"。
 - **群聊对话**：群里 @ 角色的话先聊，不直接开工。编排按顺序判断：机器人消息不理 → "重试""结束"这类固定指令 → 修改阶段对负责角色说的话当修改意见 → 其余进对话（`src/flow/chat.mjs`）。对话时角色只读文件，回一句话（专业角度回应 + 现状和下一步）；需要时提一个动作，发成提议卡，人点了才由代码执行。模型只提议，人点按钮，代码执行。
   - 能提的动作由代码按现状和被 @ 的角色算好写进任务消息，模型回来的提议再校验一次，不合规就只发回复：`start`（产品经理，群里没有进行中的项目）点了用 detail 开项目；`revise`（关口的负责角色：确认 PRD→产品经理、确认设计→设计、验收→程序员）点了等于打回并带上意见，直接开始改；`answer`（澄清中、有问题卡时的产品经理）点了把 detail 当回答；`retry`（停下时的负责角色）；`end`（产品经理）。
   - 每个群只留最新一条提议（记在 `state.proposals`），新提议发出后旧的收起；点按钮时核对卡片号、项目和阶段，流程已经往前走了就按过期卡片处理。
@@ -214,15 +214,28 @@ runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode, contro
 
 ### 7.2 AI 管理员助手（私聊）
 
-第 4 个机器人，只在飞书私聊里帮管理员照看团队。扫它的码的人就是管理员。
+第 4 个机器人，只在飞书私聊里帮管理员照看团队。扫它的码的人就是管理员。固定的事（状态、重启、回退、提醒、按钮）由代码直接做；其他话交给"管家"：一个只有一个持续会话的智能体，能看整个仓库、调度三个同事、改角色说明和技能、小改代码。
 
 - 配置：`.env` 的 `FEISHU_ADMIN_APP_ID`、`FEISHU_ADMIN_APP_SECRET`、`FEISHU_ADMIN_OPEN_ID`（扫码人在这个应用下的 open_id，不是密钥），由 `node setup.mjs scan` 写入；建应用时多要一个读私聊消息的权限 `im:message.p2p_msg:readonly`。三个没配齐时，管理服务只带着团队服务跑，团队服务退出它也退出，和没有管理员助手时一样。
 - 进程：管理服务（`src/admin/main.mjs`）先连管理员机器人的长连接，再把团队服务当子进程拉起（`supervisor.mjs`）。团队服务意外退出或起不来时，管理服务不跟着退，私聊提醒管理员。管理员机器人没连上（凭证不对、断网）就只记日志，团队服务照常跑。
 - 只听管理员：只处理私聊（`chat_type` 为 p2p）、`sender_type` 为 user 的消息，同一条 `message_id` 只处理一次；别人私聊回"我只听管理员的。"；群消息不理；卡片按钮只认管理员的 open_id（回调里的 `operator.open_id`），别人点了 toast"只有管理员能点"。
-- 固定指令（代码执行，不花模型费用）："状态"发现状卡（团队服务是否在运行、各进行中项目的阶段、谁在干活、等你做什么、停下的原因；没在运行时带 [重启团队服务]）；"重启"重启团队服务，有项目在干活时不重启、说清是哪个项目；其他话回一句现在能做什么。
-- 巡检提醒（只提醒，不诊断）：每 30 秒看一次。项目新停下（工作台快照里 `waitingFor` 为"重试"）→ 提醒卡"有项目停下了"[接着做][先不管]；团队服务意外退出 / 起不来 → 提醒卡"团队服务停了"（带最后几行输出）[重启团队服务]。按"项目 + 阶段"或"团队服务"去重，记在 `data/admin/alerts.json`，管理服务重启后也不重报；问题过去了（项目接着在做、团队服务恢复），没点过的提醒卡收起成一句话。
+- 固定指令（代码执行，不花模型费用）："状态"发现状卡（团队服务是否在运行、各进行中项目的阶段、谁在干活、等你做什么、停下的原因；没在运行时带 [重启团队服务]）；"重启"重启团队服务，有项目在干活时不重启、说清是哪个项目；"回退""撤销"回退最近一次管家改动；"停下"让正在做事的管家停下。其他话交给管家（`.env` 没配模型时回一句现在能做什么）。
+- 巡检提醒（只提醒，不诊断）：每 30 秒看一次。项目新停下（工作台快照里 `waitingFor` 为"重试"）→ 提醒卡"有项目停下了"[接着做][看看原因][先不管]，点"看看原因"才让管家去查（只查不改，事实和推断分开写）；团队服务意外退出 / 起不来 → 提醒卡"团队服务停了"（带最后几行输出）[重启团队服务]，最近有没回退的代码改动时多一个 [回退上一次改动]。按"项目 + 阶段"或"团队服务"去重，记在 `data/admin/alerts.json`，管理服务重启后也不重报；问题过去了（项目接着在做、团队服务恢复），没点过的提醒卡收起成一句话。
 - 代你操作：点"接着做"时先核对项目还停在提醒里的阶段，过期就把卡片改成"这张提醒过期了：……"；没过期就调工作台写接口 `POST /api/message`，带 `via: 'admin'`、`role` 为负责的角色、`text: '重试'`。工作台接口看到 `via: 'admin'` 时，群里转述成"AI 管理员助手代你：……"，操作人记成"AI 管理员助手（代你）"。
-- 卡片：卡片 1.0，`header.template` 用 `orange`（和三个角色区分），标题"AI 管理员助手 · ……"；按钮回调 3 秒内回 toast，重启、接着做放到后台做，做完把原卡片改成一句结果。
+- 卡片：卡片 1.0，`header.template` 用 `orange`（和三个角色区分），标题"AI 管理员助手 · ……"；按钮回调 3 秒内回 toast，重启、接着做、上线、回退放到后台做，做完把原卡片改成一句结果。
+
+**管家**（`steward.mjs`、`tools.mjs`、角色说明 `src/admin/prompt.md`）：
+
+- 一个持续的会话：会话号存在 `data/admin/session.json`，管理服务重启后接着用，上下文长了靠 SDK 自动压缩；没有多会话、没有"新话题"。一次只做一件事：做事时进度卡和角色干活时一样（一行在做什么 + [停下]），管理员再说的话以 `priority: 'now'` 插进当前这一步（进度卡多一行"↪ 你插话：……"），插不进去的排队；做完把进度卡改成回复 + 用时和 token。每次最多 15 分钟。
+- 选项：`systemPrompt` 读 `src/admin/prompt.md`；`tools` 是 `['Read', 'Glob', 'Grep', 'Write', 'Edit']`，没有命令行；`mcpServers` 是 `createSdkMcpServer({ name: 'admin', alwaysLoad: true, tools })`（参数用 zod 写）；`cwd` 是仓库根目录；`settingSources: []`；`env` 和 `runAgent` 一样只传模型变量；`maxTurns` 60。
+- 看：整个仓库能读，`.env*`、`data/model-key.txt`、`.claude-agent-config/`、`qr/` 拒绝；Grep 必须指定子目录（从根目录搜会扫到 `.env`）。改：Write、Edit 只能写工作副本 `.admin-work/`（`git worktree`，已在 `.gitignore`），而且只能是下面允许改的地方。
+- 工具（MCP，`mcp__admin__*`）：`team_status` 看现状；`ask_colleague` 用某个角色的对话模式在项目目录里只读回答，答案只给管家；`tell_colleague` 代管理员在群里对角色说话（工作台 `POST /api/message`，`via: 'admin'`）；`press_button` 代点关口的确认或打回（工作台 `POST /api/action`，只有管理员明确说了才用，参数里要填管理员原话）；`submit_change` 交改动；`restart_team` 重启（有项目在干活时拒绝）；`revert_change` 回退。
+- 改动分级（`changes.mjs`，代码算实际改动的文件，不信模型说的）：只动 `prompts/`、`team-skills/`、`docs/` 是文字类；动了 `src/`、`web/`、`test/` 是代码类；禁区 `src/flow/stages.mjs`、`src/agents/run.mjs`、`setup.mjs`、`src/setup/`、`.env*`、`src/admin/`、`package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml`、`.github/`、`data/`、`workspace/`，以及没列为能改的地方（如 `README.md`、`scripts/`），碰到一个整次作废、工作副本清空，管家改写一段开发任务交给管理员。
+- 文字类：工作副本里压成一个提交（作者"AI 管理员助手"，信息"管理员助手：……"）→ 跑测试 → 线上目录 `git merge --ff-only` → 私聊"改好了"卡 [撤销这次改动]。不重启，同事下次干活就用上。
+- 代码类：发签字卡（改了什么、为什么、改动文件、怎么回退）[上线][不要]。**点"上线"后才跑测试**：模型写的代码（包括测试）在管理员同意之前一行都不执行。测试过了 → 有项目在干活就等它这一步做完（巡检时再上线）→ 快进合并 → 重启团队服务 → 60 秒内连上飞书且工作台接口能访问才算健康；不健康自动 `git revert` 再重启，卡片说明已回退。签字只对那一个提交有效：之后工作副本又变了，旧卡作废。
+- 测试在工作副本里跑（`node --test test/*.test.mjs`），环境变量只给 `PATH`、`HOME`、`LANG`，不带密钥；没过就把提交拆回成改动，失败摘要交回管家改，最多 3 次，还不过就停下告诉管理员。
+- 线上目录有别人没提交的改动、或线上在这期间往前走了：不上线，说清原因。回退用 `git revert`（作者也是管理员助手），代码类回退要重启，有项目在干活时拒绝。改动记录在 `data/admin/changes.json`。提交只在本地，不推送；之后从上游 `git pull` 和这些本地提交冲突时，按普通 git 冲突处理（或先让管家回退）。
+- 管家的模型费用：一次简单问答约 1 万 token；读 AGENTS.md 再改一处角色说明约 10 万 token（实测豆包 31 秒）。
 
 ## 8. 预览服务与工作台
 
