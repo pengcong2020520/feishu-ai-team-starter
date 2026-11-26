@@ -11,9 +11,11 @@ RUN sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/
 
 # 依赖装在 /deps，链到根目录的 /node_modules：compose 把服务器上的 git 工作区挂到 /app 时，依赖不会被盖住
 # （Node 从 /app/src/… 往上找依赖，/app 里没有就找到 /node_modules；管家工作副本 /app/.admin-work 里跑测试也一样）
+# npm 源和上面的 apt 源一样默认用国内镜像（服务器到官方源实测每个请求 7 秒多）；在国外可以 --build-arg NPM_REGISTRY=https://registry.npmjs.org/
+ARG NPM_REGISTRY=https://registry.npmmirror.com/
 WORKDIR /deps
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && ln -s /deps/node_modules /node_modules
+RUN npm ci --omit=dev --registry=$NPM_REGISTRY && ln -s /deps/node_modules /node_modules
 
 WORKDIR /app
 COPY --chown=app:app . .
