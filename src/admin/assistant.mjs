@@ -1,16 +1,19 @@
-// AI 管理员助手：私聊里的固定指令、提醒卡上的按钮、每 30 秒一次的巡检。都由代码直接执行，不花模型费用
+// AI 管理员助手：私聊里的固定指令、提醒卡上的按钮、每 30 秒一次的巡检，都由代码直接执行；
+// 其他的话交给管家（steward.mjs，单会话智能体），它干活时管理员可以插话、让它停下
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { roles } from '../agents/roles.mjs';
 import { stageNames } from '../flow/stages.mjs';
-import { closedCard, serviceDownCard, statusCard, stuckCard } from './cards.mjs';
+import { closedCard, serviceDownCard, statusCard, stewardCard, stuckCard } from './cards.mjs';
+import { stewardActivity } from './steward.mjs';
 
 export const HELP = '我现在能做的：发“状态”看团队现状；发“重启”重启团队服务。项目停下、团队服务出问题时，我会私聊提醒你。';
+export const NO_MODEL = '模型没配好，我只能做固定的事：发“状态”看团队现状、发“重启”重启团队服务、发“回退”撤销上一次改动。';
 const toast = (content, type = 'info') => ({ toast: { type, content } });
 const name = p => `#${p.number} ${p.name}`;
 
-export function createAssistant({ root, bot, supervisor, workbench, logger = console, now = () => Date.now() }) {
+export function createAssistant({ root, bot, supervisor, workbench, steward = null, deploy = null, changes = null, logger = console, now = () => Date.now() }) {
   // 发过的提醒记在 data/admin/alerts.json：同一个问题只报一次，管理服务重启后也不重报
   const file = path.join(root, 'data/admin/alerts.json');
   let alerts = {};
@@ -40,7 +43,50 @@ export function createAssistant({ root, bot, supervisor, workbench, logger = con
     if (!a.closed) await patch(a.messageId, closedCard(title, text));
   };
 
-  const serviceDown = (exit, error = exit?.output) => alert('service', cardId => serviceDownCard({ exit, error, cardId }), { kind: 'service' });
+  // 最近一次没回退的代码改动：团队服务起不来时多半是它
+  const codeChange = () => { const c = changes?.lastChange(); return c?.level === 'code' ? c : null; };
+  const serviceDown = (exit, error = exit?.output) => alert('service', cardId => serviceDownCard({ exit, error, cardId, lastChange: codeChange() }), { kind: 'service' });
+
+  // 管家一次只做一件事；它在做时，管理员的话插进当前这一步，插不进去的排队
+  let current = null;
+  const waiting = [];
+  const runSteward = async (prompt, task) => {
+    if (!steward) { await bot.sendText(NO_MODEL); return; }
+    if (current) { waiting.push({ prompt, task }); return; }
+    const control = {};
+    const cardId = randomUUID();
+    const view = { task, activity: '💭 在想', steps: 0, guides: [], started: now() };
+    const render = (extra = {}) => stewardCard({ ...view, elapsedMs: now() - view.started, cardId, ...extra });
+    current = { control, cardId, view, refresh: () => {} };
+    let messageId = null;
+    let timer = null;
+    let last = 0;
+    try {
+      messageId = await bot.sendCard(render()).catch(error => { logger.error(`管理员助手发进度卡没成功：${error.message}`); return null; });
+      // 最多 2 秒更新一次进度卡
+      current.refresh = () => {
+        if (timer) return;
+        timer = setTimeout(() => { timer = null; last = Date.now(); void patch(messageId, render()); }, Math.max(0, 2000 - (Date.now() - last)));
+      };
+      const clock = setInterval(current.refresh, 15000);
+      const r = await steward.run({ prompt, control, onProgress: event => { view.steps += 1; view.activity = stewardActivity(event, root); current.refresh(); } });
+      clearInterval(clock);
+      clearTimeout(timer);
+      const reply = r.ok ? r.text : r.stopped ? '⏹ 已停下' : `⚠️ 没做完：${r.error}`;
+      if (messageId) await patch(messageId, render({ done: true, outcome: r.ok ? 'ok' : r.stopped ? 'stopped' : 'failed', reply, stats: r.stats }));
+      else await bot.sendText(reply);
+    } finally {
+      clearTimeout(timer);
+      current = null;
+      const next = waiting.shift();
+      if (next) void runSteward(next.prompt, next.task).catch(error => logger.error(`管家出错：${error.message}`));
+    }
+  };
+  const diagnosePrompt = p => [
+    `管理员想知道「#${p.number} ${p.name}」为什么在「${stageNames[p.stage] ?? p.stage}」停下了（负责的是${roles[p.retryRole]?.name ?? '某个同事'}，记下的原因：${p.error}）。`,
+    `去看 data/service.log 里相关的报错、data/state.json 里这个项目的记录、workspace/${p.id}/ 里的文件，需要的话问负责的同事。`,
+    '只查不改：不要代为重试，不要交改动。回复分三段：查到的事实、推断的原因（写明是推断）、建议下一步（比如点“接着做”、改哪里）。',
+  ].join('\n');
 
   const restart = async messageId => {
     restarting = true;
@@ -64,11 +110,23 @@ export function createAssistant({ root, bot, supervisor, workbench, logger = con
 
   return {
     serviceDown,
+    runSteward,
+    busy: () => Boolean(current),
 
     async onMessage({ text }) {
       const t = text.trim();
       if (/^(状态|现状|看看)$/.test(t)) {
         await bot.sendCard(statusCard({ service: supervisor.status(), snapshot: supervisor.status().running ? await workbench.state() : null, now: now(), cardId: randomUUID() }));
+        return;
+      }
+      if (/^(停下|停止)$/.test(t)) {
+        if (current) { await current.control.stop?.(); return; }
+        await bot.sendText('我现在没在做事。');
+        return;
+      }
+      if (/^(回退|撤销)$/.test(t) && deploy) {
+        const r = await deploy.revert();
+        await bot.sendText(r.ok ? `✓ ${r.text}` : `没有回退：${r.error}`);
         return;
       }
       if (/^重启/.test(t)) {
@@ -79,6 +137,8 @@ export function createAssistant({ root, bot, supervisor, workbench, logger = con
         await restart(messageId);
         return;
       }
+      if (current?.control.steer?.(t)) { current.view.guides.push(t); current.refresh(); return; }
+      if (steward) { await runSteward(`管理员说：${t}`, t); return; }
       await bot.sendText(HELP);
     },
 
@@ -90,7 +150,31 @@ export function createAssistant({ root, bot, supervisor, workbench, logger = con
         void patch(messageId, closedCard('重启团队服务', '正在重启团队服务…')).then(() => restart(messageId)).catch(error => logger.error(`重启团队服务出错：${error.message}`));
         return toast('正在重启团队服务');
       }
+      if (value.action === 'stop_steward') {
+        if (current?.cardId !== value.cardId) return toast('这件事已经做完了');
+        void current.control.stop?.();
+        return toast('正在停下');
+      }
+      if (['golive', 'reject_change'].includes(value.action) && deploy) return toast(await deploy.onSign({ action: value.action, cardId: value.cardId, sha: value.sha, messageId }));
+      if (value.action === 'revert' && deploy) {
+        const alerted = Object.values(alerts).find(a => a.cardId === value.cardId);
+        if (alerted) { alerted.closed = true; save(); }
+        void deploy.revert({ sha: value.sha }).then(r => patch(messageId, closedCard('撤销改动', r.ok ? `✓ ${r.text}` : `没有回退：${r.error}`))).catch(error => logger.error(`回退出错：${error.message}`));
+        return toast('正在回退');
+      }
       const entry = Object.entries(alerts).find(([, a]) => a.cardId === value.cardId);
+      if (entry && value.action === 'diagnose') {
+        const a = entry[1];
+        if (a.diagnosing) return toast('已经在查了');
+        a.diagnosing = true;
+        save();
+        void (async () => {
+          const p = (await workbench.state())?.projects.find(x => x.id === a.projectId);
+          if (!p) { await bot.sendText('读不到这个项目，发“状态”看最新情况'); return; }
+          await runSteward(diagnosePrompt(p), `看看 #${p.number} ${p.name} 为什么停下了`);
+        })().catch(error => logger.error(`查原因出错：${error.message}`));
+        return toast('正在查原因');
+      }
       if (!entry || entry[1].closed) { void patch(messageId, closedCard('提醒', '这张提醒已经处理过了。发“状态”看最新情况')); return toast('这张卡片已经处理过了'); }
       const [, a] = entry;
       a.closed = true;
@@ -122,6 +206,7 @@ export function createAssistant({ root, bot, supervisor, workbench, logger = con
     async tick() {
       const service = supervisor.status();
       if (!service.healthy) return;
+      await deploy?.tick();
       await settle('service', '团队服务停了', '✓ 团队服务已恢复');
       const snapshot = await workbench.state();
       if (!snapshot) return;

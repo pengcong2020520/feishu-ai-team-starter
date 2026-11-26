@@ -7,3 +7,5 @@ workspace
 *.log
 *.pid
 .sheet-test
+.admin-work
+qr

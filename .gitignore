@@ -8,3 +8,4 @@ qr/
 *.pid
 .sheet-test/
 .DS_Store
+.admin-work/
