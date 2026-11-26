@@ -99,9 +99,12 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
         const data = JSON.parse(body);
         if (url.pathname !== '/api/demand' && (typeof data.chatId !== 'string' || !data.chatId)) throw new Error('缺少项目会话');
         let result;
+        // AI 管理员助手（另一个进程）替管理员说话、点按钮也走这里，群里写明是它代你
+        const byAdmin = data.via === 'admin';
+        const source = byAdmin ? 'AI 管理员助手' : '工作台';
         if (url.pathname === '/api/action') {
-          await recorder?.add(data.chatId, { kind: 'action', role: data.role ?? 'product', action: data.value?.action, value: data.value, source: '工作台' });
-          result = await flow.handleAction({ chatId: data.chatId, value: data.value, formValue: data.formValue, actor: '你（工作台）' });
+          await recorder?.add(data.chatId, { kind: 'action', role: data.role ?? 'product', action: data.value?.action, value: data.value, source });
+          result = await flow.handleAction({ chatId: data.chatId, value: data.value, formValue: data.formValue, actor: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）' });
         }
         else {
           if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 4000) throw new Error('消息为空或过长');
@@ -114,9 +117,9 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
             targetChat = recent ?? (typeof data.chatId === 'string' && !data.chatId.startsWith('web:') ? data.chatId : (await feishu?.listChats?.('product'))?.[0]?.chat_id);
             if (!targetChat || (snapshot.groups[targetChat] && snapshot.groups[targetChat].stage !== 'done')) targetChat = `web:${randomUUID()}`;
           }
-          if (!targetChat.startsWith('web:')) await feishu?.sendText(targetChat, url.pathname === '/api/demand' ? `来自工作台的需求：${data.text}` : `来自工作台：${data.text}`, role);
-          await recorder?.add(targetChat, { kind: 'user', role, text: data.text, source: '工作台' });
-          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: '你（工作台）', ...(url.pathname === '/api/demand' ? { intent: 'demand' } : {}) });
+          if (!targetChat.startsWith('web:')) await feishu?.sendText(targetChat, byAdmin ? `AI 管理员助手代你：${data.text}` : url.pathname === '/api/demand' ? `来自工作台的需求：${data.text}` : `来自工作台：${data.text}`, role);
+          await recorder?.add(targetChat, { kind: 'user', role, text: data.text, source });
+          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）', ...(url.pathname === '/api/demand' ? { intent: 'demand' } : {}) });
           result = { ...result, chatId: targetChat, source: targetChat.startsWith('web:') ? '工作台项目' : '飞书群项目' };
         }
         return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');

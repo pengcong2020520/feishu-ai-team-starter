@@ -7,7 +7,9 @@ import { runSetup } from '../src/setup/run.mjs';
 import { readProgress, saveProgress } from '../src/setup/progress.mjs';
 
 const MODEL = 'MODEL_BASE_URL=https://m.test/api\nMODEL_API_KEY=sk-secret-123\nMODEL_NAME=m1\n';
-const BOTS = ['PRODUCT', 'DESIGNER', 'DEVELOPER'].map(k => `FEISHU_${k}_APP_ID=cli_${k.toLowerCase()}\nFEISHU_${k}_APP_SECRET=s_${k}\n`).join('');
+const TEAM = ['PRODUCT', 'DESIGNER', 'DEVELOPER'].map(k => `FEISHU_${k}_APP_ID=cli_${k.toLowerCase()}\nFEISHU_${k}_APP_SECRET=s_${k}\n`).join('');
+const ADMIN = 'FEISHU_ADMIN_APP_ID=cli_admin\nFEISHU_ADMIN_APP_SECRET=s_ADMIN\nFEISHU_ADMIN_OPEN_ID=ou_admin\n';
+const BOTS = TEAM + ADMIN;
 
 function setupRoot(envText) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'setup-run-'));
@@ -17,7 +19,7 @@ function setupRoot(envText) {
 }
 
 function fakes(over = {}) {
-  const calls = { install: 0, scan: [], group: [], service: 0, messages: [] };
+  const calls = { install: 0, scan: [], group: [], service: 0, stop: 0, greet: [], messages: [] };
   let running = false;
   const deps = {
     depsReady: () => true,
@@ -29,6 +31,7 @@ function fakes(over = {}) {
     checkModel: async () => ({ ok: true }),
     serviceStatus: () => ({ running }),
     startService: async () => { calls.service += 1; running = true; return { ok: true, pid: 1 }; },
+    stopService: async () => { calls.stop += 1; running = false; return { stopped: true }; },
     portsFree: async () => true,
     pickPort: async start => start,
     workbenchState: async () => null,
@@ -39,11 +42,14 @@ function fakes(over = {}) {
       installRetry: () => {},
       registerMissing: async ({ roles, save }) => { calls.scan.push(roles.map(r => r.key)); for (const role of roles) await save(role, { appId: `cli_new_${role.key}`, appSecret: 'new-secret', openId: 'ou_me' }); return roles.map(role => ({ role, ok: true, error: null })); },
       createTeamGroup: async args => { calls.group.push(args); return { chatId: 'oc_team', ownerSet: true, joinLink: null }; },
+      greetAdmin: async args => { calls.greet.push(args); },
     }),
     ...over,
   };
   return { deps, calls };
 }
+
+const env0 = root => readFileSync(path.join(root, '.env'), 'utf8');
 
 async function run(root, argv, { deps, env = {}, stdin = '' }) {
   const out = [];
@@ -97,7 +103,8 @@ test('scan：只扫缺的角色，写凭证，建群，起服务，最后让用�
   const { deps, calls } = fakes();
   const { code, text } = await run(root, ['scan'], { deps });
   assert.equal(code, 0);
-  assert.deepEqual(calls.scan, [['designer', 'developer']]);
+  assert.deepEqual(calls.scan, [['designer', 'developer', 'admin']]);
+  assert.match(env0(root), /FEISHU_ADMIN_OPEN_ID=ou_me/);
   const env = readFileSync(path.join(root, '.env'), 'utf8');
   assert.match(env, /FEISHU_DESIGNER_APP_ID=cli_new_designer/);
   assert.match(env, /FEISHU_PRODUCT_APP_ID=cli_old/);
@@ -252,4 +259,62 @@ test('resume：替用户给负责的角色发“重试”；编号不对、没�
   assert.match(down.text, /团队服务没在运行：先运行 node setup\.mjs/);
   const failed = await run(root, ['resume', '2'], { deps: fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => STUCK, workbenchMessage: async () => { throw new Error('角色无效'); } }).deps });
   assert.match(failed.text, /没能接着做：角色无效/);
+});
+
+const NO_ADMIN = () => { const root = setupRoot(MODEL + TEAM); saveProgress(root, { modelOk: true, groupReady: true, chatId: 'oc', ownerSet: true }); return root; };
+
+test('已搭好、还没有管理员助手：先把服务拉起来，再提示补扫一张码；status 也提一句', async () => {
+  const { deps, calls } = fakes({ workbenchState: async () => STUCK });
+  const { code, text } = await run(NO_ADMIN(), [], { deps });
+  assert.equal(code, 0);
+  assert.equal(calls.service, 1);
+  assert.deepEqual(calls.scan, []);
+  assert.match(text, /resume 2/);
+  assert.match(text, /创建 AI 管理员助手/);
+  assert.match(text, /node setup\.mjs scan/);
+  assert.match(text, /… AI 管理员助手/);
+  const status = await run(NO_ADMIN(), ['status'], { deps: fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => STUCK }).deps });
+  assert.match(status.text, /resume 2/);
+  assert.match(status.text, /还没建 AI 管理员助手/);
+});
+
+test('补扫管理员助手：只扫这一张，写进 3 个变量，私聊报到，重启团队服务让它上线', async () => {
+  const root = NO_ADMIN();
+  const { deps, calls } = fakes({ serviceStatus: () => ({ running: calls.stop === 0 || calls.service > 0 }), workbenchState: async () => ({ projects: [] }) });
+  const { code, text } = await run(root, ['scan'], { deps });
+  assert.equal(code, 0);
+  assert.deepEqual(calls.scan, [['admin']]);
+  assert.match(env0(root), /FEISHU_ADMIN_APP_ID=cli_new_admin\nFEISHU_ADMIN_APP_SECRET=new-secret\nFEISHU_ADMIN_OPEN_ID=ou_me/);
+  assert.equal(calls.greet[0].openId, 'ou_me');
+  assert.match(JSON.stringify(calls.greet[0].card), /AI 管理员助手 · 报到/);
+  assert.deepEqual([calls.stop, calls.service], [1, 1]);
+  assert.match(text, /AI 管理员助手上线了/);
+  assert.match(text, /✓ AI 管理员助手/);
+  assert.match(text, /私聊「AI 管理员助手」/);
+  assert.doesNotMatch(text, /new-secret/);
+});
+
+test('补扫管理员助手时有项目在干活、或没有权限停服务：不重启，告诉用户之后自己重启', async () => {
+  const busy = fakes({ serviceStatus: () => ({ running: true }), workbenchState: async () => ({ projects: [{ number: 4, name: '番茄钟', busy: true }] }) });
+  const r1 = await run(NO_ADMIN(), ['scan'], { deps: busy.deps });
+  assert.equal(busy.calls.stop, 0);
+  assert.match(r1.text, /#4 番茄钟正在干活，等这一步做完后运行 npm stop && npm start/);
+  const denied = fakes({ serviceStatus: () => ({ running: true }), stopService: async () => ({ stopped: false, denied: true }) });
+  const r2 = await run(NO_ADMIN(), ['scan'], { deps: denied.deps });
+  assert.equal(denied.calls.service, 0);
+  assert.match(r2.text, /在自己的终端里进入项目目录运行 npm stop && npm start/);
+});
+
+test('扫管理员助手的码没拿到扫码人的身份：不写半截配置，报出原因', async () => {
+  const { deps, calls } = fakes({ serviceStatus: () => ({ running: true }) });
+  const feishu = await deps.loadFeishu();
+  deps.loadFeishu = async () => ({ ...feishu, registerMissing: async ({ roles, save }) => {
+    calls.scan.push(roles.map(r => r.key));
+    try { await save(roles[0], { appId: 'cli_x', appSecret: 'sec', openId: null }); return [{ role: roles[0], ok: true }]; }
+    catch (error) { return [{ role: roles[0], ok: false, error }]; }
+  } });
+  const root = NO_ADMIN();
+  const { text } = await run(root, ['scan'], { deps });
+  assert.doesNotMatch(env0(root), /FEISHU_ADMIN_APP_ID/);
+  assert.match(text, /AI 管理员助手没建成（没拿到扫码人的身份（open_id））/);
 });

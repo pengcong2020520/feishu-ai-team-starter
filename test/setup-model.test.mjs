@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { missingModel, missingBots, nextStage } from '../src/setup/state.mjs';
+import { missingModel, missingBots, missingAdmin, nextStage } from '../src/setup/state.mjs';
 import { anthropicEnv, checkModel } from '../src/setup/model.mjs';
 
 const full = {
   MODEL_BASE_URL: 'https://m.test/api', MODEL_API_KEY: 'sk-1', MODEL_NAME: 'm1',
   FEISHU_PRODUCT_APP_ID: 'cli_a', FEISHU_PRODUCT_APP_SECRET: 's', FEISHU_DESIGNER_APP_ID: 'cli_b', FEISHU_DESIGNER_APP_SECRET: 's',
   FEISHU_DEVELOPER_APP_ID: 'cli_c', FEISHU_DEVELOPER_APP_SECRET: 's',
+  FEISHU_ADMIN_APP_ID: 'cli_d', FEISHU_ADMIN_APP_SECRET: 's', FEISHU_ADMIN_OPEN_ID: 'ou_admin',
 };
 
 test('模板里的占位符算没填', () => {
@@ -23,6 +24,16 @@ test('阶段按顺序推进', () => {
   assert.equal(s(full, { modelOk: true }), 'group');
   assert.equal(s(full, { modelOk: true, groupReady: true }), 'service');
   assert.equal(s(full, { modelOk: true, groupReady: true }, true, true), 'done');
+});
+
+test('管理员助手排在团队服务后面：已搭好的人先把服务拉起来，再补扫这一张码', () => {
+  const s = (env, serviceRunning) => nextStage({ env, progress: { modelOk: true, groupReady: true }, depsReady: true, serviceRunning });
+  const noAdmin = { ...full, FEISHU_ADMIN_OPEN_ID: '' };
+  assert.equal(missingAdmin(noAdmin), true);
+  assert.equal(missingAdmin(full), false);
+  assert.equal(s(noAdmin, false), 'service');
+  assert.equal(s(noAdmin, true), 'admin');
+  assert.equal(s(full, true), 'done');
 });
 
 test('沿用终端变量：只报变量名和地址，值交给写入', () => {

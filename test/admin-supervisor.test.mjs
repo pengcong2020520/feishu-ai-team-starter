@@ -71,7 +71,7 @@ test('一直没连上：到时间报出来但不杀它；重启换新进程；�
 
 test('npm start 后台起的是管理服务，团队服务是它的子进程；npm stop 两个一起停', async () => {
   const root = fixture({ 'src/main.mjs': "import { writeFileSync } from 'node:fs'; writeFileSync('team.pid', String(process.pid)); console.log('3 个机器人已连上飞书'); setInterval(() => {}, 1000);" });
-  for (const file of ['src/admin/main.mjs', 'src/admin/supervisor.mjs']) { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); copyFileSync(path.join(repo, file), path.join(root, file)); }
+  for (const file of ['src/admin/main.mjs', 'src/admin/supervisor.mjs', 'src/setup/service.mjs', 'src/setup/proc.mjs']) { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); copyFileSync(path.join(repo, file), path.join(root, file)); }
   const r = await startService(root, { intervalMs: 50 });
   assert.equal(r.ok, true);
   assert.equal(serviceStatus(root).running, true);
