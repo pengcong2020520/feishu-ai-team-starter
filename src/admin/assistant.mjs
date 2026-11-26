@@ -141,7 +141,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
         return;
       }
       if (/^(停下|停止)$/.test(t)) {
-        if (current) { await current.control.stop?.(); await bot.sendText('正在停下。'); return; }
+        if (current) { current.words.length = 0; await current.control.stop?.(); await bot.sendText('正在停下。'); return; }
         await bot.sendText('我现在没在做事。');
         return;
       }
@@ -179,6 +179,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
       }
       if (value.action === 'stop_steward') {
         if (current?.cardId !== value.cardId) return toast('这件事已经做完了');
+        current.words.length = 0;
         void current.control.stop?.();
         return toast('正在停下');
       }

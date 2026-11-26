@@ -42,6 +42,7 @@ test('query 选项、进度与返回值', async () => {
     assert.equal(o.maxTurns, 30);
     assert.equal(o.systemPrompt.type, 'custom');
     assert.match(o.systemPrompt.prompt, /你是 AI 产品经理/);
+    assert.match(o.systemPrompt.prompt, /本次是已获确认的正式任务/);
     assert.deepEqual(Object.keys(o.env).sort(), ['PATH', 'HOME', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'].sort());
     assert.equal(Object.keys(o.env).some(k => k.startsWith('FEISHU_')), false);
     assert.equal(await o.canUseTool('Read', { file_path: 'site/index.html' }).then(x => x.behavior), 'allow');
@@ -106,6 +107,8 @@ test('对话模式：只读、不用技能、开新会话，按固定格式返�
     const result = await createRunAgent(fakeQuery)({ role: 'designer', mode: 'chat', prompt: '群聊对话', projectDir: project, resume: 'old', timeoutMs: 60000 });
     assert.deepEqual(result.structured, { reply: '你好', proposal: { action: 'none', detail: '' } });
     assert.deepEqual(options.tools, ['Read', 'Glob']);
+    assert.match(options.systemPrompt.prompt, /本次是群聊对话：只读、不写文件/);
+    assert.doesNotMatch(options.systemPrompt.prompt, /本次是已获确认的正式任务/);
     assert.equal(options.outputFormat.type, 'json_schema');
     assert.deepEqual(options.outputFormat.schema.properties.proposal.properties.action.enum, ['none', 'start', 'revise', 'answer', 'retry', 'end']);
     assert.equal(options.plugins, undefined);

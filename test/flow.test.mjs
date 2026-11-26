@@ -287,6 +287,60 @@ test('智能体报错不自动重试，机器人消息不触发任务', () => fi
 const stuckOf = cards => cards.filter(card => card.header?.title?.content?.endsWith('这一步停下了')).at(-1);
 const okResult = text => ({ ok: true, text, sessionId: 's', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } });
 
+test('模型只口头提议、没有写文件：停在本阶段，进度卡不能宣称交付完成', () => fixture(async ({ dir }) => {
+  const updates = [];
+  const local = createFlow({ root: dir, feishu: { sendText: async () => {}, sendCard: async () => 'progress', patchCard: async (_, card) => updates.push(card) },
+    agent: async () => okResult('需求已明确，可以点下面的按钮开工。proposal: start') });
+  await local.handleMessage({ chatId: 'missing-files', text: '固定 3 个名额的读书会报名页', intent: 'demand' });
+  await local.waitForIdle('missing-files');
+  const p = await local.getProject('missing-files');
+  assert.equal(p.stage, 'clarifying');
+  assert.match(p.error, /docs\/questions\.json：文件不存在/);
+  assert.equal(p.sessions.product, 's');
+  assert.equal(updates.at(-1).header.title.content, 'AI 产品经理 · 停下了');
+  assert.match(JSON.stringify(updates.at(-1)), /⚠️ 没做完/);
+  assert.doesNotMatch(JSON.stringify(updates), /✅ 已完成/);
+}));
+
+test('同一问题卡并发提交，只能启动一轮产品任务', () => fixture(async ({ dir }) => {
+  let calls = 0;
+  const local = createFlow({ root: dir, feishu: { sendText: async () => {}, sendCard: async () => 'card', patchCard: async () => {} },
+    agent: async ({ projectDir }) => {
+      calls++;
+      await put(projectDir, 'docs/questions.json', { round: calls === 1 ? 1 : 2, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] });
+      return okResult('');
+    } });
+  await local.handleMessage({ chatId: 'double-answer', text: '报名页', intent: 'demand' });
+  await local.waitForIdle('double-answer');
+  const p = await local.getProject('double-answer');
+  const value = { action: 'answer', projectId: p.id, stage: p.stage, cardId: p.cardId };
+  const replies = await Promise.all([local.handleAction({ chatId: p.chatId, value }), local.handleAction({ chatId: p.chatId, value })]);
+  await local.waitForIdle(p.chatId);
+  assert.equal(calls, 2, '初次提问后，同一张卡只能再派一次任务');
+  assert.equal(replies.filter(x => x.toast.content === '已收到回答').length, 1);
+}));
+
+for (const action of ['retry', 'end']) test(`同一停下卡并发${action}只执行一次`, () => fixture(async ({ dir }) => {
+  let calls = 0;
+  const local = createFlow({ root: dir,
+    recorder: { add: async () => { await new Promise(resolve => setTimeout(resolve, 2)); } },
+    feishu: { sendText: async () => {}, sendCard: async () => 'card', patchCard: async () => { await new Promise(resolve => setTimeout(resolve, 5)); } },
+    agent: async ({ projectDir }) => {
+      if (++calls === 1) return { ...okResult(''), ok: false, error: '暂时失败' };
+      await put(projectDir, 'docs/questions.json', { round: 1, why: '确认', questions: [{ id: 'q', question: '选什么？', matters: '决定字段', options: ['一', '二'], recommended: 0, reason: '清楚' }] });
+      return okResult('');
+    } });
+  await local.handleMessage({ chatId: 'double-stuck', text: '报名页', intent: 'demand' });
+  await local.waitForIdle('double-stuck');
+  const p = await local.getProject('double-stuck');
+  const value = { action, projectId: p.id, stage: p.stage, cardId: p.stuckCardId };
+  const replies = await Promise.all([local.handleAction({ chatId: p.chatId, value }), local.handleAction({ chatId: p.chatId, value })]);
+  await local.waitForIdle(p.chatId);
+  assert.equal(replies.filter(x => x.toast.content === (action === 'retry' ? '已重试' : '项目已结束')).length, 1);
+  if (action === 'retry') assert.equal(calls, 2);
+  else assert.equal(JSON.parse(await readFile(path.join(dir, 'data/state.json'), 'utf8')).archived.length, 1);
+}));
+
 test('交付检查没过：停下卡上点重试，智能体会收到没过的原因', () => fixture(async ({ flow, cards, dir }) => {
   const prompts = [];
   const local = createFlow({ root: dir, id: (() => { let n = 0; return () => `k${++n}`; })(), feishu: { sendText: async () => {}, sendCard: async (_, card) => { cards.push(card); return `m${cards.length}`; }, patchCard: async () => {} }, agent: async ({ prompt, projectDir }) => {
