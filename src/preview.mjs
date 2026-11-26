@@ -8,6 +8,7 @@ import { roles } from './agents/roles.mjs';
 const headers = model => ({ 'Content-Security-Policy': model ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; form-action 'none'; connect-src 'none'" : "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' http://127.0.0.1:*; img-src 'self' data: blob:", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
 const send = (res, status, body, model = false, type = 'text/html; charset=utf-8') => { res.writeHead(status, { ...headers(model), 'Content-Type': type }); res.end(body); };
 const valid = id => /^[a-zA-Z0-9-]{1,80}$/.test(id);
+export const adminRequestAllowed = (via, header, token) => via !== 'admin' || Boolean(token && header === token);
 
 export async function startPreview({ root = process.cwd(), assetsRoot = root, host = '127.0.0.1', modelPort = 4871, workbenchPort = 4870, previewBase = `http://127.0.0.1:${modelPort}`, flow, feishu, recorder } = {}) {
   const model = http.createServer(async (req, res) => {
@@ -97,6 +98,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 16384) return send(res, 413, '请求过大', false, 'text/plain; charset=utf-8'); }
       try {
         const data = JSON.parse(body);
+        if (!adminRequestAllowed(data.via, req.headers['x-admin-token'], process.env.ADMIN_WORKBENCH_TOKEN)) return send(res, 403, JSON.stringify({ error: '只有 AI 管理员助手能这样操作' }), false, 'application/json; charset=utf-8');
         if (url.pathname !== '/api/demand' && (typeof data.chatId !== 'string' || !data.chatId)) throw new Error('缺少项目会话');
         let result;
         // AI 管理员助手（另一个进程）替管理员说话、点按钮也走这里，群里写明是它代你
@@ -119,7 +121,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
           }
           if (!targetChat.startsWith('web:')) await feishu?.sendText(targetChat, byAdmin ? `AI 管理员助手代你：${data.text}` : url.pathname === '/api/demand' ? `来自工作台的需求：${data.text}` : `来自工作台：${data.text}`, role);
           await recorder?.add(targetChat, { kind: 'user', role, text: data.text, source });
-          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）', ...(url.pathname === '/api/demand' ? { intent: 'demand' } : {}) });
+          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）', actor: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）', ...(url.pathname === '/api/demand' ? { intent: 'demand' } : {}) });
           result = { ...result, chatId: targetChat, source: targetChat.startsWith('web:') ? '工作台项目' : '飞书群项目' };
         }
         return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');

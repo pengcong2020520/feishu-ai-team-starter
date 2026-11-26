@@ -69,6 +69,22 @@ test('一直没连上：到时间报出来但不杀它；重启换新进程；�
   assert.equal(alive(s.pid), false);
 });
 
+test('并发启动共用一次就绪结果，停下和重启串行执行', async () => {
+  const root = fixture({ 'slow.mjs': "setTimeout(() => console.log('3 个机器人已连上飞书'), 120); setInterval(() => {}, 1000);" });
+  const sup = createSupervisor({ root, entry: 'slow.mjs', echo: false });
+  const first = sup.start();
+  const second = sup.start();
+  assert.equal(first, second);
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.ok, true);
+  assert.equal(a.pid, b.pid);
+  const restarted = sup.restart();
+  const stopped = sup.stop();
+  assert.equal((await restarted).ok, true);
+  assert.deepEqual(await stopped, { stopped: true });
+  assert.equal(sup.status().running, false);
+});
+
 test('npm start 后台起的是管理服务，团队服务是它的子进程；npm stop 两个一起停', async () => {
   const root = fixture({ 'src/main.mjs': "import { writeFileSync } from 'node:fs'; writeFileSync('team.pid', String(process.pid)); console.log('3 个机器人已连上飞书'); setInterval(() => {}, 1000);" });
   for (const file of ['src/admin/main.mjs', 'src/admin/supervisor.mjs', 'src/setup/service.mjs', 'src/setup/proc.mjs']) { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); copyFileSync(path.join(repo, file), path.join(root, file)); }

@@ -28,12 +28,12 @@ export function statusText({ service, snapshot, changes }) {
   }
   const state = changes.state();
   const history = (state.history ?? []).slice(-5).reverse();
-  if (history.length) lines.push('最近的改动（新的在前）：', ...history.map(c => `- ${c.sha.slice(0, 7)} ${c.title}（${c.level === 'text' ? '文字类' : '代码类'}${c.revertedBy ? '，已回退' : ''}）`));
+  if (history.length) lines.push('最近的改动（新的在前）：', ...history.map(c => `- 「${c.title}」（${c.level === 'text' ? '文字类' : '代码类'}${c.revertedBy ? '，已撤销' : ''}）编号 ${c.sha.slice(0, 7)}（只在调用 revert_change 时用，不要告诉管理员）`));
   if (state.pending) lines.push(`还没上线的改动：「${state.pending.title}」（${{ sign: '等管理员签字', testing: '在跑测试', waiting: '等项目做完再上线', going: '在上线' }[state.pending.status] ?? state.pending.status}）`);
   return lines.join('\n');
 }
 
-export function buildTools({ supervisor, workbench, changes, deploy, runAgent, root }) {
+export function buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords = () => [] }) {
   const findProject = async number => {
     const snapshot = await workbench.state();
     if (!snapshot) throw new Error('团队服务没在运行，读不到项目');
@@ -70,7 +70,7 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       const p = await findProject(project);
       if (!p.chatId) return fail(`${label(p)} 没有对应的群，不能代你说话`);
       const r = await workbench.message({ chatId: p.chatId, role, text, via: 'admin' });
-      const what = r.queued ? '它正在干活，这句话先记下了，这一步做完再回' : r.retrying ? '它开始重试这一步了' : r.stage ? '它开始按这句话修改了' : r.chatting ? '它会在群里回应' : r.confirming ? '群里发了确认卡，要人点' : '已交给编排处理';
+      const what = r.queued ? '它正在干活，这句话先记下了，这一步做完再回' : r.retrying ? '它开始重试这一步了' : r.stage ? '它开始按这句话修改了' : r.chatting ? '它会在群里回应' : r.confirming ? '群里发了确认卡，要管理员在群里点' : r.stopping ? '已让它停下这一步' : r.busy ? '它正在干活，现在不能重试；等这一步做完，或先停下再发“重试”' : r.waiting ? '没有执行：现在没有进行中的项目，或这一步并没有停下' : '已交给它处理';
       return reply(`已代管理员对${roles[role].name}说：“${text}”。${what}。`);
     })),
 
@@ -78,12 +78,17 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       project: z.number().int(),
       action: z.enum(['confirm', 'reject']),
       admin_words: z.string().min(1).describe('管理员要你这样做的原话'),
-    }, guard(async ({ project, action }) => {
+    }, guard(async ({ project, action, admin_words }) => {
+      const words = admin_words?.trim();
+      if (!words || [...words].length < 2 || !adminWords().some(said => said.includes(words))) return fail('管理员这次没说过这句话，不能代点。先问管理员。');
       const p = await findProject(project);
       const role = gateRole(p.stage);
       if (!role || p.busy || p.error || !p.cardId) return fail(`${label(p)} 现在在「${stageNames[p.stage] ?? p.stage}」，不在等人确认的关口，没有按钮可点`);
-      const r = await workbench.action({ chatId: p.chatId, role, value: { action, stage: p.stage, projectId: p.id, cardId: p.cardId }, via: 'admin' });
-      return reply(`已代管理员在「${stageNames[p.stage]}」点了“${action === 'confirm' ? '确认' : '打回'}”：${r.toast?.content ?? '已提交'}`);
+      const result = await workbench.action({ chatId: p.chatId, role, value: { action, stage: p.stage, projectId: p.id, cardId: p.cardId }, via: 'admin' });
+      if (result.toast?.content !== '已收到操作') return fail(`没点成：${result.toast?.content ?? '请看最新的项目状态'}`);
+      const buttons = { confirm_prd: ['确认 PRD', '打回 PRD', 'AI 设计开始画线框', 'AI 产品经理'], confirm_design: ['确认设计', '打回设计', 'AI 程序员会开始做网页', 'AI 设计'], accept: ['验收通过', '打回网页', '项目完成', 'AI 程序员'] };
+      const [confirm, reject, next, who] = buttons[p.stage];
+      return reply(action === 'confirm' ? `已代你点了“${confirm}”。${next}。` : `已代你点了“${reject}”。这只是退回修改，修改意见还没发出去；接着用 tell_colleague 把管理员的原话发给 ${who}。`);
     })),
 
     tool('submit_change', `交改动：你在 .admin-work/ 里改完文件后调用。代码会算出实际改了哪些文件（不看你说的），检查禁区，定级别：只动 prompts/、team-skills/、docs/ 是文字类，跑测试，过了直接生效；动了 src/、web/、test/ 是代码类，发签字卡给管理员，管理员点“上线”后才跑测试、上线、重启团队服务。测试没过会把失败输出交回给你，最多试 3 次。`, {

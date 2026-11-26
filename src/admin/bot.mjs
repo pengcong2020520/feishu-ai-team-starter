@@ -29,7 +29,7 @@ export function createAdminBot({ appId, appSecret, adminOpenId, onMessage, onAct
       'card.action.trigger': async data => {
         if (data.operator?.open_id !== adminOpenId) return { toast: { type: 'error', content: '只有管理员能点' } };
         try { return await onAction({ value: data.action?.value ?? {}, messageId: data.context?.open_message_id }); }
-        catch (error) { logger.error(`管理员助手处理按钮出错：${error.message}`); return { toast: { type: 'error', content: '操作失败，请查看服务日志' } }; }
+        catch (error) { logger.error(`管理员助手处理按钮出错：${error.message}`); return { toast: { type: 'error', content: '没点成。请再发“状态”看一下；还不行，让搭团队的助手看 data/service.log。' } }; }
       },
     },
     async start() {

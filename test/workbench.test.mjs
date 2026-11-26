@@ -5,9 +5,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRecorder, cardView } from '../src/workbench/recorder.mjs';
 import { questionCard, gateCard } from '../src/flow/cards.mjs';
-import { startPreview } from '../src/preview.mjs';
+import { adminRequestAllowed, startPreview } from '../src/preview.mjs';
+import { workbenchAction, workbenchMessage } from '../src/setup/service.mjs';
 
 const here = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+test('管理员代操作必须有非空且匹配的令牌', () => {
+  assert.equal(adminRequestAllowed('admin', 'private', 'private'), true);
+  assert.equal(adminRequestAllowed('admin', undefined, 'private'), false);
+  assert.equal(adminRequestAllowed('admin', 'private', ''), false);
+  assert.equal(adminRequestAllowed('admin', 'wrong', 'private'), false);
+  assert.equal(adminRequestAllowed(undefined, undefined, 'private'), true);
+});
 test('消息记录保留卡片、更新版本和角色筛选', async () => {
   const root = await mkdtemp(path.join(here, 'test-workbench-'));
   try {
@@ -50,6 +58,8 @@ test('工作台读取接口、安全约束和写接口共用编排入口', async
   const feishu = { listChats: async () => [{ chat_id: 'group', name: '演示' }], sendText: async (...args) => { sent.push(args); } };
   const recorder = createRecorder(root);
   let server;
+  const oldToken = process.env.ADMIN_WORKBENCH_TOKEN;
+  process.env.ADMIN_WORKBENCH_TOKEN = 'private-test-token';
   try {
     server = await startPreview({ root, assetsRoot: here, modelPort: 0, workbenchPort: 0, flow, feishu, recorder });
     const base = `http://127.0.0.1:${server.workbenchPort}`;
@@ -63,12 +73,31 @@ test('工作台读取接口、安全约束和写接口共用编排入口', async
     assert.equal((await write({ 'Content-Type': 'application/json', 'X-Workbench': '1' }, { chatId: 'group', role: 'designer', text: '你好' })).status, 200);
     assert.equal(calls[0].role, 'designer');
     assert.equal(calls[0].user, '你（工作台）');
+    assert.equal(calls[0].actor, '你（工作台）');
     assert.deepEqual(sent[0], ['group', '来自工作台：你好', 'designer']);
     // AI 管理员助手代管理员说话：群里写明是它代你
-    assert.equal((await write({ 'Content-Type': 'application/json', 'X-Workbench': '1' }, { chatId: 'group', role: 'developer', text: '重试', via: 'admin' })).status, 200);
+    const denied = await write({ 'Content-Type': 'application/json', 'X-Workbench': '1' }, { chatId: 'group', role: 'developer', text: '重试', via: 'admin' });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { error: '只有 AI 管理员助手能这样操作' });
+    assert.equal((await write({ 'Content-Type': 'application/json', 'X-Workbench': '1', 'X-Admin-Token': 'private-test-token' }, { chatId: 'group', role: 'developer', text: '重试', via: 'admin' })).status, 200);
     assert.deepEqual(sent[1], ['group', 'AI 管理员助手代你：重试', 'developer']);
     assert.equal(calls[1].user, 'AI 管理员助手（代你）');
-  } finally { if (server) await server.close(); await rm(root, { recursive: true, force: true }); }
+    assert.equal(calls[1].actor, 'AI 管理员助手（代你）');
+    const action = await fetch(base + '/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ chatId: 'group', role: 'product', value: { action: 'confirm' }, via: 'admin' }) });
+    assert.equal(action.status, 403);
+  } finally { if (server) await server.close(); await rm(root, { recursive: true, force: true }); if (oldToken === undefined) delete process.env.ADMIN_WORKBENCH_TOKEN; else process.env.ADMIN_WORKBENCH_TOKEN = oldToken; }
+});
+
+test('管理员工作台客户端只在代操作时带随机令牌', async () => {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, options) => { seen.push({ url, options }); return { ok: true, json: async () => ({ ok: true }) }; };
+  try {
+    await workbenchMessage(4870, { chatId: 'g', role: 'product', text: '重试', via: 'admin' }, 'private-token');
+    await workbenchAction(4870, { chatId: 'g', role: 'product', value: { action: 'confirm' }, via: 'admin' }, 'private-token');
+    await workbenchMessage(4870, { chatId: 'g', role: 'product', text: '你好' });
+    assert.deepEqual(seen.map(x => x.options.headers['X-Admin-Token']), ['private-token', 'private-token', undefined]);
+  } finally { globalThis.fetch = original; }
 });
 
 test('提需求按最近群状态分流：空闲进飞书，忙时进 web 会话', async () => {

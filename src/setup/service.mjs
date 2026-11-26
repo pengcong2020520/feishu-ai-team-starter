@@ -78,16 +78,16 @@ export async function workbenchState(port) {
 }
 
 // via: 'admin' 表示 AI 管理员助手代管理员说的，群里写“AI 管理员助手代你：……”
-export async function workbenchMessage(port, { chatId, role, text, via }) {
-  const res = await fetch(`http://127.0.0.1:${port}/api/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ chatId, role, text, ...(via ? { via } : {}) }), signal: AbortSignal.timeout(10000) });
+export async function workbenchMessage(port, { chatId, role, text, via }, token) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1', ...(via ? { 'X-Admin-Token': token ?? '' } : {}) }, body: JSON.stringify({ chatId, role, text, ...(via ? { via } : {}) }), signal: AbortSignal.timeout(10000) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `工作台返回 ${res.status}`);
   return data;
 }
 
 // AI 管理员助手代管理员点卡片按钮（关口的确认、打回），和在工作台上点一样
-export async function workbenchAction(port, { chatId, role, value, via }) {
-  const res = await fetch(`http://127.0.0.1:${port}/api/action`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ chatId, role, value, ...(via ? { via } : {}) }), signal: AbortSignal.timeout(10000) });
+export async function workbenchAction(port, { chatId, role, value, via }, token) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/action`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1', ...(via ? { 'X-Admin-Token': token ?? '' } : {}) }, body: JSON.stringify({ chatId, role, value, ...(via ? { via } : {}) }), signal: AbortSignal.timeout(10000) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `工作台返回 ${res.status}`);
   return data;

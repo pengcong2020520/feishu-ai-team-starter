@@ -2,6 +2,7 @@
 // 配了 AI 管理员助手（.env 的 FEISHU_ADMIN_*）时，它连上自己的长连接，团队服务出问题私聊提醒管理员；
 // 没配时，团队服务退出它也退出，和以前一样
 import { appendFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSupervisor } from './supervisor.mjs';
@@ -9,7 +10,7 @@ import { workbenchAction, workbenchMessage, workbenchState } from '../setup/serv
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 // 团队服务用启动时的环境，自己去读 .env：重启时能读到 .env 的新内容
-const baseEnv = { ...process.env };
+const baseEnv = { ...process.env, ADMIN_WORKBENCH_TOKEN: randomBytes(32).toString('hex') };
 try { process.loadEnvFile(path.join(root, '.env')); } catch {}
 const logFile = process.env.SERVICE_LOG_FILE ? path.resolve(root, process.env.SERVICE_LOG_FILE) : null;
 // 管理服务自己的话：容器里也写进 data/service.log，管理员助手以后能读到
@@ -50,18 +51,18 @@ if (config) {
     const { createChanges } = await import('./changes.mjs');
     const { createDeploy } = await import('./deploy.mjs');
     const port = Number(process.env.PREVIEW_PORT || 4870);
-    const workbench = { state: () => workbenchState(port), message: message => workbenchMessage(port, message), action: action => workbenchAction(port, action) };
+    const workbench = { state: () => workbenchState(port), message: message => workbenchMessage(port, message, baseEnv.ADMIN_WORKBENCH_TOKEN), action: action => workbenchAction(port, action, baseEnv.ADMIN_WORKBENCH_TOKEN) };
     let ready = null;
     bot = createAdminBot({ ...config, logger, onMessage: event => ready.onMessage(event), onAction: event => ready.onAction(event) });
     const changes = createChanges({ root });
-    const deploy = createDeploy({ changes, supervisor, workbench, bot, logger, handBack: text => ready.runSteward(text, '测试没过，交回管家修改') });
+    const deploy = createDeploy({ changes, supervisor, workbench, bot, logger, handBack: text => ready.runSteward(text, '测试没过，我接着改'), serviceDown: (exit, error) => ready.serviceDown(exit, error) });
     // 模型配好了才有管家；没配时只做固定的事
     let steward = null;
     if (['MODEL_BASE_URL', 'MODEL_API_KEY', 'MODEL_NAME'].every(k => process.env[k])) {
       const { createSteward } = await import('./steward.mjs');
       const { buildTools } = await import('./tools.mjs');
       const { runAgent } = await import('../agents/run.mjs');
-      steward = createSteward({ root, tools: buildTools({ supervisor, workbench, changes, deploy, runAgent, root }) });
+      steward = createSteward({ root, tools: buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords: () => ready?.adminWords() ?? [] }) });
     }
     ready = createAssistant({ root, bot, supervisor, workbench, steward, deploy, changes, logger });
     await bot.start();
