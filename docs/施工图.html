@@ -35,7 +35,7 @@ code,.k{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",mon
 </head>
 <body>
 <div class="sheet">
-  <h1>施工图：飞书 AI 团队（启蒙版）<small>一个 Node 进程 + 3 个 Agent（Agent SDK）；飞书走长连接，网页只开在本机</small></h1>
+  <h1>施工图：飞书 AI 团队（启蒙版）<small>管理服务带着团队服务（3 个 Agent，Agent SDK）；飞书走长连接，网页只开在本机</small></h1>
 
   <div class="row">
     <div class="lab">安装层<small>node setup.mjs</small></div>
@@ -110,8 +110,26 @@ code,.k{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",mon
   <div class="wire"><b>⇅</b>智能体只读写 <code>workspace/&lt;项目号&gt;/</code>，靠文件交接　·　模型请求走 <code>ANTHROPIC_BASE_URL</code></div>
 
   <div class="row">
+    <div class="lab" style="background:linear-gradient(160deg,#f59e0b,#d97706)">管理层<small>AI 管理员助手<br>私聊 · 只听管理员</small></div>
+    <div class="cards" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+      <div class="c"><h3>管理服务 <span class="k">supervisor.mjs</span></h3><span class="step">管理员助手</span>
+        <p>npm start 和容器的入口；把团队服务当子进程拉起、重启；连上飞书才算健康</p>
+        <div class="t"><span>团队服务子进程</span><span>data/service.log</span></div></div>
+      <div class="c"><h3>私聊与巡检 <span class="k">assistant.mjs</span></h3><span class="step">管理员助手</span>
+        <p>第 4 个机器人；状态、重启、回退、停下；每 30 秒巡检，停下和服务挂了私聊提醒</p>
+        <div class="t"><span>FEISHU_ADMIN_*</span><span>橙色卡片</span><span>alerts.json</span></div></div>
+      <div class="c"><h3>管家 <span class="k">steward.mjs · tools.mjs</span></h3><span class="step">管理员助手</span>
+        <p>单会话智能体：看整个仓库（密钥除外），只改 .admin-work/；问同事、代你说话和点关口</p>
+        <div class="t"><span>createSdkMcpServer · zod</span><span>via: 'admin'</span></div></div>
+      <div class="c"><h3>改动上线 <span class="k">deploy.mjs</span></h3><span class="step">管理员助手</span>
+        <p>文字类测试过了直接生效；代码类签字后才跑测试、上线、重启；起不来自动回退</p>
+        <div class="t"><span>git worktree</span><span>merge --ff-only</span><span>revert</span></div></div>
+    </div>
+  </div>
+
+  <div class="row">
     <div class="lab">基础设施<small>本机文件</small></div>
-    <div class="chips"><span>.env<small>600 · 飞书凭证 · 模型密钥</small></span><span>data/state.json<small>每群一个项目 · 阶段 · 会话 id</small></span><span>data/messages/*.jsonl<small>消息记录</small></span><span>workspace/&lt;项目号&gt;/<small>docs · design · site</small></span><span>prompts/ · team-skills/<small>起步包原文</small></span></div>
+    <div class="chips"><span>.env<small>600 · 飞书凭证 · 模型密钥</small></span><span>data/state.json<small>每群一个项目 · 阶段 · 会话 id</small></span><span>data/messages/*.jsonl<small>消息记录</small></span><span>workspace/&lt;项目号&gt;/<small>docs · design · site</small></span><span>prompts/ · team-skills/<small>起步包原文</small></span><span>data/admin/<small>管家会话 · 提醒 · 改动记录</small></span></div>
   </div>
   <div class="row">
     <div class="lab">外部系统</div>
