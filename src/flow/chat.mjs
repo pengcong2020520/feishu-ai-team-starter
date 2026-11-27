@@ -16,6 +16,7 @@ const actionText = {
 // 这次能提哪些动作：按项目现状和被 @ 的角色由代码算好，模型只能从中选
 export function allowedActions(p, role) {
   if (p?.busy) return [];
+  if (p?.dedicated && p.stage === 'done') return [];
   if (!p || p.stage === 'done') return role === 'product' ? ['start'] : [];
   if (p.error) return [...(retryRole(p) === role ? ['retry'] : []), ...(role === 'product' ? ['end'] : [])];
   return [
@@ -36,7 +37,7 @@ export function checkProposal(proposal, allowed) {
 }
 
 export const artifacts = { 'docs/prd.md': 'PRD', 'design/wireframe.html': '线框', 'design/theme.json': '主题', 'site/index.html': '网页', 'design/walkthrough.json': '走查记录' };
-const speaker = row => row.kind === 'user' ? '用户' : roles[row.role]?.name ?? 'AI 同事';
+const speaker = row => row.kind === 'user' ? row.actor || row.userName || '用户' : roles[row.role]?.name ?? 'AI 同事';
 
 export function chatPrompt({ p, role, text, recent = [], files = [] }) {
   const allowed = allowedActions(p, role);

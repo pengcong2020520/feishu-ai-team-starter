@@ -70,7 +70,8 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       question: z.string().min(1).max(1000),
     }, guard(async ({ role, project, question }) => {
       const p = await findProject(project);
-      const r = await runAgent({ role, mode: 'chat', projectDir: path.join(root, 'workspace', p.id), timeoutMs: 120000, prompt: [
+      if ((await workbench.state())?.scheduler?.limit === 1) return fail('当前全团队只有一个执行名额，管理员正在使用。请直接读取该项目文件，或结束本轮后再让同事处理。');
+      const r = await runAgent({ role, mode: 'chat', isolateSession: Boolean(p.dedicated), projectDir: path.join(root, 'workspace', p.id), timeoutMs: 120000, prompt: [
         'AI 管理员助手代管理员问你（这不是群聊，你的回答只给管理员助手看）。只读文件，把答案写在 reply 里（可以超过 120 字，但要具体），proposal 用 none。',
         `项目：${label(p)}，现在在「${stageNames[p.stage] ?? p.stage}」。`,
         `问题：${question}`,

@@ -1,6 +1,7 @@
 // 管家：AI 管理员助手背后的智能体。只有一个持续的会话（会话号存在 data/admin/session.json，重启后接着用），
 // 能看整个仓库（密钥除外），只能改工作副本 .admin-work/，没有命令行；调度同事、交改动、重启、回退都走固定工具
 import { query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import { acquireCapacity } from '../agents/capacity.mjs';
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -117,7 +118,7 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
       const abortController = new AbortController();
       let timedOut = false;
       let stopped = false;
-      const timer = setTimeout(() => { timedOut = true; abortController.abort(); }, timeoutMs);
+      let timer, release;
       const channel = inputChannel(prompt);
       let running = null;
       if (control) {
@@ -132,6 +133,9 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
       const resume = readSession();
       try {
         for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY', 'MODEL_NAME']) if (!process.env[name]) throw new Error(`缺少配置：${name}`);
+        if (queryImpl === query) release = await acquireCapacity({ root, role: 'admin', signal: abortController.signal, onQueued: waiting => { if (waiting) onProgress?.({ tool: '等待执行名额', input: {} }); } });
+        abortController.signal.throwIfAborted();
+        timer = setTimeout(() => { timedOut = true; abortController.abort(); }, timeoutMs);
         const configDir = path.join(root, '.claude-agent-config');
         mkdirSync(configDir, { recursive: true });
         const check = (tool, input) => stewardPermission(root, tool, input, readOnly);
@@ -186,6 +190,7 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
         return { ok: false, text: '', error: error.message, stats };
       } finally {
         clearTimeout(timer);
+        await release?.();
         channel.close();
         if (control) control.steer = () => false;
       }

@@ -27,16 +27,23 @@ export function createRecorder(root = process.cwd()) {
   const directory = path.join(root, 'data/messages');
   const file = chatId => path.join(directory, `${createHash('sha256').update(chatId).digest('hex')}.jsonl`);
   const listeners = new Set();
+  const writes = new Map();
   return {
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    async add(chatId, event) {
-      await mkdir(directory, { recursive: true });
-      const record = { at: new Date().toISOString(), chatId, ...event };
-      await appendFile(file(chatId), JSON.stringify(record) + '\n');
-      for (const fn of listeners) fn(record);
+    add(chatId, event) {
+      const task = (writes.get(chatId) || Promise.resolve()).catch(() => {}).then(async () => {
+        await mkdir(directory, { recursive: true });
+        const record = { at: new Date().toISOString(), chatId, ...event };
+        await appendFile(file(chatId), JSON.stringify(record) + '\n');
+        for (const fn of listeners) fn(record);
+      });
+      writes.set(chatId, task);
+      void task.finally(() => { if (writes.get(chatId) === task) writes.delete(chatId); }).catch(() => {});
+      return task;
     },
     async list(chatId, { role, limit = 300 } = {}) {
       try {
+        await writes.get(chatId);
         const rows = (await readFile(file(chatId), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
         return rows.filter(row => !role || row.role === role).slice(-limit);
       } catch (e) { if (e.code === 'ENOENT') return []; throw e; }

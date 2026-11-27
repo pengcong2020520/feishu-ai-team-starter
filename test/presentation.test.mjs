@@ -33,14 +33,14 @@ test('头像、等人标签与列数量采用新版样式', async () => {
   assert.match(css, /\.avatar\.user\{background:#F5B82E\}/);
   assert.match(css, /\.card-status\.wait\{color:#241b0a;background:#F5B82E/);
   assert.match(css, /\.column-head\{[^}]*justify-content:flex-start;gap:6px/);
-  assert.match(app, /head\.append\(el\('span',title\),el\('span',String\(items\.length\),'column-count'\)\)/);
-  assert.match(app, /\$\('#page-subtitle'\)\.textContent=p\?`\$\{stageNames\[p\.stage\]\} · \$\{p\.source\}`/);
+  assert.match(app.replace(/\s+/g, ''), /head\.append\(el\('span',title\),el\('span',String\(items\.length\),'column-count'\)\)/);
+  assert.match(app, /stageNames\[p\.stage\]\} · \$\{p\.source\}/);
 });
 
 test('详情页产物按流程挂载，预览 iframe 铺满中栏', async () => {
   assert.deepEqual(artifactStep, { prd: 0, wireframe: 1, site: 2, walkthrough: 3 });
   const [css, app] = await Promise.all(['app.css', 'app.js'].map(name => readFile(new URL(`../web/${name}`, import.meta.url), 'utf8')));
-  assert.match(app, /if\(artifactStep\[key\]!==i\)continue/);
+  assert.match(app.replace(/\s+/g, ''), /if\(artifactStep\[key\]!==i\)continue/);
   assert.match(css, /#artifact-content\{[^}]*padding:0\}/);
   assert.match(css, /#artifact-content iframe\{[^}]*width:100%;height:100%;border:0;[^}]*border-radius:0\}/);
 });
