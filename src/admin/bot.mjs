@@ -2,8 +2,9 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { withRetry } from '../feishu.mjs';
 import { createFeishuLogger } from '../feishu-logger.mjs';
+import { eventIdentity } from '../projects/events.mjs';
 
-export function createAdminBot({ appId, appSecret, adminOpenId, onMessage, onAction, logger = console, lark = Lark }) {
+export function createAdminBot({ appId, appSecret, adminOpenId, onMessage, onAction, onIdentity, logger = console, lark = Lark }) {
   const sdkLogger = createFeishuLogger(logger);
   const client = new lark.Client({ appId, appSecret, logger: sdkLogger });
   const seen = new Set();
@@ -24,13 +25,14 @@ export function createAdminBot({ appId, appSecret, adminOpenId, onMessage, onAct
           let text = '';
           try { text = String(JSON.parse(m.content ?? '{}').text ?? '').replace(/@_user_\d+/g, '').trim(); } catch {}
           if (!text) { await api.sendText('我只看得懂文字消息。'); return; }
+          await onIdentity?.(eventIdentity(data.sender.sender_id, 'admin'), data.sender.name);
           // 不等处理完：重启之类的要几十秒，长连接的事件要尽快回
           void Promise.resolve(onMessage({ text })).catch(error => logger.error(`管理员助手处理消息出错：${error.message}`));
         } catch (error) { logger.error(`管理员助手收消息出错：${error.message}`); }
       },
       'card.action.trigger': async data => {
         if (data.operator?.open_id !== adminOpenId) return { toast: { type: 'error', content: '只有管理员能点' } };
-        try { return await onAction({ value: data.action?.value ?? {}, messageId: data.context?.open_message_id }); }
+        try { await onIdentity?.(eventIdentity(data.operator, 'admin'), data.operator.name); return await onAction({ value: data.action?.value ?? {}, messageId: data.context?.open_message_id }); }
         catch (error) { logger.error(`管理员助手处理按钮出错：${error.message}`); return { toast: { type: 'error', content: '没点成。请再发“状态”看一下；还不行，让搭团队的助手看 data/service.log。' } }; }
       },
     },

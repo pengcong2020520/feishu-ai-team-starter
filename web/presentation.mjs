@@ -57,15 +57,24 @@ export function roleTimeline(events) {
   return timeline;
 }
 
+export function speakerName(event) {
+  const actor = typeof event?.actor === 'string' ? event.actor.trim() : '';
+  const userName = typeof event?.userName === 'string' ? event.userName.trim() : '';
+  return actor || userName || '你';
+}
+export const readableMentions = text => String(text).replace(/<at\b[^>]*>(.*?)<\/at>/gs, '@$1');
+
 export function messageView(event) {
   if (event.card) return { type: 'card', card: event.card, user: false };
   if ((event.kind === 'card' || event.kind === 'card_update') && event.title) return { type: 'card', card: { title: event.title }, user: false };
   if (event.kind === 'action') {
-    const label = { confirm: '你点了确认', reject: '你点了打回', answer: '你提交了回答', retry: '你点了重试', end: '你点了结束项目', keep: '你选择继续做', start: '你点了开始做', revise: '你点了按这个改', dismiss: '你选择先不做', steer: '你点了现在引导', stop: '你点了停下' }[event.action] ?? '你点了卡片按钮';
-    return { type: 'text', text: label, user: true };
+    const who = speakerName(event);
+    const verb = { confirm: '点了确认', reject: '点了打回', answer: '提交了回答', retry: '点了重试', end: '点了结束项目', keep: '选择继续做', start: '点了开始做', revise: '点了按这个改', dismiss: '选择先不做', steer: '点了现在引导', stop: '点了停下' }[event.action] ?? '点了卡片按钮';
+    return { type: 'text', text: `${who}${verb}`, user: true };
   }
   if (event.kind === 'action_result') return null;
-  if (event.text) return { type: 'text', text: event.text, user: event.kind === 'user' };
+  if (event.kind === 'user' && event.text) return { type: 'text', text: event.text, user: true };
+  if (event.text) return { type: 'text', text: readableMentions(event.text), user: event.kind === 'user' };
   return null;
 }
 

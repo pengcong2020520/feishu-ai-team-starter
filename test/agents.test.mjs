@@ -12,6 +12,23 @@ process.env.MODEL_BASE_URL ??= 'https://model.test';
 process.env.MODEL_API_KEY ??= 'test-key';
 process.env.MODEL_NAME ??= 'test-model';
 
+test('新项目的 SDK 存储按项目和角色隔离，同一角色续用原目录', async () => {
+  const a=await mkdtemp(path.join(root,'test-project-')), b=await mkdtemp(path.join(root,'test-project-')), configs=[];
+  const captured=[];
+  const fakeQuery=async function*({options}){captured.push(options);yield {type:'result',subtype:'success',is_error:false,result:'完成',session_id:'s',num_turns:1,duration_ms:1,modelUsage:{}};};
+  const run=createRunAgent(fakeQuery);
+  try{
+    for(const [projectDir,role,resume] of [[a,'product'],[b,'product'],[a,'designer'],[a,'product','s']])await run({projectDir,role,prompt:'隔离测试',isolateSession:true,resume});
+    await run({projectDir:a,role:'product',prompt:'只读问答',mode:'chat',isolateSession:true});
+    await run({projectDir:a,role:'product',prompt:'管理员代问',mode:'chat',isolateSession:true});
+    configs.push(...captured.map(o=>o.env.CLAUDE_CONFIG_DIR));
+    assert.equal(new Set(configs).size,5);assert.equal(configs[0],configs[3]);assert.equal(captured[3].resume,'s');
+    assert.notEqual(configs[4],configs[5]);assert.notEqual(configs[0],configs[4]);
+    assert.equal((await captured[0].canUseTool('Read',{file_path:path.join(b,'docs/prd.md')})).behavior,'deny');
+    assert.ok(captured.every(o=>o.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY==='1'));
+  }finally{await Promise.all([a,b,...new Set(configs.map(c=>path.dirname(c)))].map(p=>rm(p,{recursive:true,force:true})));}
+});
+
 test('query 选项、进度与返回值', async () => {
   const project = await mkdtemp(path.join(root, 'test-project-'));
   let captured;
@@ -43,7 +60,8 @@ test('query 选项、进度与返回值', async () => {
     assert.equal(o.systemPrompt.type, 'custom');
     assert.match(o.systemPrompt.prompt, /你是 AI 产品经理/);
     assert.match(o.systemPrompt.prompt, /本次是已获确认的正式任务/);
-    assert.deepEqual(Object.keys(o.env).sort(), ['PATH', 'HOME', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'].sort());
+    assert.deepEqual(Object.keys(o.env).sort(), ['PATH', 'HOME', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY'].sort());
+    assert.equal(o.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');
     assert.equal(Object.keys(o.env).some(k => k.startsWith('FEISHU_')), false);
     assert.equal(await o.canUseTool('Read', { file_path: 'site/index.html' }).then(x => x.behavior), 'allow');
     assert.equal(await o.canUseTool('Write', { file_path: 'docs/questions.json' }).then(x => x.behavior), 'allow');

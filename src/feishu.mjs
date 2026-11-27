@@ -1,6 +1,8 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { cardView } from './workbench/recorder.mjs';
 import { createFeishuLogger } from './feishu-logger.mjs';
+import { createMessageReceiver, eventIdentity } from './projects/events.mjs';
+import { recipient } from './projects/directory.mjs';
 
 const names = ['product', 'designer', 'developer'];
 const err = e => {
@@ -32,12 +34,12 @@ export const timed = (promise, ms, what) => {
   return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
 };
 
-export function createFeishu({ credentials, onMessage, onAction, recorder, logger = console, uploadMs = 60000 }) {
+export function createFeishu({ credentials, onMessage, onAction, onDiscussion, observe, shouldRecord, recorder, logger = console, uploadMs = 60000 }) {
   const sdkLogger = createFeishuLogger(logger);
   const clients = Object.fromEntries(names.map(role => [role, new Lark.Client({ ...credentials[role], logger: sdkLogger })]));
   const sockets = [];
   const ids = new Map();
-  const seen = new Set();
+  const receive = createMessageReceiver({ ids, onMessage, onDiscussion, observe, shouldRecord, recorder });
   const owner = new Map();
   const cardChats = new Map();
   const pick = (chatId, role) => clients[role ?? owner.get(chatId) ?? 'product'];
@@ -72,8 +74,37 @@ export function createFeishu({ credentials, onMessage, onAction, recorder, logge
       return r.data?.message_id;
     },
     async listChats(role = 'product') {
-      const r = await call(() => clients[role].im.v1.chat.list({ params: { page_size: 100 } }));
-      return r.data?.items ?? [];
+      const items = []; let page_token;
+      do { const r = await call(() => clients[role].im.v1.chat.list({ params: { page_size: 100, page_token } })); items.push(...r.data?.items || []); page_token = r.data?.has_more ? r.data.page_token : null; } while (page_token);
+      return items;
+    },
+    async listMembers(chatId) {
+      const items = []; let page_token;
+      do {
+        const r = await call(() => clients.product.im.v1.chatMembers.get({ path: { chat_id: chatId }, params: { member_id_type: 'union_id', page_size: 100, page_token } }));
+        items.push(...(r.data?.items || []).map(p => ({ name: p.name, identity: { unionId: p.member_id } })));
+        page_token = r.data?.has_more ? r.data.page_token : null;
+      } while (page_token);
+      return items;
+    },
+    async addMembers(chatId, people) {
+      for (const type of ['union_id', 'user_id', 'open_id']) {
+        const ids = people.map(recipient).filter(p => p?.type === type).map(p => p.id);
+        if (!ids.length) continue;
+        const r = await call(() => clients.product.im.v1.chatMembers.create({ path: { chat_id: chatId }, params: { member_id_type: type }, data: { id_list: ids } }));
+        if (r.data?.invalid_id_list?.length || r.data?.not_existed_id_list?.length || r.data?.pending_approval_id_list?.length) throw Error('部分成员未成功入群，请检查应用可用范围或群加人审批');
+      }
+    },
+    async createProjectGroup({ projectId, name, team }) {
+      const owner = recipient(team.people.find(p => p.id === team.ownerId));
+      if (!owner) throw Error('项目负责人缺少飞书身份');
+      const r = await call(() => clients.product.im.v1.chat.create({ params: { user_id_type: owner.type, set_bot_manager: true, uuid: `project-${projectId}`.slice(0, 50) }, data: {
+        name: `项目 · ${name}`.slice(0, 80), description: '本群对应一个独立项目。讨论完整留档；@ AI 同事交流，按确认卡推进。',
+        owner_id: owner.id, user_id_list: [owner.id], bot_id_list: ['designer', 'developer'].map(role => credentials[role].appId),
+      } }));
+      const chatId = r.data?.chat_id;
+      if (!chatId) throw Error('创建项目群没有返回群号');
+      return chatId;
     },
     async start() {
       for (const role of names) {
@@ -81,18 +112,7 @@ export function createFeishu({ credentials, onMessage, onAction, recorder, logge
         ids.set(role, bot.bot?.open_id ?? bot.data?.bot?.open_id);
         const dispatcher = new Lark.EventDispatcher({ logger: sdkLogger }).register({
           'im.message.receive_v1': async data => {
-            try {
-              const m = data.message ?? {};
-              if (data.sender?.sender_type !== 'user' || !m.message_id || seen.has(m.message_id)) return;
-              if (m.chat_type === 'group' && !m.mentions?.some(x => x.id?.open_id === ids.get(role) || x.id === ids.get(role))) return;
-              seen.add(m.message_id);
-              if (seen.size > 5000) seen.clear();
-              const chatId = m.chat_id;
-              owner.set(chatId, role);
-              const content = JSON.parse(m.content ?? '{}');
-              const text = String(content.text ?? '').replace(/@_user_\d+/g, '').trim();
-              if (text) { await recorder?.add(chatId, { kind: 'user', role, text }); await onMessage({ chatId, role, text, senderType: 'user', user: data.sender?.sender_id?.open_id }); }
-            } catch (e) { logger.error(err(e).message); }
+            try { await receive(data, role); } catch (e) { logger.error(err(e).message); }
           },
           'card.action.trigger': async data => {
             const chatId = data.context?.open_chat_id ?? data.open_chat_id;
@@ -104,8 +124,10 @@ export function createFeishu({ credentials, onMessage, onAction, recorder, logge
                 await recorder?.add(chatId, { kind: 'action', role, action: value?.action ?? '', accepted: false, reason: '测试卡片', value });
                 return { toast: { type: 'info', content: '这是测试卡片，不会推动流程，请点正式卡片' } };
               }
-              await recorder?.add(chatId, { kind: 'action', role, action: value?.action ?? '', value, source: '飞书' });
-              return await onAction({ chatId, value, formValue: data.action?.form_value ?? {}, actor: data.operator?.name ?? '你' });
+              const identity = eventIdentity(data.operator, role);
+              const person = await observe?.(identity, data.operator?.name);
+              await recorder?.add(chatId, { kind: 'action', role, action: value?.action ?? '', value, actor: person?.name ?? data.operator?.name ?? '群成员', identity, source: '飞书' });
+              return await onAction({ chatId, value, formValue: data.action?.form_value ?? {}, actor: person?.name ?? data.operator?.name ?? '你', identity, source: 'feishu' });
             }
             catch (e) { logger.error(err(e).message); return { toast: { type: 'error', content: '操作失败，请查看服务日志' } }; }
           },

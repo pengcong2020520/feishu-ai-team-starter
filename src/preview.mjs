@@ -31,7 +31,13 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       } catch { return send(res, 404, '页面尚未生成', false, 'text/plain; charset=utf-8'); }
     }
     if (req.method === 'GET' && url.pathname === '/api/state' && flow) return send(res, 200, JSON.stringify(await flow.getState()), false, 'application/json; charset=utf-8');
-    if (req.method === 'GET' && url.pathname === '/api/config') return send(res, 200, JSON.stringify({ modelBase: previewBase }), false, 'application/json; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/api/config') return send(res, 200, JSON.stringify({ modelBase: previewBase, teamMode: flow?.projects ? 'projects' : 'basic' }), false, 'application/json; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/api/team' && flow?.projects) return send(res, 200, JSON.stringify(await flow.projects.getTeam()), false, 'application/json; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/api/context' && flow?.projects) {
+      const p = await flow.getProjectById(url.searchParams.get('projectId'));
+      if (!p) return send(res, 404, '项目不存在', false, 'text/plain; charset=utf-8');
+      return send(res, 200, await flow.projects.context(p), false, 'text/plain; charset=utf-8');
+    }
     if (req.method === 'GET' && url.pathname === '/api/messages' && recorder) {
       const role = url.searchParams.get('role');
       if (role && !roles[role]) return send(res, 400, '角色无效', false, 'text/plain; charset=utf-8');
@@ -90,7 +96,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web/index.html'), 'utf8')); }
       catch { return send(res, 404, '工作台尚未生成', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'POST' && ['/api/demand', '/api/message', '/api/action'].includes(url.pathname) && flow) {
+    if (req.method === 'POST' && ['/api/demand', '/api/message', '/api/action', '/api/team/person', '/api/team/settings', '/api/team/import', '/api/team/project', '/api/team/admin-identity'].includes(url.pathname) && flow) {
       const origin = req.headers.origin;
       if (origin && origin !== `http://${hostValue}`) return send(res, 403, 'Origin 不允许', false, 'text/plain; charset=utf-8');
       if (req.headers['x-workbench'] !== '1' || !/^application\/json(?:;|$)/i.test(req.headers['content-type'] ?? '')) return send(res, 415, '请求格式不正确', false, 'text/plain; charset=utf-8');
@@ -99,14 +105,40 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       try {
         const data = JSON.parse(body);
         if (!adminRequestAllowed(data.via, req.headers['x-admin-token'], process.env.ADMIN_WORKBENCH_TOKEN)) return send(res, 403, JSON.stringify({ error: '只有 AI 管理员助手能这样操作' }), false, 'application/json; charset=utf-8');
+        if (url.pathname.startsWith('/api/team/')) {
+          if (!flow.projects) throw Error('项目管理尚未启用');
+          if (url.pathname === '/api/team/admin-identity') {
+            if (data.via !== 'admin' || data.identity?.role !== 'admin' || data.identity?.openId !== process.env.FEISHU_ADMIN_OPEN_ID) throw Error('管理员身份不匹配');
+            await flow.projects.observe(data.identity, data.name);
+            return send(res, 200, JSON.stringify({ ok: true }), false, 'application/json; charset=utf-8');
+          }
+          if (data.via === 'admin') throw Error('人员分工请在本机工作台管理');
+          const result = url.pathname === '/api/team/person' ? await flow.projects.directory.upsert(data)
+            : url.pathname === '/api/team/settings' ? await flow.projects.directory.settings(data)
+            : url.pathname === '/api/team/import' ? await flow.projects.importMembers(data.chatId)
+            : await flow.updateTeam(data);
+          return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');
+        }
         if (url.pathname !== '/api/demand' && (typeof data.chatId !== 'string' || !data.chatId)) throw new Error('缺少项目会话');
         let result;
         // AI 管理员助手（另一个进程）替管理员说话、点按钮也走这里，群里写明是它代你
         const byAdmin = data.via === 'admin';
         const source = byAdmin ? 'AI 管理员助手' : '工作台';
+        const identity = flow.projects ? byAdmin ? { role: 'admin', openId: process.env.FEISHU_ADMIN_OPEN_ID } : await flow.projects.localIdentity() : undefined;
+        const actorContext = flow.projects ? { identity, source: byAdmin ? 'admin' : 'local' } : {};
+        const localPerson = !byAdmin && flow.projects ? (await flow.projects.directory.get()).people.find(p => p.id === identity?.localPersonId) : null;
+        const actor = byAdmin ? 'AI 管理员助手（代你）' : localPerson ? `${localPerson.name}（工作台）` : '你（工作台）';
+        if (url.pathname === '/api/demand' && flow.projects) {
+          if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 4000) throw Error('消息为空或过长');
+          const requestId = data.requestId || randomUUID();
+          if (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(requestId)) throw Error('建项请求编号无效');
+          const options = { name: data.name, scope: data.scope, channel: data.channel, ownerId: data.ownerId, memberIds: data.memberIds, approvers: data.approvers };
+          const result = await flow.handleMessage({ chatId: `web:entry-${requestId}`, text: data.text, role: 'product', intent: 'demand', options, requestId, ...actorContext });
+          return send(res, 200, JSON.stringify({ ...result, source: result.chatId.startsWith('web:') ? '本机项目' : '飞书项目群' }), false, 'application/json; charset=utf-8');
+        }
         if (url.pathname === '/api/action') {
-          await recorder?.add(data.chatId, { kind: 'action', role: data.role ?? 'product', action: data.value?.action, value: data.value, source });
-          result = await flow.handleAction({ chatId: data.chatId, value: data.value, formValue: data.formValue, actor: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）' });
+          await recorder?.add(data.chatId, { kind: 'action', role: data.role ?? 'product', action: data.value?.action, value: data.value, actor, source });
+          result = await flow.handleAction({ chatId: data.chatId, value: data.value, formValue: data.formValue, actor, ...actorContext });
         }
         else {
           if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 4000) throw new Error('消息为空或过长');
@@ -120,8 +152,8 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
             if (!targetChat || (snapshot.groups[targetChat] && snapshot.groups[targetChat].stage !== 'done')) targetChat = `web:${randomUUID()}`;
           }
           if (!targetChat.startsWith('web:')) await feishu?.sendText(targetChat, byAdmin ? `AI 管理员助手代你：${data.text}` : url.pathname === '/api/demand' ? `来自工作台的需求：${data.text}` : `来自工作台：${data.text}`, role);
-          await recorder?.add(targetChat, { kind: 'user', role, text: data.text, source });
-          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）', actor: byAdmin ? 'AI 管理员助手（代你）' : '你（工作台）', ...(url.pathname === '/api/demand' ? { intent: 'demand' } : {}) });
+          await recorder?.add(targetChat, { kind: 'user', role, text: data.text, actor, source });
+          result = await flow.handleMessage({ chatId: targetChat, role, text: data.text, senderType: 'user', user: actor, actor, ...actorContext, ...(url.pathname === '/api/demand' ? { intent: 'demand' } : {}) });
           result = { ...result, chatId: targetChat, source: targetChat.startsWith('web:') ? '工作台项目' : '飞书群项目' };
         }
         return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');

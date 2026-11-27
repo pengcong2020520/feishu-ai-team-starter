@@ -12,6 +12,7 @@ import { createTeamGroup, greetAdmin } from './group.mjs';
 import { introCard as adminIntroCard } from '../admin/cards.mjs';
 import { stageNames } from '../flow/stages.mjs';
 import { createFeishuLogger } from '../feishu-logger.mjs';
+import { resolveTeamMode, teamModeNames } from '../team-mode.mjs';
 
 const portOf = env => Number(env.PREVIEW_PORT || 4870);
 const workbenchOf = env => `http://127.0.0.1:${portOf(env)}`;
@@ -59,6 +60,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     const bots = team.length - missingBots(fileEnv).length;
     const mark = ok => (ok ? '✓' : '…');
     log(['', '== 当前进度 ==',
+      `版本：${teamModeNames[resolveTeamMode({ root, env: fileEnv })]}`,
       `${mark(progress.modelOk && !missingModel(fileEnv).length)} 模型`,
       `${mark(depsOk())} 依赖`,
       `${mark(bots === team.length)} 飞书机器人 ${bots}/${team.length}`,
@@ -69,7 +71,27 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     return code;
   };
 
-  if (command === 'model') {
+  if (command === 'mode') {
+    const selected = rest[0];
+    if (!Object.hasOwn(teamModeNames, selected)) return finish(1, ['请选择：node setup.mjs mode basic（启航版）或 node setup.mjs mode projects（领航版）']);
+    const current = readEnv(envFile);
+    if (serviceRunning() && resolveTeamMode({ root, env: current }) !== selected) return finish(1, ['请等正在执行的步骤结束后 npm stop，再选择版本；原数据会保留']);
+    resolveTeamMode({ root, env: { TEAM_MODE: selected } });
+    updateEnv(envFile, { TEAM_MODE: selected });
+    return finish(0, [`已选择${teamModeNames[selected]}。运行 node setup.mjs 继续；使用已有机器人升级多项目时，再按 docs/prompts/projects.md 补权限和人员分工。`]);
+  } else if (command === 'upgrade-projects') {
+    if (!depsOk()) return finish(1, ['请先运行 node setup.mjs 安装依赖，再运行 node setup.mjs upgrade-projects']);
+    const current = readEnv(envFile);
+    if (missingBots(current).includes('product') || !current.FEISHU_PRODUCT_APP_ID || /^cli_x+$/.test(current.FEISHU_PRODUCT_APP_ID)) return finish(1, ['请先配置现有的 AI 产品经理机器人']);
+    const f = await d.loadFeishu();
+    f.installRetry(f.lark.defaultHttpInstance, { log });
+    log('给现有 AI 产品经理增补：记录全部群讨论、读取私聊、按职责拉人。不创建新机器人。请扫码查看权限差异并确认。');
+    const result = await f.registerMissing({ lark: f.lark, qrcode: f.qrcode, roles: [{ ...team[0], existingAppId: current.FEISHU_PRODUCT_APP_ID }], qrDir: path.join(root, 'qr'), log,
+      save: async (_role, r) => { updateEnv(envFile, { FEISHU_PRODUCT_APP_SECRET: r.appSecret }); saveProgress(root, { projectScopesRequested: true, ...(r.openId ? { ownerOpenId: r.openId } : {}) }); },
+    });
+    if (result.every(r => r.ok)) updateEnv(envFile, { TEAM_MODE: 'projects' });
+    return finish(result.every(r => r.ok) ? 0 : 1, [result.every(r => r.ok) ? '现有机器人授权已更新，并选择领航版。等正在执行的步骤结束后重启本机服务，在工作台导入真人并设置本机操作者；验证普通群消息入档，权限是否生效以飞书接口检查为准。' : '授权未完成，重新运行 node setup.mjs upgrade-projects 即可。']);
+  } else if (command === 'model') {
     const updates = {};
     if (flag('--base-url')) updates.MODEL_BASE_URL = flag('--base-url');
     if (flag('--model')) updates.MODEL_NAME = flag('--model');
@@ -104,7 +126,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     catch (error) { return finish(1, [`没能接着做：${error.message}`]); }
     return finish(0, [`告诉用户：已让${name}接着做 #${p.number} ${p.name}「${stageNames[p.stage] ?? p.stage}」，去飞书群或工作台 ${workbenchOf(fileEnv)} 看进度卡`]);
   } else if (command && !['scan', 'status'].includes(command)) {
-    return finish(1, [`不认识的参数：${command}。可用：node setup.mjs、node setup.mjs scan、node setup.mjs status、node setup.mjs resume <编号>、node setup.mjs model …、node setup.mjs --use-anthropic-env`]);
+    return finish(1, [`不认识的参数：${command}。可用：node setup.mjs、node setup.mjs mode basic|projects、node setup.mjs upgrade-projects、node setup.mjs scan、node setup.mjs status、node setup.mjs resume <编号>、node setup.mjs model …、node setup.mjs --use-anthropic-env`]);
   }
 
   // 依赖不在、也没在装，就先在后台装：用户回答问题的同时装好
@@ -131,7 +153,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     feishu ??= await d.loadFeishu();
     feishu.installRetry(feishu.lark.defaultHttpInstance, { log });
     const results = await feishu.registerMissing({
-      lark: feishu.lark, qrcode: feishu.qrcode, roles, qrDir: path.join(root, 'qr'), log,
+      lark: feishu.lark, qrcode: feishu.qrcode, roles: roles.map(role => ({ ...role, mode: resolveTeamMode({ root, env: readEnv(envFile) }) })), qrDir: path.join(root, 'qr'), log,
       save: async (role, r) => {
         if (role.key === 'admin') {
           if (!r.openId) throw new Error('没拿到扫码人的身份，请用飞书手机版重扫这一张码');
@@ -242,7 +264,9 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     return finish(0, [
       ...await stuckLines(fileEnv),
       '都好了。告诉用户：',
-      '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；它回一张“要开始做吗？”卡片，点“就按这个开始”才开工，之后按卡片提示点按钮',
+      resolveTeamMode({ root, env: fileEnv }) === 'projects'
+        ? '1. 先在工作台“人员与职责”从「AI 团队」导入真人、设置本机操作者，维护岗位、负责范围和确认事项；再提需求，产品经理会新建独立项目群。已有机器人需补权限时运行 node setup.mjs upgrade-projects。'
+        : '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；它回一张“要开始做吗？”卡片，点“就按这个开始”后在原群开工，之后按卡片提示点按钮',
       progress.ownerSet ? null : progress.joinLink ? `   还不在群里的话，先打开这个链接进群：${progress.joinLink}` : '   还不在群里的话：在飞书里新建一个群，把 3 个机器人拉进来（群设置 → 群机器人 → 添加机器人）',
       `2. 本机工作台：${workbenchOf(readEnv(envFile))}`,
       '3. 飞书里私聊「AI 管理员助手」：发“状态”看团队现状；项目停下、团队服务出问题时它会私聊提醒',

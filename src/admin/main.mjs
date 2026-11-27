@@ -53,7 +53,10 @@ if (config) {
     const port = Number(process.env.PREVIEW_PORT || 4870);
     const workbench = { state: () => workbenchState(port), message: message => workbenchMessage(port, message, baseEnv.ADMIN_WORKBENCH_TOKEN), action: action => workbenchAction(port, action, baseEnv.ADMIN_WORKBENCH_TOKEN) };
     let ready = null;
-    bot = createAdminBot({ ...config, logger, onMessage: event => ready.onMessage(event), onAction: event => ready.onAction(event) });
+    bot = createAdminBot({ ...config, logger, onIdentity: async (identity, name) => {
+      // 只把已经由管理员机器人验证的本人身份送给团队进程，不能由工作台请求伪造。
+      try { await fetch(`http://127.0.0.1:${port}/api/team/admin-identity`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1', 'X-Admin-Token': baseEnv.ADMIN_WORKBENCH_TOKEN }, body: JSON.stringify({ via: 'admin', identity, name }), signal: AbortSignal.timeout(1000) }); } catch {}
+    }, onMessage: event => ready.onMessage(event), onAction: event => ready.onAction(event) });
     const changes = createChanges({ root });
     const deploy = createDeploy({ changes, supervisor, workbench, bot, logger, handBack: text => ready.runSteward(text, '测试没过，我接着改'), serviceDown: (exit, error) => ready.serviceDown(exit, error) });
     // 模型配好了才有管家；没配时只做固定的事

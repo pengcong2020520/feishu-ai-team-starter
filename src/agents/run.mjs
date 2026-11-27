@@ -3,7 +3,9 @@ import { readFile, mkdir, realpath, lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash, randomUUID } from 'node:crypto';
 import { roles } from './roles.mjs';
+import { acquireCapacity } from './capacity.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const tools = ['Read', 'Write', 'Edit', 'Glob', 'Skill'];
@@ -114,7 +116,7 @@ function inputChannel(prompt) {
 }
 
 export function createRunAgent(queryImpl = query) {
-  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode = 'work', control }) {
+  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode = 'work', control, isolateSession = false }) {
     const started = Date.now();
     const stats = { turns: 0, durationMs: 0, inputTokens: 0, outputTokens: 0 };
     let sessionId = null;
@@ -146,7 +148,9 @@ export function createRunAgent(queryImpl = query) {
       const chat = mode === 'chat';
       const allowed = chat ? chatTools : tools;
       if (!chat) await mkdir(path.join(cwd, roles[role].writeDir), { recursive: true });
-      const configDir = path.join(root, '.claude-agent-config');
+      const configDir = isolateSession
+        ? path.join(root, '.claude-agent-config/isolated', createHash('sha256').update(await realpath(cwd)).digest('hex'), ...(chat ? [`${role}-chat`, randomUUID()] : [role]))
+        : path.join(root, '.claude-agent-config');
       await mkdir(configDir, { recursive: true });
       if (existsSync(path.join(root, '.env'))) process.loadEnvFile(path.join(root, '.env'));
       for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY', 'MODEL_NAME']) {
@@ -188,6 +192,7 @@ export function createRunAgent(queryImpl = query) {
           ANTHROPIC_BASE_URL: process.env.MODEL_BASE_URL,
           ANTHROPIC_AUTH_TOKEN: process.env.MODEL_API_KEY,
           CLAUDE_CONFIG_DIR: configDir,
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
           ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.MODEL_NAME,
         },
       };
@@ -227,4 +232,18 @@ export function createRunAgent(queryImpl = query) {
   };
 }
 
-export const runAgent = createRunAgent();
+const execute = createRunAgent();
+export async function runAgent(args) {
+  const queued = new AbortController();
+  const queueTimer = args.mode === 'chat' ? setTimeout(() => queued.abort(), args.timeoutMs || 60000) : null;
+  let release;
+  if (args.control) { args.control.stop = async () => queued.abort(); args.control.steer = () => false; }
+  try {
+    release = await acquireCapacity({ root, role: args.role, project: path.basename(args.projectDir), signal: queued.signal, onQueued: args.onQueued });
+    clearTimeout(queueTimer);
+    queued.signal.throwIfAborted();
+    return await execute(args);
+  } catch (error) {
+    return { ok: false, text: '', sessionId: null, error: queued.signal.aborted ? '已取消排队' : error.message, ...(queued.signal.aborted ? { stopped: true } : {}), stats: { turns: 0, durationMs: 0, inputTokens: 0, outputTokens: 0 } };
+  } finally { clearTimeout(queueTimer); await release?.(); }
+}

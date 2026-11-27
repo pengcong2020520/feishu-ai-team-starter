@@ -4,9 +4,31 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { team } from '../src/setup/team.mjs';
-import { ADDONS, installRetry, registerMissing } from '../src/setup/register.mjs';
+import { ADDONS, installRetry, registerMissing, registerRole } from '../src/setup/register.mjs';
 
 const qrcode = { async toFile(file) { writeFileSync(file, 'png'); } };
+
+test('新建基础版不申请全部群消息；多项目版才增补对应权限', async () => {
+  const requested = [];
+  const lark = { registerApp: async options => { requested.push(options.addons.scopes.tenant); return { client_id: 'cli_new', client_secret: 'test-only' }; } };
+  await registerRole({ lark, role: { ...team[0], mode: 'basic' } });
+  await registerRole({ lark, role: { ...team[0], mode: 'projects' } });
+  for (const scope of ['im:message.group_msg', 'im:message.p2p_msg:readonly', 'im:chat.members:write_only']) {
+    assert.equal(requested[0].includes(scope), false);
+    assert.equal(requested[1].includes(scope), true);
+  }
+});
+
+test('多项目授权更新指定现有机器人，不重建；应用号不一致时不保存', async () => {
+  let options;
+  const lark = { registerApp: async input => { options = input; return { client_id: 'cli_existing', client_secret: 'test-only' }; } };
+  const role = { ...team[0], existingAppId: 'cli_existing' };
+  await registerRole({ lark, role, onQr: () => {} });
+  assert.equal(options.appId, 'cli_existing'); assert.notEqual(options.createOnly, true);
+  assert.ok(options.addons.scopes.tenant.includes('im:message.group_msg'));
+  lark.registerApp = async () => ({ client_id: 'cli_other', client_secret: 'test-only' });
+  await assert.rejects(registerRole({ lark, role, onQr: () => {} }), /不一致/);
+});
 
 test('扫码轮询断网时重试，其他请求和非网络错误不重试', async () => {
   let handler; let resent = 0;
