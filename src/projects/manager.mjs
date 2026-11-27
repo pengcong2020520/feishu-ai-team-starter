@@ -40,14 +40,14 @@ export function createProjectManager({ root = process.cwd(), feishu, recorder, d
         let request = registry.requests[requestId];
         if (request && request.fingerprint !== fingerprint) throw Error('这次建项请求已经用于其他需求，请重新提需求');
         if (!request) {
-          const team = await directory.plan({ text, scope: options.scope, ownerId: options.ownerId, memberIds: options.memberIds, approvers: options.approvers, identity });
+          const team = await directory.plan({ text, scope: options.scope, ownerId: options.ownerId, memberIds: options.memberIds, approvers: options.approvers, identity, stages: options.approvalStages });
           if (channel === 'feishu' && !feishu?.createProjectGroup) throw Error('尚未连接飞书，请选择本机项目');
           if (channel === 'feishu' && team.people.some(p => !recipient(p))) throw Error('项目成员缺少飞书身份，请先从现有群导入这些人员，或选择本机项目');
           request = { projectId, sourceChatId, text, fingerprint, name: String(options.name || text).trim().slice(0, 60), team, channel, createdAt: new Date().toISOString() };
           registry.requests[requestId] = request; await save();
         }
         if (!request.chatId) {
-          request.chatId = channel === 'local' ? `web:${request.projectId}` : await feishu.createProjectGroup({ projectId: request.projectId, name: request.name, team: request.team });
+          request.chatId = channel === 'local' ? `web:${request.projectId}` : await feishu.createProjectGroup({ projectId: request.projectId, name: request.name, team: request.team, ...(options.botRoles ? { botRoles: options.botRoles } : {}) });
           await save();
         }
         // 群号先落盘，再邀请人员。加人失败或重启后只补邀请，不重建群。
@@ -90,7 +90,7 @@ export function createProjectManager({ root = process.cwd(), feishu, recorder, d
       return `${at}，请处理${approvalNames[stage] || '项目确认'}${tags ? `（${tags}）` : ''}。其他成员可以补充意见，确认按钮由指定负责人操作。`;
     },
     async updateTeam(project, input) {
-      const team = await directory.plan({ text: project.demand, scope: project.team?.scope, ...input });
+      const team = await directory.plan({ text: project.demand, scope: project.team?.scope, ...input, stages: project.approvalStages });
       if (!project.chatId.startsWith('web:')) {
         if (team.people.some(p => !recipient(p))) throw Error('新成员缺少飞书身份，请先导入');
         await feishu.addMembers(project.chatId, team.people);

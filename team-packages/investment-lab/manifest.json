@@ -1,0 +1,422 @@
+{
+  "schemaVersion": 1,
+  "runtime": "feishu-team/1",
+  "id": "investment-lab",
+  "name": "观澜 · 投研团队",
+  "version": "1.0.0",
+  "description": "公开资料研究、收益与风险分析、反方评审及尽调建议。",
+  "author": "Feishu AI Team contributors",
+  "license": "MIT",
+  "workflow": "collaboration/workflow.json",
+  "collaboration": "collaboration/SKILL.md",
+  "roles": [
+    {
+      "id": "chief",
+      "name": "AI 研究主理人",
+      "description": "澄清研究目标，编排任务并汇总证据",
+      "prompt": "agents/chief.md",
+      "skills": [
+        "chief-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "brief",
+        "sources",
+        "analysis",
+        "judgment",
+        "review",
+        "recommendations",
+        "report",
+        "context"
+      ],
+      "write": [
+        "brief",
+        "report"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "radar",
+      "name": "AI 信息雷达",
+      "description": "检索公开资料，记录出处和日期",
+      "prompt": "agents/radar.md",
+      "skills": [
+        "radar-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill",
+        "WebFetch",
+        "WebSearch"
+      ],
+      "read": [
+        "brief",
+        "sources",
+        "analysis",
+        "judgment",
+        "review",
+        "recommendations",
+        "report",
+        "context"
+      ],
+      "write": [
+        "sources"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "analyst",
+      "name": "AI 收益与风险分析师",
+      "description": "分析收益驱动因素、风险和情景",
+      "prompt": "agents/analyst.md",
+      "skills": [
+        "analyst-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "brief",
+        "sources",
+        "analysis",
+        "judgment",
+        "review",
+        "recommendations",
+        "report",
+        "context"
+      ],
+      "write": [
+        "analysis"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "judge",
+      "name": "AI 投资判断师",
+      "description": "比较证据与反证，形成判断",
+      "prompt": "agents/judge.md",
+      "skills": [
+        "judge-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "brief",
+        "sources",
+        "analysis",
+        "judgment",
+        "review",
+        "recommendations",
+        "report",
+        "context"
+      ],
+      "write": [
+        "judgment"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "venture",
+      "name": "AI 创投评审",
+      "description": "检查市场、团队、壁垒和执行风险",
+      "prompt": "agents/venture.md",
+      "skills": [
+        "venture-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill",
+        "WebFetch",
+        "WebSearch"
+      ],
+      "read": [
+        "brief",
+        "sources",
+        "analysis",
+        "judgment",
+        "review",
+        "recommendations",
+        "report",
+        "context"
+      ],
+      "write": [
+        "review"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "recommender",
+      "name": "AI 研究建议师",
+      "description": "输出后续尽调与观察清单",
+      "prompt": "agents/recommender.md",
+      "skills": [
+        "recommender-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "brief",
+        "sources",
+        "analysis",
+        "judgment",
+        "review",
+        "recommendations",
+        "report",
+        "context"
+      ],
+      "write": [
+        "recommendations"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    }
+  ],
+  "skills": [
+    {
+      "id": "chief-method",
+      "version": "1.0.0",
+      "path": "skills/chief-method/SKILL.md",
+      "description": "澄清研究目标，编排任务并汇总证据",
+      "inputs": [
+        "用户研究目标",
+        "已交接资料"
+      ],
+      "outputs": [
+        "brief/result.md"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "radar-method",
+      "version": "1.0.0",
+      "path": "skills/radar-method/SKILL.md",
+      "description": "检索公开资料，记录出处和日期",
+      "inputs": [
+        "用户研究目标",
+        "已交接资料"
+      ],
+      "outputs": [
+        "sources/result.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch"
+      ],
+      "resources": []
+    },
+    {
+      "id": "analyst-method",
+      "version": "1.0.0",
+      "path": "skills/analyst-method/SKILL.md",
+      "description": "分析收益驱动因素、风险和情景",
+      "inputs": [
+        "用户研究目标",
+        "已交接资料"
+      ],
+      "outputs": [
+        "analysis/result.md"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "judge-method",
+      "version": "1.0.0",
+      "path": "skills/judge-method/SKILL.md",
+      "description": "比较证据与反证，形成判断",
+      "inputs": [
+        "用户研究目标",
+        "已交接资料"
+      ],
+      "outputs": [
+        "judgment/result.md"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "venture-method",
+      "version": "1.0.0",
+      "path": "skills/venture-method/SKILL.md",
+      "description": "检查市场、团队、壁垒和执行风险",
+      "inputs": [
+        "用户研究目标",
+        "已交接资料"
+      ],
+      "outputs": [
+        "review/result.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch"
+      ],
+      "resources": []
+    },
+    {
+      "id": "recommender-method",
+      "version": "1.0.0",
+      "path": "skills/recommender-method/SKILL.md",
+      "description": "输出后续尽调与观察清单",
+      "inputs": [
+        "用户研究目标",
+        "已交接资料"
+      ],
+      "outputs": [
+        "recommendations/result.md"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    }
+  ],
+  "workspace": {
+    "directories": [
+      "brief",
+      "sources",
+      "analysis",
+      "judgment",
+      "review",
+      "recommendations",
+      "report"
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "chief",
+      "name": "AI 研究主理人交付",
+      "path": "brief/result.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "radar",
+      "name": "AI 信息雷达交付",
+      "path": "sources/result.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "analyst",
+      "name": "AI 收益与风险分析师交付",
+      "path": "analysis/result.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "judge",
+      "name": "AI 投资判断师交付",
+      "path": "judgment/result.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "venture",
+      "name": "AI 创投评审交付",
+      "path": "review/result.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "recommender",
+      "name": "AI 研究建议师交付",
+      "path": "recommendations/result.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "report",
+      "name": "研究报告",
+      "path": "report/final.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    }
+  ],
+  "examples": [
+    {
+      "name": "开源商业模式研究",
+      "demand": "研究开源开发工具的商业模式。先明确范围，基于所提供的公开来源给出驱动因素、风险和下一步尽调问题。没有资料要明确列缺口。",
+      "expectedArtifacts": [
+        "report"
+      ]
+    }
+  ],
+  "sources": [],
+  "files": [
+    "LICENSE",
+    "agents/analyst.md",
+    "agents/chief.md",
+    "agents/judge.md",
+    "agents/radar.md",
+    "agents/recommender.md",
+    "agents/venture.md",
+    "collaboration/SKILL.md",
+    "collaboration/workflow.json",
+    "manifest.json",
+    "skills/analyst-method/SKILL.md",
+    "skills/chief-method/SKILL.md",
+    "skills/judge-method/SKILL.md",
+    "skills/radar-method/SKILL.md",
+    "skills/recommender-method/SKILL.md",
+    "skills/venture-method/SKILL.md"
+  ]
+}

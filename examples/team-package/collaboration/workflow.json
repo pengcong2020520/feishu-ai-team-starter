@@ -1,0 +1,64 @@
+{
+  "entry": "draft",
+  "coordinator": "writer",
+  "relations": [
+    {
+      "from": "writer",
+      "to": "reviewer",
+      "kind": "dispatch"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "draft",
+      "name": "起草简报",
+      "type": "task",
+      "role": "writer",
+      "skills": [
+        "writer-method"
+      ],
+      "prompt": "目标：{{demand}}。意见：{{feedback}}。写三句简报到 drafts/brief.md。",
+      "outputs": [
+        "writer"
+      ],
+      "next": "scope"
+    },
+    {
+      "id": "scope",
+      "name": "确认范围",
+      "type": "gate",
+      "role": "writer",
+      "approval": "confirm_prd",
+      "next": "review",
+      "reject": "draft"
+    },
+    {
+      "id": "review",
+      "name": "校对简报",
+      "type": "task",
+      "role": "reviewer",
+      "skills": [
+        "reviewer-method"
+      ],
+      "prompt": "读取 drafts/brief.md，按目标、事实、待确认事项整理三句简报到 review/brief.md。用户意见：{{feedback}}。",
+      "outputs": [
+        "reviewer"
+      ],
+      "next": "accept"
+    },
+    {
+      "id": "accept",
+      "name": "验收简报",
+      "type": "gate",
+      "role": "writer",
+      "approval": "accept",
+      "next": "done",
+      "reject": "review"
+    },
+    {
+      "id": "done",
+      "name": "已完成",
+      "type": "done"
+    }
+  ]
+}

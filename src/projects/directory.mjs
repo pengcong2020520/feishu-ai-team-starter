@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { listPackages } from '../packages/store.mjs';
 
 export const approvalStages = ['clarifying', 'confirm_prd', 'confirm_design', 'accept'];
 export const approvalNames = { clarifying: '需求澄清', confirm_prd: '需求确认', confirm_design: '设计确认', accept: '最终验收' };
@@ -25,7 +26,8 @@ export function createDirectory(root = process.cwd()) {
   const save = async () => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file + '.tmp', JSON.stringify(state, null, 2), { mode: 0o600 }); await rename(file + '.tmp', file); };
   const mutate = fn => { const task = queue.then(async () => { await ready; const before = structuredClone(state); try { const result = await fn(); await save(); return structuredClone(result); } catch (error) { state = before; throw error; } }); queue = task.catch(() => {}); return task; };
   const api = {
-    async get() { await ready; await queue; return structuredClone(state); },
+    async approvalCatalog() { return { ...approvalNames, ...Object.fromEntries((await listPackages(root)).flatMap(p => p.gates.map(g => [g.approval, g.name]))) }; },
+    async get() { await ready; await queue; return { ...structuredClone(state), approvalOptions: await api.approvalCatalog() }; },
     async find(identity) { await ready; await queue; return structuredClone(state.people.find(p => matchesIdentity(p, identity)) ?? null); },
     observe(identity, name) {
       return mutate(() => {
@@ -33,20 +35,21 @@ export function createDirectory(root = process.cwd()) {
         let person = state.people.find(p => matchesIdentity(p, identity));
         if (!person) { person = { id: randomUUID(), name: clean(name) || '待填写姓名', active: true, identity: {}, responsibilities: [] }; state.people.push(person); }
         for (const key of ['unionId', 'userId']) if (validId(identity[key])) person.identity[key] = identity[key];
-        if (validId(identity.openId) && ['product', 'designer', 'developer', 'admin'].includes(identity.role)) (person.identity.openIds ??= {})[identity.role] = identity.openId;
+        if (validId(identity.openId) && /^[a-z][a-z0-9-]{0,63}$/.test(identity.role || '')) (person.identity.openIds ??= {})[identity.role] = identity.openId;
         if (name && person.name === '待填写姓名') person.name = clean(name);
         return person;
       });
     },
     upsert(input) {
-      return mutate(() => {
+      return mutate(async () => {
         const name = clean(input.name);
         if (!name) throw Error('请填写姓名');
         if (!Array.isArray(input.responsibilities) || input.responsibilities.length > 30) throw Error('职责格式不正确');
+        const knownApprovals = await api.approvalCatalog();
         const responsibilities = input.responsibilities.map(row => {
           const job = clean(row.job, 40), scope = clean(row.scope, 80);
           if (!job || !scope) throw Error('每条职责都要填写岗位和负责范围');
-          if (!Array.isArray(row.approvals) || row.approvals.some(x => !approvalStages.includes(x))) throw Error('确认事项不正确');
+          if (!Array.isArray(row.approvals) || row.approvals.some(x => !Object.hasOwn(knownApprovals, x))) throw Error('确认事项不正确');
           return { job, scope, approvals: [...new Set(row.approvals)] };
         });
         let person = input.id && state.people.find(p => p.id === input.id);
@@ -59,7 +62,7 @@ export function createDirectory(root = process.cwd()) {
       });
     },
     settings({ ownerId }) { return mutate(() => { if (!state.people.some(p => p.id === ownerId && p.active)) throw Error('请选择有效的本机操作者'); state.ownerId = ownerId; return state; }); },
-    async plan({ text = '', scope = '', ownerId, memberIds, approvers = {}, identity } = {}) {
+    async plan({ text = '', scope = '', ownerId, memberIds, approvers = {}, identity, stages = approvalStages } = {}) {
       const snapshot = await api.get();
       const people = snapshot.people.filter(p => p.active);
       const creator = identity ? people.find(p => matchesIdentity(p, identity)) : null;
@@ -72,7 +75,9 @@ export function createDirectory(root = process.cwd()) {
       if (!Array.isArray(selected) || selected.some(id => !people.some(p => p.id === id))) throw Error('项目成员包含不存在或已停用的人员');
       const members = [...new Set([owner.id, ...selected])];
       const decisions = {};
-      for (const stage of approvalStages) {
+      const knownApprovals = await api.approvalCatalog();
+      if (!Array.isArray(stages) || stages.some(s => !Object.hasOwn(knownApprovals, s))) throw Error('团队关口声明无效');
+      for (const stage of stages) {
         const explicit = approvers[stage];
         const candidates = people.filter(p => members.includes(p.id) && matched(p).some(row => row.approvals.includes(stage)));
         if (!explicit && candidates.length > 1) throw Error(`${approvalNames[stage]}有多位负责人：${candidates.map(p => p.name).join('、')}，请在新项目表单中指定一位`);

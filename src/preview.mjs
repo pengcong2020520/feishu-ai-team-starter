@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { walkthroughPage } from './walkthrough-page.mjs';
 import { roles } from './agents/roles.mjs';
+import { packageHttp } from './packages/http.mjs';
 
 const headers = model => ({ 'Content-Security-Policy': model ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; form-action 'none'; connect-src 'none'" : "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' http://127.0.0.1:*; img-src 'self' data: blob:", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
 const send = (res, status, body, model = false, type = 'text/html; charset=utf-8') => { res.writeHead(status, { ...headers(model), 'Content-Type': type }); res.end(body); };
@@ -21,6 +22,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
     const url = new URL(req.url, 'http://localhost');
     const hostValue = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost):\d+$/.test(hostValue)) return send(res, 403, 'Host 不允许', false, 'text/plain; charset=utf-8');
+    if (await packageHttp({ req, res, url, root, flow, recorder, send })) return;
     const match = /^\/p\/([^/]+)\/(walkthrough|outline|shot\/(?:outline|design|site|walkthrough))$/.exec(url.pathname);
     if (req.method === 'GET' && match && valid(match[1])) {
       try {
@@ -88,13 +90,17 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       try { return send(res, 200, await readFile(path.join(root, 'workspace', p.id, 'docs/questions.json'), 'utf8'), false, 'application/json; charset=utf-8'); }
       catch { return send(res, 404, '问题尚未生成', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs', '/teams.js', '/teams.css'].includes(url.pathname)) {
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web', url.pathname.slice(1)), 'utf8'), false, url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8'); }
       catch { return send(res, 404, '资源不存在', false, 'text/plain; charset=utf-8'); }
     }
     if (req.method === 'GET' && url.pathname === '/') {
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web/index.html'), 'utf8')); }
       catch { return send(res, 404, '工作台尚未生成', false, 'text/plain; charset=utf-8'); }
+    }
+    if (req.method === 'GET' && url.pathname === '/teams') {
+      try { return send(res, 200, await readFile(path.join(assetsRoot, 'web/teams.html'), 'utf8')); }
+      catch { return send(res, 404, '团队工作台尚未生成', false, 'text/plain; charset=utf-8'); }
     }
     if (req.method === 'POST' && ['/api/demand', '/api/message', '/api/action', '/api/team/person', '/api/team/settings', '/api/team/import', '/api/team/project', '/api/team/admin-identity'].includes(url.pathname) && flow) {
       const origin = req.headers.origin;
@@ -128,6 +134,18 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
         const actorContext = flow.projects ? { identity, source: byAdmin ? 'admin' : 'local' } : {};
         const localPerson = !byAdmin && flow.projects ? (await flow.projects.directory.get()).people.find(p => p.id === identity?.localPersonId) : null;
         const actor = byAdmin ? 'AI 管理员助手（代你）' : localPerson ? `${localPerson.name}（工作台）` : '你（工作台）';
+        const packageProject = data.chatId && await flow.packages?.get(data.chatId);
+        if (packageProject && ['/api/message', '/api/action'].includes(url.pathname)) {
+          if (url.pathname === '/api/action') {
+            const result = await flow.packages.action({ chatId: data.chatId, value: { ...data.value, action: data.value?.action?.startsWith('package_') ? data.value.action : `package_${data.value?.action}` }, formValue: data.formValue, actor, ...actorContext });
+            return send(res, 200, JSON.stringify({ ...result, toast: { type: 'info', content: '已收到操作' } }), false, 'application/json; charset=utf-8');
+          }
+          if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 4000 || !packageProject.roles.some(r => r.id === data.role)) throw Error('角色或消息无效');
+          if (!data.chatId.startsWith('web:')) await feishu.sendText(data.chatId, `${byAdmin ? 'AI 管理员助手代你' : '来自工作台'}：${data.text}`, packageProject.botBindings[data.role]);
+          await recorder?.add(data.chatId, { kind: 'user', role: data.role, text: data.text, actor, source, projectId: packageProject.id });
+          const result = await flow.packages.message({ chatId: data.chatId, role: data.role, text: data.text, senderType: 'user', actor, ...actorContext });
+          return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');
+        }
         if (url.pathname === '/api/demand' && flow.projects) {
           if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 4000) throw Error('消息为空或过长');
           const requestId = data.requestId || randomUUID();

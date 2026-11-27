@@ -1,0 +1,346 @@
+{
+  "schemaVersion": 1,
+  "runtime": "feishu-team/1",
+  "id": "web-studio",
+  "name": "筑页 · 网页团队",
+  "version": "1.0.0",
+  "description": "产品、设计、开发协作，保留已验证的网页制作流程。",
+  "author": "Feishu AI Team contributors",
+  "license": "MIT; upstream notices apply",
+  "workflow": "collaboration/workflow.json",
+  "collaboration": "collaboration/SKILL.md",
+  "roles": [
+    {
+      "id": "product",
+      "name": "AI 产品经理",
+      "description": "澄清需求、PRD 与验收规格",
+      "prompt": "agents/product.md",
+      "skills": [
+        "clarify",
+        "prd-spec",
+        "spec-checklist"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "docs",
+        "design",
+        "site",
+        "context"
+      ],
+      "write": [
+        "docs"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "designer",
+      "name": "AI 设计",
+      "description": "线框、主题、交互走查",
+      "prompt": "agents/designer.md",
+      "skills": [
+        "lofi-wireframe",
+        "theme-pick",
+        "flow-walkthrough",
+        "consistency-check"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "docs",
+        "design",
+        "site",
+        "context"
+      ],
+      "write": [
+        "design"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "purple"
+    },
+    {
+      "id": "developer",
+      "name": "AI 程序员",
+      "description": "依据已确认规格开发网页",
+      "prompt": "agents/developer.md",
+      "skills": [
+        "frontend-design"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "docs",
+        "design",
+        "site",
+        "context"
+      ],
+      "write": [
+        "site"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "green"
+    }
+  ],
+  "skills": [
+    {
+      "id": "clarify",
+      "version": "1.0.0",
+      "path": "skills/clarify/SKILL.md",
+      "description": "clarify",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "prd-spec",
+      "version": "1.0.0",
+      "path": "skills/prd-spec/SKILL.md",
+      "description": "prd-spec",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "spec-checklist",
+      "version": "1.0.0",
+      "path": "skills/spec-checklist/SKILL.md",
+      "description": "spec-checklist",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "lofi-wireframe",
+      "version": "1.0.0",
+      "path": "skills/lofi-wireframe/SKILL.md",
+      "description": "lofi-wireframe",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "theme-pick",
+      "version": "1.0.0",
+      "path": "skills/theme-pick/SKILL.md",
+      "description": "theme-pick",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "flow-walkthrough",
+      "version": "1.0.0",
+      "path": "skills/flow-walkthrough/SKILL.md",
+      "description": "flow-walkthrough",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "consistency-check",
+      "version": "1.0.0",
+      "path": "skills/consistency-check/SKILL.md",
+      "description": "consistency-check",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "frontend-design",
+      "version": "1.0.0",
+      "path": "skills/frontend-design/SKILL.md",
+      "description": "frontend-design",
+      "inputs": [
+        "本项目规格及用户意见"
+      ],
+      "outputs": [
+        "技能原文定义的文件"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    }
+  ],
+  "workspace": {
+    "directories": [
+      "docs",
+      "design",
+      "site"
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "prd",
+      "name": "产品需求",
+      "path": "docs/prd.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "outline",
+      "name": "页面结构",
+      "path": "docs/outline.json",
+      "format": "json",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "checklist",
+      "name": "需求检查",
+      "path": "docs/checklist.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "questions",
+      "name": "澄清问题",
+      "path": "docs/questions.json",
+      "format": "json",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "wireframe",
+      "name": "线框",
+      "path": "design/wireframe.html",
+      "format": "html",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "theme",
+      "name": "主题",
+      "path": "design/theme.json",
+      "format": "json",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "site",
+      "name": "网页",
+      "path": "site/index.html",
+      "format": "html",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "walkthrough",
+      "name": "走查报告",
+      "path": "design/walkthrough.json",
+      "format": "json",
+      "requiredKeys": [],
+      "minBytes": 1
+    }
+  ],
+  "examples": [
+    {
+      "name": "活动报名页",
+      "demand": "做一个读书会报名网页，展示时间地点，支持报名、人数已满和报名成功状态。",
+      "expectedArtifacts": [
+        "prd",
+        "wireframe",
+        "theme",
+        "site",
+        "walkthrough"
+      ]
+    }
+  ],
+  "sources": [],
+  "files": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "agents/designer.md",
+    "agents/developer.md",
+    "agents/product.md",
+    "collaboration/SKILL.md",
+    "collaboration/workflow.json",
+    "manifest.json",
+    "skills/clarify/SKILL.md",
+    "skills/consistency-check/SKILL.md",
+    "skills/flow-walkthrough/SKILL.md",
+    "skills/frontend-design/SKILL.md",
+    "skills/lofi-wireframe/SKILL.md",
+    "skills/prd-spec/SKILL.md",
+    "skills/spec-checklist/SKILL.md",
+    "skills/theme-pick/SKILL.md"
+  ]
+}

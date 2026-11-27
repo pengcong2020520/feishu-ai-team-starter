@@ -20,10 +20,10 @@ export function messageContent(message, botIds = []) {
   return { text: text.trim(), attachments };
 }
 
-export function createMessageReceiver({ ids, onMessage, onDiscussion, observe, recorder, shouldRecord = async () => true }) {
+export function createMessageReceiver({ ids, onMessage, onDiscussion, observe, recorder, shouldRecord = async () => true, roleOrder = ['product', 'designer', 'developer'] }) {
   const recorded = new Set(), dispatched = new Set();
   const queues = new Map();
-  const order = ['product', 'designer', 'developer'];
+  const order = roleOrder;
   const receive = async (data, receivingRole) => {
     const m = data.message || {};
     if (data.sender?.sender_type !== 'user' || !m.message_id) return;
@@ -32,7 +32,8 @@ export function createMessageReceiver({ ids, onMessage, onDiscussion, observe, r
     const person = await observe?.(identity, data.sender.name);
     const actor = person?.name || data.sender.name || '群成员';
     const { text, attachments } = messageContent(m, [...ids.values()]);
-    const targets = m.chat_type === 'p2p' ? [receivingRole] : order.filter(role => m.mentions?.some(x => (x.id?.open_id || x.id) === ids.get(role)));
+    const orderedRoles = typeof order === 'function' ? await order(m.chat_id) : order;
+    const targets = m.chat_type === 'p2p' ? [receivingRole] : orderedRoles.filter(role => m.mentions?.some(x => (x.id?.open_id || x.id) === ids.get(role)));
     if (!recorded.has(m.message_id)) {
       recorded.add(m.message_id);
       await recorder?.add(m.chat_id, { kind: 'user', role: targets[0] || null, targetRoles: targets, text, actor, identity, messageId: m.message_id, source: '飞书', attachments, sentAt: m.create_time });
