@@ -1,5 +1,7 @@
 # 项目说明书：飞书 AI 团队
 
+完整应用团队更新：`team-packages/app-studio` 是独立的「筑域」五角色包，按 Specify → Plan → Tasks → 实现 → 架构复核 → 实测 → 本机发布 → 验收运行；原筑页静态网页 workflow 与旧项目不变。`manifest.application` 目前仅支持 Node.js 24 + SQLite，`src/packages/app-runner.mjs` 在 Docker 中执行迁移、测试、健康检查和回滚，发布前 `release=true` 关口必须真人确认。安装和回归见 [完整应用团队方案](docs/完整应用团队方案.md)；默认 `team-pack init` 不安装筑域，也不复用旧机器人。测试示例使用模型替身，不能称作真实飞书私聊验收。
+
 Wiki 与连续记忆更新：团队包可选 `knowledge: {format:"wiki/1",pages:[...]}`，见 [Wiki 知识层](docs/Wiki知识层.md)。团队知识随不可变包版本分享；项目知识、项目协作记忆、管理员个人记忆在 `data/knowledge/` 分区存储，不自动导出。`src/knowledge/` 提供版本化存储和按需检索；管理员通过 wiki_lookup/wiki_update 维护，角色只读检索并可保存本项目 proposed 笔记。知识状态不批准 workflow。管理员续用 SDK 会话，不再每轮重建；完整 journal 可按需检索，SDK 原生压缩不删除原始记录。`src/agents/usage.mjs` 对续用累计用量取差值，缓存读写单列，缺基线时明确采用主调用口径。
 
 交流表达更新：所有角色与管理员使用 `src/presentation.mjs` 的统一交流规范。按用户当下问题组织表达，禁止机械套三节；需要深入解释时允许分节、局部加粗与对比表，由卡片渲染转换成飞书样式；下文旧的“纯文本/120字”要求仅适用于简短任务通知，不限制复杂问答。专业 Skill 和 workflow 不变。

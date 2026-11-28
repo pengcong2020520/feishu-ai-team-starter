@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { safeFile, inside } from './store.mjs';
 import { teamPages } from '../knowledge/wiki.mjs';
 import { validatePrd, validateQuestions, validateDesign, validateSite, validateWalkthrough } from '../flow/validate.mjs';
+import { verifyApplication, deployApplication } from './app-runner.mjs';
 
 export async function roleDefinition(pack, roleId, root) {
   const role = pack.manifest.roles.find(r => r.id === roleId); if (!role) throw Error('团队包中没有这个角色');
@@ -37,6 +38,7 @@ export async function initializeWorkspace(pack, directory) {
   }
 }
 export async function validateOutputs(pack, node, directory, round = 1) {
+  if (node.validator === 'app-deployment') { await deployApplication(pack, directory); return 'next'; }
   // 校验文件路径先拒绝软链接，之后可复用已验证的网页内容契约。
   for (const id of node.outputs) {
     const a = pack.manifest.artifacts.find(a => a.id === id);
@@ -44,6 +46,7 @@ export async function validateOutputs(pack, node, directory, round = 1) {
     if (bytes.length < a.minBytes || !bytes.toString().trim()) throw Error(`交付文件为空或过短：${a.path}`);
     if (a.format === 'json') { const value = JSON.parse(bytes); for (const key of a.requiredKeys) if (value?.[key] === undefined) throw Error(`交付 JSON 缺少 ${key}：${a.path}`); }
   }
+  if (node.validator === 'app-verification') { await verifyApplication(pack, directory); return 'next'; }
   if (node.validator === 'web-clarify') {
     const hasPrd = await safeFile(directory, 'docs/prd.md').then(() => true, e => { if (e.code === 'ENOENT') return false; throw e; });
     const result = await (hasPrd ? validatePrd : validateQuestions)(directory);

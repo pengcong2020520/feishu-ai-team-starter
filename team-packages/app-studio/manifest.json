@@ -1,0 +1,518 @@
+{
+  "schemaVersion": 1,
+  "runtime": "feishu-team/1",
+  "id": "app-studio",
+  "name": "筑域 · 应用开发团队",
+  "version": "1.0.0",
+  "description": "五角色按规格、架构、实现、复核、测试与本机发布协作，交付 Node.js 前后端和 SQLite 数据库应用。",
+  "author": "Feishu AI Team contributors",
+  "license": "MIT; upstream notices apply",
+  "workflow": "collaboration/workflow.json",
+  "collaboration": "collaboration/SKILL.md",
+  "roles": [
+    {
+      "id": "product",
+      "name": "AI 产品经理",
+      "description": "澄清目标、维护规格和验收场景",
+      "prompt": "agents/product.md",
+      "skills": [
+        "specify"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "spec",
+        "design",
+        "architecture",
+        "app",
+        "review",
+        "qa",
+        "release",
+        "context"
+      ],
+      "write": [
+        "spec"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "designer",
+      "name": "AI 设计师",
+      "description": "交互状态和界面设计",
+      "prompt": "agents/designer.md",
+      "skills": [
+        "interaction"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "spec",
+        "design",
+        "architecture",
+        "app",
+        "review",
+        "qa",
+        "release",
+        "context"
+      ],
+      "write": [
+        "design"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "purple"
+    },
+    {
+      "id": "architect",
+      "name": "AI 架构师",
+      "description": "设计系统结构并复核实现",
+      "prompt": "agents/architect.md",
+      "skills": [
+        "architecture",
+        "task-breakdown",
+        "architecture-review"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "spec",
+        "design",
+        "architecture",
+        "app",
+        "review",
+        "qa",
+        "release",
+        "context"
+      ],
+      "write": [
+        "architecture",
+        "review"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "indigo"
+    },
+    {
+      "id": "developer",
+      "name": "AI 全栈程序员",
+      "description": "实现前后端、迁移与自动测试",
+      "prompt": "agents/developer.md",
+      "skills": [
+        "implementation",
+        "bug-fix"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "spec",
+        "design",
+        "architecture",
+        "app",
+        "review",
+        "qa",
+        "release",
+        "context"
+      ],
+      "write": [
+        "app"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "green"
+    },
+    {
+      "id": "qa",
+      "name": "AI 测试部署工程师",
+      "description": "运行测试、检查迁移并发布",
+      "prompt": "agents/qa.md",
+      "skills": [
+        "verification",
+        "deployment"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "spec",
+        "design",
+        "architecture",
+        "app",
+        "review",
+        "qa",
+        "release",
+        "context"
+      ],
+      "write": [
+        "qa",
+        "release"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "orange"
+    }
+  ],
+  "skills": [
+    {
+      "id": "specify",
+      "version": "0.1.0",
+      "path": "skills/specify/SKILL.md",
+      "description": "specify",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "interaction",
+      "version": "0.1.0",
+      "path": "skills/interaction/SKILL.md",
+      "description": "interaction",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "architecture",
+      "version": "0.1.0",
+      "path": "skills/architecture/SKILL.md",
+      "description": "architecture",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "task-breakdown",
+      "version": "0.1.0",
+      "path": "skills/task-breakdown/SKILL.md",
+      "description": "task-breakdown",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "architecture-review",
+      "version": "0.1.0",
+      "path": "skills/architecture-review/SKILL.md",
+      "description": "architecture-review",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "implementation",
+      "version": "0.1.0",
+      "path": "skills/implementation/SKILL.md",
+      "description": "implementation",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "bug-fix",
+      "version": "0.1.0",
+      "path": "skills/bug-fix/SKILL.md",
+      "description": "bug-fix",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "verification",
+      "version": "0.1.0",
+      "path": "skills/verification/SKILL.md",
+      "description": "verification",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    },
+    {
+      "id": "deployment",
+      "version": "0.1.0",
+      "path": "skills/deployment/SKILL.md",
+      "description": "deployment",
+      "inputs": [
+        "已确认的项目规格和上游产物"
+      ],
+      "outputs": [
+        "技能规定的项目交付"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ],
+      "resources": []
+    }
+  ],
+  "workspace": {
+    "directories": [
+      "spec",
+      "design",
+      "architecture",
+      "app",
+      "review",
+      "qa",
+      "release"
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "spec",
+      "name": "产品规格",
+      "path": "spec/spec.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "design",
+      "name": "交互设计",
+      "path": "design/interaction.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "architecture",
+      "name": "架构方案",
+      "path": "architecture/plan.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "tasks",
+      "name": "任务清单",
+      "path": "architecture/tasks.md",
+      "format": "markdown",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "server",
+      "name": "后端入口",
+      "path": "app/server.mjs",
+      "format": "text",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "database",
+      "name": "数据库迁移",
+      "path": "app/migrations/001.sql",
+      "format": "text",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "frontend",
+      "name": "前端界面",
+      "path": "app/index.html",
+      "format": "html",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "tests",
+      "name": "应用测试",
+      "path": "app/test/app.test.mjs",
+      "format": "text",
+      "requiredKeys": [],
+      "minBytes": 1
+    },
+    {
+      "id": "review",
+      "name": "架构复核",
+      "path": "review/review.json",
+      "format": "json",
+      "requiredKeys": [
+        "status"
+      ],
+      "minBytes": 1
+    },
+    {
+      "id": "verification",
+      "name": "测试回执",
+      "path": "qa/verification.json",
+      "format": "json",
+      "requiredKeys": [
+        "status"
+      ],
+      "minBytes": 1
+    },
+    {
+      "id": "deployment",
+      "name": "部署回执",
+      "path": "release/deployment.json",
+      "format": "json",
+      "requiredKeys": [
+        "status"
+      ],
+      "minBytes": 1
+    }
+  ],
+  "examples": [
+    {
+      "name": "读书会报名应用",
+      "demand": "做一个有报名表单、后端 API、SQLite 持久化和人数限制的读书会应用。",
+      "expectedArtifacts": [
+        "spec",
+        "architecture",
+        "server",
+        "database",
+        "frontend",
+        "tests",
+        "verification",
+        "deployment"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://github.com/github/spec-kit",
+      "revision": "f2010547121b3351e4923fe467205079e4593a32",
+      "license": "MIT",
+      "notice": "THIRD_PARTY_NOTICES.md"
+    }
+  ],
+  "files": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "agents/architect.md",
+    "agents/designer.md",
+    "agents/developer.md",
+    "agents/product.md",
+    "agents/qa.md",
+    "collaboration/SKILL.md",
+    "collaboration/workflow.json",
+    "knowledge/constitution.md",
+    "manifest.json",
+    "skills/architecture-review/SKILL.md",
+    "skills/architecture/SKILL.md",
+    "skills/bug-fix/SKILL.md",
+    "skills/deployment/SKILL.md",
+    "skills/implementation/SKILL.md",
+    "skills/interaction/SKILL.md",
+    "skills/specify/SKILL.md",
+    "skills/task-breakdown/SKILL.md",
+    "skills/verification/SKILL.md"
+  ],
+  "application": {
+    "runtime": "node24-sqlite",
+    "entry": "app/server.mjs",
+    "test": "app/test/app.test.mjs",
+    "migration": "app/migrations/001.sql",
+    "healthPath": "/health",
+    "port": 3000
+  },
+  "knowledge": {
+    "format": "wiki/1",
+    "pages": [
+      {
+        "id": "constitution",
+        "title": "应用开发原则",
+        "summary": "规格到发布的全栈交付约定",
+        "path": "knowledge/constitution.md",
+        "tags": [
+          "架构",
+          "研发",
+          "测试",
+          "发布"
+        ],
+        "sources": [
+          "筑域团队作者确认的协作原则，2026-11-29"
+        ],
+        "status": "confirmed",
+        "links": []
+      }
+    ]
+  }
+}

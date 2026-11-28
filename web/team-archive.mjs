@@ -33,6 +33,7 @@ export function archiveUI({el,button,get,post,avatar,documentView,dateLabel,open
       const layout=el('div',null,'dossier-layout'),main=el('div',null,'dossier-main'),aside=el('aside',null,'dossier-aside');layout.append(main,aside);box.append(layout);
       const product=el('section',null,'dossier-product');product.append(el('div','01 / 最终成果','eyebrow'),el('h2',a.source.artifacts[0]?.text.match(/^#\s+(.+)$/m)?.[1]||'项目成果'));
       if(a.outcome)product.append(el('p',a.outcome,'archive-outcome'));
+      if(p.application?.status==='running')product.append(externalLink('打开可运行应用 ↗',p.application.url));
       if(p.stageType!=='done')product.append(el('small',p.ended?'项目已结束，以下是已保留成果':'内容成果与流程确认分别记录 · 当前'+status(p),'muted'));
       if(!a.source.artifacts.length)product.append(el('p','当前还没有最终交付文件。过程资料与讨论已保留。'));
       for(const artifact of a.source.artifacts){const actions=el('div',null,'dossier-delivery-links');actions.append(p.archiveLegacy?externalLink('打开网页成品',p.siteUrl):button('完整预览 ↗',()=>showArtifact(p,artifact.id),'document-link'));const remote=p.documents?.items.find(d=>d.artifactId===artifact.id);if(remote?.url&&remote.shared)actions.append(externalLink('飞书文档',remote.url));product.append(actions);
