@@ -231,3 +231,11 @@ test('不同进程共用三个名额，超过上限排队并在释放后继续',
     assert.equal(max,3);assert.equal(count,0);assert.deepEqual(await capacityStatus(root,3),{active:0,queued:0,limit:3});
   } finally { for(const child of children)if(child.exitCode===null)child.kill(); }
 }));
+
+
+test('引用消息和附件保留在原群入站事件中，多应用重复推送仅接收一次',()=>fixture(async root=>{
+ const recorder=createRecorder(root),seen=[];const receive=createMessageReceiver({ids:new Map([['chief','bot-chief']]),recorder,onMessage:async e=>seen.push(e),onUnaddressed:async e=>seen.push(e)});
+ const event={sender:{sender_type:'user',sender_id:{union_id:'alice'}},message:{chat_id:'group-a',chat_type:'group',message_id:'reply-1',parent_id:'parent-a',root_id:'thread-a',message_type:'file',content:JSON.stringify({file_name:'来源.pdf',file_key:'file-a'})}};
+ await receive(event,'chief');await receive(event,'chief');assert.equal(seen.length,1);assert.equal(seen[0].replyToMessageId,'parent-a');assert.equal(seen[0].threadRootMessageId,'thread-a');assert.equal(seen[0].attachments[0].name,'来源.pdf');
+ const rows=await recorder.list('group-a');assert.equal(rows.length,1);assert.equal(rows[0].replyToMessageId,'parent-a');assert.match(rows[0].text,/文件/);
+}));
