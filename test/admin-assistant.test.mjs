@@ -272,8 +272,10 @@ test('状态读不到时巡检跳过，私聊重启拒绝；只有整句才算�
   assert.equal(s.sent.at(-1), NO_MODEL);
 });
 
-test('说明文档使用管理员助手的最新操作文案', () => {
+test('README 链接管理员使用指南，指南使用当前按钮文案', () => {
   const readme = readFileSync('README.md', 'utf8');
-  assert.match(readme, /项目停下时点“接着做”；团队服务停了时点“重启团队服务”/);
-  assert.match(readme, /点“撤销这次改动”，也可以私聊发“撤销”/);
+  assert.match(readme, /\]\(docs\/管理员助手\.md\)/);
+  const guide = readFileSync('docs/管理员助手.md', 'utf8');
+  assert.match(guide, /项目停下时点“接着做”；团队服务停了时点“重启团队服务”/);
+  assert.match(guide, /点“撤销这次改动”，也可以私聊发“撤销”/);
 });
