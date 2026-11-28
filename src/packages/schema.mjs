@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { knowledgeManifest } from '../knowledge/schema.mjs';
 
 export const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).refine(x => !['constructor', 'prototype', '__proto__'].includes(x), '不能使用保留名称');
 export const relativePath = z.string().min(1).max(240).refine(p => !p.startsWith('/') && !/[\\\x00-\x1f:]/.test(p) && p.split('/').every(x => x && x !== '.' && x !== '..'), '必须是包内相对路径');
@@ -13,6 +14,7 @@ export const manifestSchema = z.object({
   roles: z.array(z.object({ id: identifier, name: text, description: text, prompt: relativePath, skills: list(identifier), tools: z.array(tools).min(1), read: z.array(relativePath).min(1), write: list(relativePath), memory: z.literal('project'), model: z.enum(['default', 'strong', 'fast']).default('default'), color: z.enum(['blue', 'purple', 'green', 'orange', 'red', 'turquoise', 'indigo']).default('blue') }).strict()).min(1).max(20),
   skills: list(z.object({ id: identifier, version, path: relativePath, description: text, inputs: list(text), outputs: list(text), tools: list(tools), resources: list(relativePath).default([]) }).strict()),
   workspace: z.object({ directories: z.array(relativePath).min(1), templates: list(z.object({ source: relativePath, target: relativePath }).strict()).default([]) }).strict(),
+  knowledge: knowledgeManifest.optional(),
   artifacts: list(artifact),
   examples: z.array(z.object({ name: text, demand: text, expectedArtifacts: list(identifier) }).strict()).min(1),
   sources: list(z.object({ url: z.string().url(), revision: text, license: text, notice: relativePath }).strict()).default([]),
@@ -43,6 +45,13 @@ export function validateDefinition(manifest, workflow) {
   const roles = new Map(m.roles.map(r => [r.id, r])), skills = new Map(m.skills.map(s => [s.id, s])), artifacts = new Map(m.artifacts.map(a => [a.id, a]));
   const declared = f => { if (!m.files.includes(f)) throw Error(`文件未声明：${f}`); };
   [m.workflow, m.collaboration, 'LICENSE', ...m.sources.map(s => s.notice)].forEach(declared);
+  const pages = m.knowledge?.pages || [];
+  unique(pages.map(p => p.id), '知识页'); unique(pages.map(p => p.path), '知识路径');
+  for (const page of pages) {
+    declared(page.path);
+    for (const id of page.links) if (!pages.some(p => p.id === id)) throw Error(`知识页引用未知页面 ${id}`);
+  }
+  for (const file of m.files) if (file.startsWith('knowledge/') && !pages.some(p => p.path === file)) throw Error('knowledge/ 只允许分发已声明的团队知识页');
   const dirs = m.workspace.directories;
   if (dirs.some(d => ['context', '.team', '.claude'].some(x => within(x, d)))) throw Error('Workspace 不能占用平台目录');
   for (const r of m.roles) {

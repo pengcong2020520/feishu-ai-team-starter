@@ -35,13 +35,13 @@ export function createAdminJournal({ root, secrets = Object.entries(process.env)
       });
     },
     async operation(name, args, fn, context = scope.getStore()) {
-      const start = record('operation-start', { name, draftId: args.draftId, runId: args.runId, beforeHash: args.expectedHash, file: args.file, paths: args.files?.map(f => f.path), remove: args.remove }, context);
+      const start = record('operation-start', { name, draftId: args.draftId, runId: args.runId, beforeHash: args.expectedHash, file: args.file, paths: args.files?.map(f => f.path), remove: args.remove, scope:args.scope, pageId:args.page?.id||args.id, project:args.project, beforeRevision:args.expectedRevision }, context);
       try {
         // SDK tools can arrive outside the original message's async scope.
         // Carry the captured turn into nested replies (for example an exported file).
         const result = await scope.run(context, fn);
         record('operation', { operationId: start.id, name, ok: true, draftId: args.draftId || (name === 'team_draft_open' ? result.id : result.draftId), runId: result.runId || args.runId,
-          beforeHash: args.expectedHash, afterHash: result.hash, changed: result.changed, targetId: result.targetId, package: result.package,
+          beforeHash: args.expectedHash || (args.draftId ? args.expectedRevision : undefined), afterHash: result.hash, scope:args.scope, pageId:args.page?.id||args.id, project:args.project, beforeRevision:args.expectedRevision, afterRevision:result.revision, changed: result.changed, targetId: result.targetId, package: result.package,
           file: args.file, status: result.status, valid: result.valid ?? result.validated, verified: result.verified, applied: result.applied, unchanged: result.unchanged }, context);
         return result;
       } catch (e) { record('operation', { operationId: start.id, name, ok: false, draftId: args.draftId, runId: args.runId, error: e.message }, context); throw e; }
@@ -57,7 +57,7 @@ export function createAdminJournal({ root, secrets = Object.entries(process.env)
       return wrapped;
     },
     async diff(operationId) {
-      const op = events().find(e => e.id === operationId && e.type === 'operation' && e.name === 'team_draft_edit' && e.ok);
+      const op = events().find(e => e.id === operationId && e.type === 'operation' && ['team_draft_edit','wiki_update'].includes(e.name) && e.ok);
       if (!op || !/^[a-f0-9-]{36}$/.test(op.draftId) || ![op.beforeHash, op.afterHash].every(h => /^[a-f0-9]{64}$/.test(h))) throw Error('找不到这次修改');
       const dir = path.join(root, 'data/admin/team-lab/drafts', op.draftId, 'revisions');
       const [before, after] = await Promise.all([loadPackage(path.join(dir, op.beforeHash)), loadPackage(path.join(dir, op.afterHash))]);

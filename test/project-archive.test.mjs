@@ -62,7 +62,7 @@ test('档案 SDK 仅允许读取本项目，无写入、Skill、网络及续用�
  await mkdir(dir,{recursive:true});await writeFile(path.join(root,'.env'),'MODEL_BASE_URL=https://example.invalid\nMODEL_API_KEY=test-placeholder\nMODEL_NAME=test\n');
  let options;const query=async function* (args){options=args.options;yield{type:'result',subtype:'success',result:'档案',structured_output:{summary:'真实资料'}};};
  const result=await createRunAgent(query)({role:'writer',definition,projectDir:dir,runtimeRoot:root,prompt:'整理档案',mode:'archive',resume:'不得续用',isolateSession:true,outputSchema:{type:'object'}});
- assert.ok(result.ok);assert.deepEqual(options.tools,['Read','Glob']);assert.equal(options.resume,undefined);assert.equal(options.plugins,undefined);assert.equal(options.mcpServers,undefined);
+ assert.ok(result.ok);assert.deepEqual(options.tools,['Read','Glob']);assert.equal(options.resume,undefined);assert.equal(options.plugins,undefined);assert.deepEqual(Object.keys(options.mcpServers),['knowledge']);assert.equal((await options.canUseTool('mcp__knowledge__remember',{})).behavior,'deny');
  assert.equal((await options.canUseTool('Write',{file_path:'drafts/test.md'})).behavior,'deny');assert.equal((await options.canUseTool('Read',{file_path:'../two/report.md'})).behavior,'deny');assert.equal((await options.canUseTool('Read',{file_path:'context/project.json'})).behavior,'allow');
 }));
 

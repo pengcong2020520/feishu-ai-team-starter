@@ -2,7 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile, readdir, rm, mkdtemp, rename, realpath } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, rm, mkdtemp, rename, realpath, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { atomicJson, loadPackage, lockedPackage, listPackages, latestPackages, installPackage, exportPackage, safeFile, inside } from '../packages/store.mjs';
 import { identifier, relativePath } from '../packages/schema.mjs';
@@ -73,7 +73,13 @@ export function createTeamLab({ root, launch, notify = async () => {} }) {
         await atomicJson(path.join(draftDir(id),'draft.json'),d);return view(d);
       } finally { await rm(temp,{recursive:true,force:true}); }
     },
-    async read(id, file) { const d=await readDraft(id),p=await draftPack(d); if(!file)return view(d);if(!p.files.has(file))throw Error('文件不在草稿清单中');const bytes=p.files.get(file);if(bytes.length>200000)throw Error('文件过大，请用本机编辑器查看');return {draftId:id,hash:d.hash,file,text:bytes.toString()}; },
+    async read(id, file, revision) { let d=await readDraft(id);if(revision){if(!/^[a-f0-9]{64}$/.test(revision))throw Error('历史版本编号无效');d={...d,hash:revision};}const p=await draftPack(d); if(!file)return view(d);if(!p.files.has(file))throw Error('文件不在草稿清单中');const bytes=p.files.get(file);if(bytes.length>200000)throw Error('文件过大，请用本机编辑器查看');return {draftId:id,hash:d.hash,file,text:bytes.toString()}; },
+    async history(id,offset=0) {
+      const d=await readDraft(id),dir=path.join(draftDir(id),'revisions');
+      const entries=await readdir(dir,{withFileTypes:true});
+      const rows=await Promise.all(entries.filter(e=>e.isDirectory()&&/^[a-f0-9]{64}$/.test(e.name)).map(async e=>({revision:e.name,at:(await stat(path.join(dir,e.name))).mtime.toISOString()})));
+      rows.sort((a,b)=>b.at.localeCompare(a.at));return {revision:d.hash,revisions:rows.slice(offset,offset+20),nextOffset:offset+20<rows.length?offset+20:null};
+    },
     async edit({draftId,expectedHash,files,remove=[]}) { return draftTransaction(draftId,async()=>{
       const d=await readDraft(draftId);if(d.hash!==expectedHash)throw Error('草稿已更新，请重新读取后修改');
       if(!Array.isArray(files)||files.length>100||!Array.isArray(remove)||remove.length>100)throw Error('文件批次无效');

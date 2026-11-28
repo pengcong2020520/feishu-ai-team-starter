@@ -1,5 +1,7 @@
 # 项目说明书：飞书 AI 团队
 
+Wiki 与连续记忆更新：团队包可选 `knowledge: {format:"wiki/1",pages:[...]}`，见 [Wiki 知识层](docs/Wiki知识层.md)。团队知识随不可变包版本分享；项目知识、项目协作记忆、管理员个人记忆在 `data/knowledge/` 分区存储，不自动导出。`src/knowledge/` 提供版本化存储和按需检索；管理员通过 wiki_lookup/wiki_update 维护，角色只读检索并可保存本项目 proposed 笔记。知识状态不批准 workflow。管理员续用 SDK 会话，不再每轮重建；完整 journal 可按需检索，SDK 原生压缩不删除原始记录。`src/agents/usage.mjs` 对续用累计用量取差值，缓存读写单列，缺基线时明确采用主调用口径。
+
 交流表达更新：所有角色与管理员使用 `src/presentation.mjs` 的统一交流规范。按用户当下问题组织表达，禁止机械套三节；需要深入解释时允许分节、局部加粗与对比表，由卡片渲染转换成飞书样式；下文旧的“纯文本/120字”要求仅适用于简短任务通知，不限制复杂问答。专业 Skill 和 workflow 不变。
 
 图文补充（2026-11-28）：文档写作和飞书发布遵守 `docs/文档与飞书呈现规范.md` 与 `skills/illustrated-documents/SKILL.md`，专业 Skill 契约优先。团队包 Markdown 可用 `team-figure` 有界定义或本项目相对 PNG/JPEG/WebP 配图，由平台生成/上传原生图片；旧网页引擎和本机项目不冒称已同步。协调机器人需要文档、协作者、素材上传权限；真实 API 失败需显示错误，重试复用正文与图片进度。不要读其他项目的图片或开启文档公开编辑。安装说明优先引导读 `docs/图文安装与权限指南.md`，它不代替标准 setup。
@@ -33,6 +35,7 @@
 - 启航版提示词：[docs/prompts/basic.md](docs/prompts/basic.md)。新安装默认 `TEAM_MODE=basic`，用 `node setup.mjs mode basic` 确认选择。
 - 领航版提示词：[docs/prompts/projects.md](docs/prompts/projects.md)。先运行 `node setup.mjs mode projects`；已有机器人补权限用 `node setup.mjs upgrade-projects`。
 - 开放团队包提示词：[docs/prompts/ecosystem.md](docs/prompts/ecosystem.md)。按所选团队安装，不要求同时创建三支团队。
+- Wiki 复现追加读 [知识层搭建提示词](docs/prompts/knowledge.md)：沿用已选版本和团队，真实私聊验证新增、修订与连续追问，项目知识和个人记忆不自动分享。
 - 新工作台复现统一读 [docs/工作台与成品复现.md](docs/工作台与成品复现.md)：标准 setup 不自动安装团队包；启航版和领航版可仅安装筑页、绑定原三位角色后展示新看板，旧项目仍走原入口。
 - 两版均保留 3 个 AI 同事、AI 管理员助手、工作台、同一 Agent SDK 和同一 workflow。版本只是功能组合，不是重复维护两份阶段表或角色提示词。
 - 已有安装先读当前模式，不要求重建。没有 `TEAM_MODE` 的旧安装：已有独立项目/建群登记时保持领航版，否则沿用启航版。已有独立项目的目录禁止切为启航版，以免绕过人员权限；要体验另一版使用独立目录，同一组机器人只运行一处。
@@ -296,7 +299,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 
 **管家**（`steward.mjs`、`tools.mjs`、角色说明 `src/admin/prompt.md`）：
 
-- 一个持续的会话：会话号存在 `data/admin/session.json`，管理服务重启后接着用，上下文长了靠 SDK 自动压缩；没有多会话、没有"新话题"。一次只做一件事：做事时进度卡和角色干活时一样（一行在做什么 + [停下]），管理员再说的话以 `priority: 'now'` 插进当前这一步（进度卡多一行"↪ 你插话：……"），插不进去的排队；做完把进度卡改成回复 + 用时和 token。每次最多 15 分钟。
+- 对话记录持续保存并续用 SDK 会话；首次启动才由 `context.mjs` 提供近期索引，完整旧记录通过 conversation_history 按需检索。`data/admin/session.json` 保存续用号和累计用量基线。一次只做一件事：做事时进度卡和角色干活时一样（一行在做什么 + [停下]），管理员再说的话以 `priority: 'now'` 插进当前这一步（进度卡多一行"↪ 你插话：……"），插不进去的排队；做完把进度卡改成回复 + 用时和 token。每次最多 15 分钟。
 - 选项：`systemPrompt` 读 `src/admin/prompt.md`；`tools` 是 `['Read', 'Glob', 'Grep', 'Write', 'Edit']`，没有命令行；`mcpServers` 是 `createSdkMcpServer({ name: 'admin', alwaysLoad: true, tools })`（参数用 zod 写）；`cwd` 是仓库根目录；`settingSources: []`；`env` 和 `runAgent` 一样只传模型变量；`maxTurns` 60。
 - 看：整个仓库能读，`.env*`、`data/model-key.txt`、`.claude-agent-config/`、`qr/` 拒绝；Grep 不能从根目录或 `data/` 本身搜，必须指定更具体的子目录。改：Write、Edit 只能写工作副本 `.admin-work/`（`git worktree`，已在 `.gitignore`），而且只能是下面允许改的地方；"看看原因"时连自定义工具也只放行 `team_status`、`ask_colleague`。
 - 工具（MCP，`mcp__admin__*`）：`team_status` 看现状；`ask_colleague` 用某个角色的对话模式在项目目录里只读回答，答案只给管家；`tell_colleague` 代管理员在群里对角色说话（工作台 `POST /api/message`，`via: 'admin'`）；`press_button` 代点关口的确认或打回（工作台 `POST /api/action`，只接受最新一条完整且明确的短指令，如“确认 #3 设计”“打回 #3 网页”；动作、项目、关口须匹配，一条消息只能代点一次；多个项目在等同类关口时须带编号；诊断和测试交回无管理员原话，不能代点）；`submit_change` 交改动；`restart_team` 重启（有项目在干活时拒绝）；`revert_change` 撤销。

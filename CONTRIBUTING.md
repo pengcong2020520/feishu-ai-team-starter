@@ -6,8 +6,9 @@
 
 1. 复制 `examples/team-package/` 到 `team-packages/<你的包名>/`。
 2. 修改 `manifest.json` 的 `id`、`name`、`version`、作者和描述；同步维护角色、技能、工作目录、成果与 `files` 清单。
-3. 在 `agents/` 写角色职责，在 `skills/` 写任务方法，在 `collaboration/SKILL.md` 写协作关系，在 `collaboration/workflow.json` 写调度顺序。
-4. 在 `examples` 中给出一条真实可执行的示例需求和预期成果。复用第三方内容时保留来源、版本和许可证。
+3. 可选的团队业务知识放进 `knowledge/*.md`，在清单 `knowledge.pages` 与 `files` 中声明；字段和示例见 [Wiki 知识层](docs/Wiki知识层.md)。运行中的项目资料和个人协作记忆不作为团队包自动分享。
+4. 在 `agents/` 写角色职责，在 `skills/` 写任务方法，在 `collaboration/SKILL.md` 写协作关系，在 `collaboration/workflow.json` 写调度顺序。
+5. 在 `examples` 中给出一条真实可执行的示例需求和预期成果。复用第三方内容时保留来源、版本和许可证。
 
 以 `team-packages/my-team` 为例：
 
@@ -55,6 +56,7 @@ npm run smoke
 | --- | --- |
 | 团队包协议、安装、编排 | `src/packages/`；字段定义在 `schema.mjs`，调度在 `engine.mjs` |
 | Agent SDK、工具和会话 | `src/agents/` |
+| Wiki 知识、连续记忆与私聊维护 | `src/knowledge/`、`src/admin/knowledge-tools.mjs`、`src/admin/history.mjs` |
 | 飞书消息、卡片、文档 | `src/feishu.mjs`、`src/presentation.mjs`、`src/feishu-documents.mjs` |
 | 网页工作台 | `web/`、`src/preview.mjs`、`src/packages/http.mjs` |
 | 安装、扫码和常驻服务 | `setup.mjs`、`src/setup/`、`scripts/service.mjs` |
