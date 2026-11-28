@@ -7,7 +7,7 @@
 先读 [团队包标准](docs/AI团队包规范.md)，搭建提示词在 [docs/prompts/ecosystem.md](docs/prompts/ecosystem.md)。原启航版、领航版及下文默认网页流程继续保留。
 
 - `node scripts/team-pack.mjs init` 安装筑页、观澜和文枢三包；观澜 2.1 是 TradingAgents 固定提交的 Apache-2.0 适配，五角色十六技能，未接入 Tauric 专用数据与计算服务；Newtype 按固定提交下载到本机并保留 SUL 来源声明，不复制进 MIT 核心代码。
-- `/` 是团队工作台，`/teams` 是同一入口，`/legacy` 保留旧网页项目。团队页显示实际角色、Skill 和 workflow；本机项目不要求机器人。点“扫码连接飞书”或运行 `bots` 调用标准注册流程，各新团队创建自己的专属角色，当前团队已创建的才复用，不自行写扫码脚本。同一团队一角色一机器人，同一应用只有一条长连接。
+- `/` 是团队工作台，`/teams` 是同一入口，`/legacy` 保留旧网页项目。团队页聚焦单个当前团队，以角色实时状态和四列项目看板为首页；三、五、八角色按网格全部展示。团队生态入口切换成熟团队包，旧项目仍锁定原包。角色详情查看 Skill，项目详情保留 workflow 与原动作；本机项目不要求机器人。点“扫码连接飞书”或运行 `bots` 调用标准注册流程，各新团队创建自己的专属角色，当前团队已创建的才复用，不自行写扫码脚本。同一团队一角色一机器人，同一应用只有一条长连接。
 - 第三方通过清单、角色提示词、Skill、协作 Skill、workflow.json、Workspace 和交付契约定义团队，不改平台源码。作者打包应用 [skills/team-packager/SKILL.md](skills/team-packager/SKILL.md)，实际校验、导出、干净安装后分层记录验收；打包不等于公开发布。
 - `src/packages/` 是标准、不可变包存储、通用编排、工具与 HTTP；原 `src/flow/` 继续服务旧项目。新包统一使用共享 SDK/并发名额，按项目真实路径与角色隔离；锁定内容不能被源包更新静默替换。
 - 团队包飞书文档见 [文档同步与反馈](docs/飞书文档同步与反馈.md)：协调机器人创建，群成员可编辑；只同步声明的 Markdown，草稿与交付按版本追加，保留人工编辑和评论。评论进入本项目 context/document-feedback.md，不得当作批准；正式任务与问答先读。保留 data/project-documents 映射，创建回执不确定时禁止重复创建。
@@ -322,7 +322,9 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 - **放进卡片**：用 `im.v1.image.create`（`image_type: 'message'`）上传，拿到 `image_key`，卡片里放 `{ tag: 'img', img_key, alt: { tag: 'plain_text', content: '页面一览' } }`，后面紧跟链接按钮。
 - **失败不卡流程**：截图前先删掉旧图，免得复用上一轮的；截图或上传失败时，卡片里写一行灰字"一览图未生成（原因）"，原因只写一句（浏览器截图超时 / 找不到 Chrome 浏览器 / 浏览器在当前环境里起不来 / 浏览器截图失败），Chrome 的命令行和崩溃日志只写服务日志；链接照常放，阶段照常推进。
 
-### 8.2 工作台长相
+### 8.2 旧版工作台长相（仅 /legacy）
+
+新版 `/` 与 `/teams` 按用户确认的 [单团队工作台原型](docs/design/single-team-workbench-v1/README.md) 实现：浅色、单当前团队、角色状态置顶，项目分为进行中／等你确认／需处理／已完成。`web/team-board.mjs` 只派生展示状态，不推进 workflow；执行、排队、聊天、独立审核与空闲分别显示。切换团队不关闭已有机器人或迁移项目。
 
 工作台给人一屏看清全局，整页不滚动，长内容只在各自区域里滚动。统一按下面做：
 

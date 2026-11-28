@@ -92,15 +92,16 @@ test('群聊排队与超时有独立回执，重试只重答原问题，不改�
     if(args.mode!=='chat'){work++;return fake(args);}
     chats++;assert.equal(args.prompt.includes('读者怎么定'),true);assert.equal(args.queueTimeoutMs,300000);
     args.onQueued?.(true);
+    assert.equal((await engine.snapshot())[0].liveActivities[0].status,'queued');
     if(chats===1)return {ok:false,queueTimedOut:true,error:'等待执行名额超时',stats};
-    args.onQueued?.(false);return {ok:true,structured:{reply:'建议面向 AI 爱好者。',proposal:{action:'none',detail:''}},stats};
+    args.onQueued?.(false);assert.equal((await engine.snapshot())[0].liveActivities[0].status,'running');return {ok:true,structured:{reply:'建议面向 AI 爱好者。',proposal:{action:'none',detail:''}},stats};
   }});
   let p=await engine.create({package:lock,text:'当前项目'});p=await engine.waitForIdle(p.id);const cardId=p.cardId;
   await engine.message({chatId:p.chatId,role:'writer',text:'读者怎么定'});p=await engine.waitForIdle(p.id);
   assert.equal(p.lastChatFailure.queueTimedOut,true);assert.equal(p.stage,'scope');assert.equal(p.cardId,cardId);assert.equal(p.error,null);
   const cards=(await recorder.list(p.chatId)).filter(r=>r.card);assert.ok(cards.some(r=>r.card.title.includes('排队')));assert.match(cards.at(-1).card.text.join(''),/尚未开始回答/);
   await engine.message({chatId:p.chatId,role:'writer',text:'重试'});p=await engine.waitForIdle(p.id);
-  assert.equal(chats,2);assert.equal(work,1);assert.equal(p.lastChatFailure,undefined);assert.equal(p.cardId,cardId);
+  assert.deepEqual((await engine.snapshot())[0].liveActivities,[]);assert.equal(chats,2);assert.equal(work,1);assert.equal(p.lastChatFailure,undefined);assert.equal(p.cardId,cardId);
 }));
 
 test('冗长模型交付保留完整工作区交接，群聊与确认卡只显示可读摘要', () => fixture(async root => {
@@ -457,4 +458,21 @@ test('SDK Skill 成功钩子才发成功证据，失败响应不伪报成功', (
   const events=[];
   const query=async function*({options}){const hook=options.hooks.PostToolUse[0].hooks[0];await hook({tool_name:'Skill',tool_input:{skill:'team:writer-method'},tool_response:{isError:true}});assert.equal(events.length,0);await hook({tool_name:'Skill',tool_input:{skill:'team:writer-method'},tool_response:{success:true}});yield{type:'result',subtype:'success',result:'loaded'};};
   const r=await createRunAgent(query)({role:'writer',definition,projectDir:dir,runtimeRoot:root,prompt:'加载技能',onProgress:e=>events.push(e)});assert.equal(r.ok,true);assert.deepEqual(events,[{tool:'Skill',file:'team:writer-method',status:'succeeded'}]);
+}));
+
+test('执行名额释放后工作台由排队恢复执行，完成后不保留虚假运行状态',()=>fixture(async root=>{
+  const lock=await installPackage('examples/team-package',root);
+  const queued=Promise.withResolvers(),resume=Promise.withResolvers(),running=Promise.withResolvers(),finish=Promise.withResolvers();
+  const engine=createPackageEngine({root,agent:async args=>{
+    args.onQueued(true);queued.resolve();await resume.promise;
+    args.onQueued(false);running.resolve();await finish.promise;
+    return fake(args);
+  }});
+  const p=await engine.create({package:lock,text:'队列状态显示'});await queued.promise;
+  try {
+    assert.equal((await engine.snapshot())[0].activities.writer.status,'queued');
+    resume.resolve();await running.promise;
+    assert.equal((await engine.snapshot())[0].activities.writer.status,'running');
+  } finally {resume.resolve();finish.resolve();await engine.waitForIdle(p.id);}
+  const completed=(await engine.snapshot())[0];assert.equal(completed.activities.writer.status,'done');assert.deepEqual(completed.running,[]);assert.equal(completed.stage,'scope');
 }));

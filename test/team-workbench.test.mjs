@@ -67,7 +67,8 @@ test('工作台首页是团队流程；人员管理接口和页面已删除；�
  const flow={packages:{snapshot:async()=>[]},connections:{status:()=>null,start:async()=>{started++;return {state:'scanning'};}},getState:async()=>({projects:[]})};
  const server=await startPreview({root,assetsRoot:process.cwd(),flow,workbenchPort:0,modelPort:0});const base=`http://127.0.0.1:${server.workbenchPort}`;
  try{
-  const html=await fetch(base).then(r=>r.text());assert.match(html,/teams.js/);assert.doesNotMatch(html,/人员与职责|人员名册/);
+  const html=await fetch(base).then(r=>r.text());assert.match(html,/teams.js/);assert.match(html,/团队生态/);assert.doesNotMatch(html,/<h2>我的 AI 团队/);
+  const model=await fetch(base+'/team-board.mjs');assert.equal(model.status,200);assert.match(model.headers.get('content-type'),/javascript/);assert.doesNotMatch(html,/人员与职责|人员名册/);
   for(const route of ['/api/team','/api/team/person','/api/team/settings','/api/team/project','/api/team/import'])assert.equal((await fetch(base+route,{method:route==='/api/team'?'GET':'POST'})).status,404);
   const send=headers=>fetch(base+'/api/packages/connect',{method:'POST',headers,body:JSON.stringify({packageId:'example-team'})});
   assert.equal((await send({'Content-Type':'application/json','X-Workbench':'1',Origin:'http://evil.invalid'})).status,403);
