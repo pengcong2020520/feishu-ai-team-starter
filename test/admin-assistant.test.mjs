@@ -182,7 +182,7 @@ test('卡片时间、输出和回复用中文可读格式', () => {
   assert.match(serviceLine({ running: false, lastExit: { code: null, signal: 'SIGTERM', at: new Date(now - 1000).toISOString() } }, now), /被系统停下了/);
   assert.match(projectLine({ number: 1, name: '计划', stage: 'confirm_prd', waitingFor: '确认 PRD', stageAt: new Date(now - 1000).toISOString() }, now), /等你确认 PRD（刚刚）/);
   assert.equal(cleanReply('# 标题\n> **内容** [链接] `代码` <尖括号>'), '标题\n内容 链接 代码 尖括号');
-  assert.match(text(stewardCard({ task: '看看', activity: '', steps: 1, elapsedMs: 1, done: true, outcome: 'ok', reply: '# 标题\n> **内容**' })), /标题\\n内容/);
+  assert.match(text(stewardCard({ task: '看看', activity: '', steps: 1, elapsedMs: 1, done: true, outcome: 'ok', reply: '# 标题\n> **内容**' })), /\*\*标题\*\*\\n\*\*内容\*\*/);
   const down = serviceDownCard({ exit: { code: 1 }, error: Array.from({ length: 7 }, (_, i) => `> **第${i}行**`).join('\n'), cardId: 'x', lastChange: { title: '改卡片', sha: 'abc' } });
   assert.equal(down.elements.filter(e => e.text?.content?.includes('第')).length, 5);
   assert.match(text(down), /撤销上一次改动/);

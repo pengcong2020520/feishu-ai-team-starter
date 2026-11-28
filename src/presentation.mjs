@@ -57,3 +57,29 @@ export const taskReplySchema = {
   type: 'object', additionalProperties: false, required: ['reply'],
   properties: { reply: { type: 'string', maxLength: 240, description: '发给飞书用户的2至3句简洁中文，建议60至160字。说清做出了什么、最重要的结论与限制。不列文件路径、技能调用、工具日志、修改清单或代码，不用Markdown。必须保留未核实和未通过的事实。完整细节写入工作区文件。' } },
 };
+
+
+export const conversationStyle = `面向用户交流时先回答当前问题，再按必要程度补充依据，不套固定模板。语气像共同做事的同行：直接、自然、有根据，不说教、不奉承。
+用户问进展或结果：第一句给最新结论（做完什么、是否仍有问题）；随后只给一至三个关键事实和必要的成品入口。通常80—180字。不从历史过程讲起，不罗列任务全链路，不主动复述技术字段、路径、字数统计。用户追问过程时再展开。没有核实的问题不能说成缺陷，尤其不能把早期摘要当作最终事实。
+简单问题一两段即可，不强制编号、加粗、标题、表格或结尾问句。用户只问现状，就回答现状，不顺势提出“再跑一轮”。任务完成不等于用户验收。
+只有需要深入解释或比较时，才按问题自然分节：结论、依据、取舍、下一步。抽象概念可用贴切生活比喻，再交代对应关系和局限；选型确有横向维度时用最多四列的简短表。不要每次都套“怎么理解、怎么选、风险”三节。
+按适用条件分析二元问题，不武断站队、不虚假平衡；不用无依据的“唯一”“彻底”“成本翻倍”。事实、假设与判断分开。每段一至三句，少量关键词加粗，不整段加粗。排查清单只列相关项，不凑数。专业文档、结构化返回与 workflow 仍遵守原契约。`;
+
+// Card 1.0 supports bold and columns, but not Markdown heading/table syntax.
+export function replyMarkdown(value) {
+  const bold=[];
+  const source=String(value??'').replace(/\*\*([^*\n]+)\*\*/g,(_,text)=>{bold.push(plainText(text).replace(/[<>]/g,''));return `REPLYBOLDTOKEN${bold.length-1}END`;});
+  return plainText(source).replace(/[<>]/g,'').replace(/REPLYBOLDTOKEN(\d+)END/g,(_,i)=>bold[i]===undefined?'':`**${bold[i]}**`);
+}
+export function replyElements(value) {
+  const lines=String(value??'').slice(0,10000).split('\n'),out=[],buffer=[];
+  const flush=()=>{if(buffer.length){out.push({tag:'div',text:{tag:'lark_md',content:replyMarkdown(buffer.join('\n'))||' '}});buffer.length=0;}};
+  const cells=line=>line.trim().replace(/^\||\|$/g,'').split('|').map(x=>x.trim());
+  for(let i=0;i<lines.length;i++) {
+    if(lines[i].includes('|') && /^\s*\|?\s*:?-{3,}/.test(lines[i+1]||'') && cells(lines[i]).length<=4){
+      flush();const headers=cells(lines[i]);i++;
+      const row=(values,heading)=>({tag:'column_set',flex_mode:'none',columns:headers.map((_,j)=>({tag:'column',width:'weighted',weight:1,elements:[{tag:'div',text:{tag:'lark_md',content:heading?`**${plainText(values[j]||'')}**`:replyMarkdown(values[j]||'—')}}]}))});
+      out.push(row(headers,true));while(i+1<lines.length&&lines[i+1].includes('|'))out.push(row(cells(lines[++i]),false));
+    }else buffer.push(lines[i].replace(/^\s*#{1,6}\s+(.+)$/,'**$1**'));
+  }flush();return out;
+}

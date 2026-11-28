@@ -9,7 +9,7 @@ import { roles } from './roles.mjs';
 import { acquireCapacity } from './capacity.mjs';
 import { researchServer } from '../packages/research.mjs';
 import { saveResearchEvidence } from '../packages/evidence.mjs';
-import { replyInstructions, taskReplySchema } from '../presentation.mjs';
+import { replyInstructions, taskReplySchema, conversationStyle } from '../presentation.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const tools = ['Read', 'Write', 'Edit', 'Glob', 'Skill'];
@@ -18,7 +18,7 @@ const chatTools = ['Read', 'Glob'];
 export const chatSchema = {
   type: 'object', additionalProperties: false, required: ['reply', 'proposal'],
   properties: {
-    reply: { type: 'string', description: '发到群里的回复：纯文本，120 字以内' },
+    reply: { type: 'string', description: '发到群里的回复：简洁回答；复杂讨论可用分节、局部加粗、对比表，通常400—900字' },
     proposal: {
       type: 'object', additionalProperties: false, required: ['action', 'detail'],
       properties: {
@@ -185,7 +185,7 @@ export function createRunAgent(queryImpl = query) {
       const research = definition && !chat && !planning && !readOnly ? researchServer(spec.tools, process.env, (kind, result) => saveResearchEvidence(projectDir, role, kind, result)) : null;
       const researchDiscipline = research ? '\n\n## 研究执行预算\n先读 context/source-ledger.jsonl 和有关的 context/sources/ 缓存，复用已核实原文与计算，不重复下载同一页或重算相同公式。尽早 Write 任务指定的交付文件并增量完善；缺口明确标待核，不能靠不断搜索拖到没有交付。相同缺口连续三次搜索无关或读取失败就记录限制；本步优先控制在十二次新增检索/网页/PDF读取内，已有证据充分即转入分析与写作。预算不构成编造或省略重大反证的理由；未证实的结论留作未知。' : '';
       const options = {
-        systemPrompt: { type: 'custom', prompt: `${shared}\n\n${rolePrompt}\n\n## 本次调用\n${modePrompt}${researchDiscipline}${!chat && !planning && !readOnly ? documentInstructions + (definition ? documentVisualInstructions : '') : ''}\n\n## 面向用户的表达\n${replyInstructions}` },
+        systemPrompt: { type: 'custom', snapshot: false, prompt: `${shared}\n\n${rolePrompt}\n\n## 本次调用\n${modePrompt}${researchDiscipline}${!chat && !planning && !readOnly ? documentInstructions + (definition ? documentVisualInstructions : '') : ''}\n\n## 面向用户的表达\n${chat ? conversationStyle : replyInstructions + "\n" + conversationStyle}` },
         tools: [...allowed].filter(t => !definition || !['WebFetch', 'WebSearch', 'Calculate'].includes(t)),
         ...(research ? { mcpServers: { research } } : {}),
         outputFormat: { type: 'json_schema', schema: resultSchema },

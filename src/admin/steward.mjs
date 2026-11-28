@@ -1,5 +1,6 @@
 // 管家：AI 管理员助手背后的智能体。只有一个持续的会话（会话号存在 data/admin/session.json，重启后接着用），
 // 能看整个仓库（密钥除外），只能改工作副本 .admin-work/，没有命令行；调度同事、交改动、重启、回退都走固定工具
+import { conversationStyle } from '../presentation.mjs';
 import { query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { acquireCapacity } from '../agents/capacity.mjs';
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
@@ -152,7 +153,7 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
         mkdirSync(configDir, { recursive: true });
         const check = (tool, input) => stewardPermission(root, tool, input, readOnly);
         const options = {
-          systemPrompt: { type: 'custom', prompt: readFileSync(path.join(root, 'src/admin/prompt.md'), 'utf8') },
+          systemPrompt: { type: 'custom', snapshot: false, prompt: readFileSync(path.join(root, 'src/admin/prompt.md'), 'utf8') + '\n' + conversationStyle },
           tools: readOnly ? READ_TOOLS : [...READ_TOOLS, ...WRITE_TOOLS],
           mcpServers: { admin: createServer({ name: 'admin', version: '1.0.0', alwaysLoad: true, tools }) },
           canUseTool: check,

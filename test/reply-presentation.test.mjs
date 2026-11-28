@@ -25,7 +25,7 @@ test('公开摘要不广播交接日志，同时保留未通过与未核实的�
   assert.doesNotMatch(publicReply('已完成。'.repeat(100)+'这份结论尚未通过核实。'),/验收通过/);
   const card = gateCard({stage:'accept',projectId:'p',cardId:'c',title:'验收',description:raw,process:{stats:{inputTokens:123}},points:['文件：site/index.html']});
   assert.doesNotMatch(JSON.stringify(card), /PostToolUse|inputTokens|token|site\/index/);
-  assert.equal(teamCard({title:'角色',text:'## **已提交**\n- 请确认'}).elements[0].text.content, '已提交\n• 请确认');
+  assert.equal(teamCard({title:'角色',text:'## **已提交**\n- 请确认'}).elements[0].text.content, '**已提交**\n• 请确认');
 });
 
 test('账户欠费说清阻塞原因，不把请求编号与原始异常发给用户', () => {
@@ -40,4 +40,14 @@ test('角色创建状态以真实回执为准，部分失败不停止其他角�
   const state=registrationView([{role:{key:'one',name:'</script><script>window.bad=true</script>',desc:'职责'},done:true}]);
   assert.doesNotMatch(qrStatusScript(state), /<script>/);
   const page=qrPage(state);assert.doesNotMatch(page,/<script>window.bad/);assert.match(page,/prefers-reduced-motion/);assert.doesNotMatch(page,/http-equiv="refresh"/);
+});
+
+test('讨论保留重点、转换标题与表格，工作台不遗漏表格单元格', async()=>{
+  const {replyElements}=await import('../src/presentation.mjs');
+  const {cardView}=await import('../src/workbench/recorder.mjs');
+  const elements=replyElements('### 一、选择\n**先隔离上下文**\n| 方案 | 代价 |\n| --- | --- |\n| 共用 | 隔离配置 |\n| 独立 | 运维成本 |');
+  assert.equal(elements[0].text.content,'**一、选择**\n**先隔离上下文**');
+  assert.equal(elements.filter(e=>e.tag==='column_set').length,3);
+  const view=cardView({elements});assert.ok(view.text.includes('运维成本'));assert.ok(view.text.includes('共用'));
+  assert.doesNotMatch(JSON.stringify(replyElements('<at id="all">所有人</at>')) , /<at/);
 });

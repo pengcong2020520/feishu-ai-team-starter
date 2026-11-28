@@ -1,5 +1,5 @@
 import { linkLabel } from '../project-labels.mjs';
-import { plainText, publicReply } from '../presentation.mjs';
+import { plainText, publicReply, replyElements } from '../presentation.mjs';
 const templates = { product: 'blue', designer: 'purple', developer: 'green' };
 const roleNames = { product: 'AI 产品经理', designer: 'AI 设计', developer: 'AI 程序员' };
 const roleOf = title => title?.startsWith('AI 设计') ? 'designer' : title?.startsWith('AI 程序员') ? 'developer' : 'product';
@@ -113,7 +113,7 @@ export function proposalCard({ role, reply, action, detail, projectId, stage, ca
   if (!kind) throw new Error('未知提议');
   const value = name => ({ action: name, stage, projectId, cardId });
   return { config, header: header(proposalTitle(role, action), role), elements: [
-    md(escape(reply)),
+    ...replyElements(reply),
     ...(kind.label && detail ? [{ tag: 'hr' }, gray(`${kind.label}：${detail}`)] : []),
     { tag: 'action', actions: [button(kind.yes, value(action), action === 'end' ? 'danger' : 'primary'), button(kind.no[0], value(kind.no[1]))] },
   ] };
@@ -121,7 +121,7 @@ export function proposalCard({ role, reply, action, detail, projectId, stage, ca
 
 // 点过的卡片收起来：只留标题和一句结果，按钮去掉
 export function closedCard(title, text, role = roleOf(title)) {
-  return { config, header: header(title, role), elements: [md(escape(text))] };
+  return { config, header: header(title, role), elements: replyElements(text) };
 }
 
 export function completeCard({ url }) {

@@ -68,4 +68,4 @@ export function chatPrompt({ p, role, text, recent = [], files = [] }) {
 }
 
 // 模型写的回复当不可信文字：去掉 Markdown 符号，限长
-export const tidy = text => plainText(text).slice(0, 300);
+export const tidy = text => String(text ?? "").slice(0, 10000);

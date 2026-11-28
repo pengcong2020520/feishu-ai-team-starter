@@ -36,5 +36,5 @@ test('对话任务消息带上现状、最近消息、这句话和能提的动�
   assert.match(prompt, /- revise：/);
   assert.doesNotMatch(prompt, /- start：/);
   assert.match(chatPrompt({ p: null, role: 'product', text: '你好' }), /群里现在没有进行中的项目/);
-  assert.equal(tidy('**好的** `代码`'), '好的 代码');
+  assert.equal(tidy('**好的** `代码`'), '**好的** `代码`');
 });

@@ -48,7 +48,7 @@ export function createAdminJournal({ root, secrets = Object.entries(process.env)
     },
     wrapBot(bot) {
       const wrapped = Object.create(bot);
-      const cardText = card => (card.elements || card.body?.elements || []).flatMap(e => e.text?.content ? [e.text.content] : e.tag === 'markdown' ? [e.content] : []).join('\n');
+      const cardText = card => { const parts=[]; const visit=items=>{for(const e of items||[]){if(e.text?.content)parts.push(e.text.content);else if(e.tag==='markdown')parts.push(e.content);visit(e.elements);visit(e.columns);}};visit(card.elements||card.body?.elements);return parts.join('\n'); };
       const inProgress = card => JSON.stringify(card).includes('stop_steward');
       wrapped.sendText = async text => { const id = await bot.sendText(text); record('reply', { messageId: id, text, kind: 'text' }); return id; };
       wrapped.sendCard = async card => { const id = await bot.sendCard(card); record('reply', { messageId: id, title: card.header?.title?.content, text: cardText(card), kind: 'card', pending: inProgress(card) }); return id; };

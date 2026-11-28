@@ -14,7 +14,7 @@ import { runAgent } from '../agents/run.mjs';
 import { cardView } from '../workbench/recorder.mjs';
 import { questionCard } from '../flow/cards.mjs';
 import { readResearchEvidence } from './evidence.mjs';
-import { plainText, publicReply, publicError } from '../presentation.mjs';
+import { plainText, publicReply, publicError, replyElements } from '../presentation.mjs';
 import { newProjectRequest } from './lobby.mjs';
 import { createDocumentSync } from './documents.mjs';
 
@@ -28,7 +28,7 @@ export function teamCard({ title, text, color = 'blue', buttons = [], links = []
   const navigation = links.map(l => ({ tag: 'button', text: { tag: 'plain_text', content: linkLabel(l.label) }, type: 'default', url: l.url }));
   const rows = items => Array.from({ length: Math.ceil(items.length / 5) }, (_, i) => ({ tag: 'action', actions: items.slice(i * 5, i * 5 + 5) }));
   return { config: { wide_screen_mode: true, update_multi: true }, header: { template: color, title: { tag: 'plain_text', content: plain(title) } }, elements: [
-    { tag: 'div', text: { tag: 'plain_text', content: plain(text) || '请查看项目工作台。' } },
+    ...replyElements(text || '请查看项目工作台。'),
     ...rows(actions),
     ...(navigation.length ? [{ tag: 'hr' }, { tag: 'div', text: { tag: 'plain_text', content: '查看资料 · 下方入口仅跳转，不会确认或推进流程' } }, ...rows(navigation)] : []),
   ] };
@@ -509,7 +509,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
           p.lastChatFailure = { role, text: event.text, at: new Date().toISOString(), timedOut: !!result.timedOut, queueTimedOut: !!result.queueTimedOut, error: String(result.error || '未完成回复').replaceAll(process.env.MODEL_API_KEY || '\0', '[已隐藏]').slice(0, 1000) }; await save();
           await reply('这次回复未完成', `${result.queueTimedOut ? '等待执行名额超过五分钟，尚未开始回答。' : result.timedOut ? '这次回答超过一分钟，已停止等待。' : '这次模型回复没有完成。'}你的消息已保留，项目进度没有改变。请 @${roleName} 说“重试”，重新回答这条消息；不会重做整个项目。`); return;
         }
-        const text = plainText(result.structured?.reply || result.text);
+        const text = result.structured?.reply || result.text;
         await reply('回复', text);
         if (p.lastChatFailure?.role === role) { delete p.lastChatFailure; await save(); }
         const proposal = result.structured?.proposal;
