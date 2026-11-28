@@ -238,7 +238,8 @@ test('自定义第四包并行项目从导入到验收：项目、会话、卡�
   const ownerEvent={identity:{localPersonId:owner.id},source:'local'};
   await press(engine,pa,'confirm',ownerEvent);await assert.rejects(press(engine,pa,'confirm',ownerEvent),/过期/);
   const gate=await engine.waitForIdle(pa.id);assert.equal(gate.stage,'accept');
-  await assert.rejects(press(engine,gate,'confirm',ownerEvent),/确认人/);
+  const guest=await projects.directory.upsert({name:'旁观者',responsibilities:[]});
+  await assert.rejects(press(engine,gate,'confirm',{identity:{localPersonId:guest.id},source:'local'}),/人员分工/);
   await press(engine,gate,'confirm',{identity:{localPersonId:reviewer.id},source:'local'});assert.equal((await engine.waitForIdle(pa.id)).stage,'done');
   assert.equal((await engine.get(pb.id)).stage,'scope');
   assert.match(await readFile(path.join(root,'workspace',pa.id,'review/brief.md'),'utf8'),new RegExp(pa.id));
@@ -345,7 +346,8 @@ test('第三方 JSON 分支与自定义确认职责在同一引擎执行', () =>
   const owner=await projects.directory.upsert({name:'发起人',responsibilities:[]});const reviewer=await projects.directory.upsert({name:'编辑负责人',responsibilities:[{job:'编辑',scope:'内容',approvals:['editorial-review']}]});await projects.directory.settings({ownerId:owner.id});
   const engine=createPackageEngine({root,recorder,projects,agent:async args=>{const result=await fake(args);if(args.role==='writer')await put(args.projectDir,'drafts/decision.json',{result:'ready'});return result;}});
   let p=await engine.create({package:lock,text:'内容项目',options:{memberIds:[owner.id,reviewer.id],approvers:{'editorial-review':reviewer.id}}});p=await engine.waitForIdle(p.id);assert.equal(p.team.approvers['editorial-review'],reviewer.id);
-  await assert.rejects(press(engine,p,'confirm',{source:'local',identity:{localPersonId:owner.id}}),/编辑负责人/);
+  const guest=await projects.directory.upsert({name:'旁观者',responsibilities:[]});
+  await assert.rejects(press(engine,p,'confirm',{source:'local',identity:{localPersonId:guest.id}}),/人员分工/);
   await press(engine,p,'confirm',{source:'local',identity:{localPersonId:reviewer.id}});assert.equal((await engine.waitForIdle(p.id)).stage,'accept');
 }));
 

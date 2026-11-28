@@ -134,8 +134,9 @@ test('两个项目独立工作区与会话，全部讨论入上下文，确认�
   assert.match(await readFile(path.join(root, 'workspace', first.projectId, 'context/discussion.md'), 'utf8'), /独有讨论/);
   assert.doesNotMatch(await readFile(path.join(root, 'workspace', second.projectId, 'context/discussion.md'), 'utf8'), /独有讨论|红色项目/);
   const p = await flow.getProject(first.chatId); assert.equal(p.error, null); const value = { action: 'answer', projectId: p.id, stage: p.stage, cardId: p.cardId };
-  const denied = await flow.handleAction({ chatId: p.chatId, value, identity: { unionId: 'on_owner' }, source: 'feishu' });
-  assert.match(denied.toast.content, /产品同事/); assert.equal(calls.length, 2);
+  await person(directory, '旁观成员', 'on_observer');
+  const denied = await flow.handleAction({ chatId: p.chatId, value, identity: { unionId: 'on_observer' }, source: 'feishu' });
+  assert.match(denied.toast.content, /人员分工/); assert.equal(calls.length, 2);
   await flow.handleAction({ chatId: p.chatId, value, identity: { unionId: 'on_expert' }, source: 'feishu' }); await flow.waitForIdle(p.chatId);
   assert.equal((await flow.getProject(p.chatId)).stage, 'confirm_prd');
   assert.equal(calls.at(-1).resume, first.projectId + '-product');
@@ -181,8 +182,9 @@ test('工作台不能用请求体伪造确认人；分工变更与旧卡有明�
     const created=await post('/api/demand',{text:'APP 需求',channel:'local',requestId:'web-project'}).then(r=>r.json());await flow.waitForIdle(created.chatId);
     const p=await flow.getProject(created.chatId),oldCard=p.cardId,value={projectId:p.id,stage:p.stage,cardId:oldCard,action:'answer'};
     assert.equal((await post('/api/team/person',{name:'伪造',responsibilities:[]},{Origin:'http://evil.example'})).status,404);
-    const denied=await post('/api/action',{chatId:p.chatId,value,identity:{unionId:'on_expert',localPersonId:expert.id},source:'local'}).then(r=>r.json());
-    assert.match(denied.toast.content,/APP 产品/);assert.equal(p.cardId,oldCard);
+    const accepted=await post('/api/action',{chatId:p.chatId,value,identity:{unionId:'on_expert',localPersonId:expert.id},source:'local'}).then(r=>r.json());
+    assert.doesNotMatch(accepted.toast.content,/APP 产品|无权限|人员分工/);await flow.waitForIdle(p.chatId);
+    const event=(await recorder.list(p.chatId)).findLast(r=>r.kind==='action');assert.match(event.actor,/本机用户/);assert.doesNotMatch(event.actor,/APP 产品/);
     assert.equal((await post('/api/team/project',{projectId:p.id})).status,404);
     // 历史项目的内部迁移仍保留权限与旧卡保护，人员管理 HTTP 已删除。
     await flow.updateTeam({projectId:p.id,ownerId:owner.id,memberIds:[owner.id,expert.id],approvers:Object.fromEntries(all.map(s=>[s,owner.id]))});

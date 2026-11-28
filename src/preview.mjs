@@ -144,14 +144,19 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
         const actor = byAdmin ? 'AI 管理员助手（代你）' : localPerson ? `${localPerson.name}（工作台）` : '你（工作台）';
         const packageProject = data.chatId && await flow.packages?.get(data.chatId);
         if (packageProject && ['/api/message', '/api/action'].includes(url.pathname)) {
+          const manager = flow.packageProjects || flow.projects;
+          const packageIdentity = byAdmin ? { role: 'admin', openId: process.env.FEISHU_ADMIN_OPEN_ID } : await manager?.localIdentity(packageProject.package.id);
+          const packageActor = { identity: packageIdentity, source: byAdmin ? 'admin' : 'local' };
           if (url.pathname === '/api/action') {
-            const result = await flow.packages.action({ chatId: data.chatId, value: { ...data.value, action: data.value?.action?.startsWith('package_') ? data.value.action : `package_${data.value?.action}` }, formValue: data.formValue, actor, ...actorContext });
+            const result = await flow.packages.action({ chatId: data.chatId, value: { ...data.value, action: data.value?.action?.startsWith('package_') ? data.value.action : `package_${data.value?.action}` }, formValue: data.formValue, actor, ...packageActor });
             return send(res, 200, JSON.stringify({ ...result, toast: { type: 'info', content: '已收到操作' } }), false, 'application/json; charset=utf-8');
           }
           if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 4000 || !packageProject.roles.some(r => r.id === data.role)) throw Error('角色或消息无效');
-          if (!data.chatId.startsWith('web:')) await feishu.sendText(data.chatId, `${byAdmin ? 'AI 管理员助手代你' : '来自工作台'}：${data.text}`, packageProject.botBindings[data.role]);
-          await recorder?.add(data.chatId, { kind: 'user', role: data.role, text: data.text, actor, source, projectId: packageProject.id });
-          const result = await flow.packages.message({ chatId: data.chatId, role: data.role, text: data.text, senderType: 'user', actor, ...actorContext });
+          const auth = await manager?.authorize({ project: packageProject, ...packageActor, action: 'discuss' });
+          if (auth && !auth.ok) throw Error(auth.reason);
+          const messageId = !data.chatId.startsWith('web:') ? await feishu.sendText(data.chatId, `${byAdmin ? 'AI 管理员助手代你' : '来自工作台'}：${data.text}`, packageProject.botBindings[data.role], { record: false }) : undefined;
+          await recorder?.add(data.chatId, { kind: 'user', role: data.role, text: data.text, actor, source, projectId: packageProject.id, messageId, identity: packageIdentity, authority: auth?.authority || 'member' });
+          const result = await flow.packages.message({ chatId: data.chatId, role: data.role, text: data.text, senderType: 'user', actor, ...packageActor });
           return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');
         }
         if (url.pathname === '/api/demand' && flow.projects) {

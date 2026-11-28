@@ -21,3 +21,96 @@ body{height:100dvh;overflow:hidden}#workspace{height:100dvh;display:flex;flex-di
 .skill-original{margin:18px 0 24px}.skill-original>summary{font-size:14px;color:var(--blue)}.artifact-document-title{font-size:13px;margin:4px 0 10px;line-height:1.65;color:#586170}.skill-history{line-height:1.7}
 
 .timeline-head .mobile-artifacts{font-size:12px;padding:4px 8px}.legacy-history{margin:24px 0;padding-top:18px;border-top:1px solid var(--line);font-size:14px}
+
+/* V2.1: compact multi-project cards and distinct role portraits. */
+.role-portrait { overflow:visible; background:transparent; }
+.role-portrait svg { stroke:none; border-radius:inherit; }
+.role-chip { display:inline-flex; align-items:center; gap:6px; min-width:0; color:#566174; font-size:12px; vertical-align:middle; }
+button.role-chip { border:0; background:transparent; padding:0; text-align:left; }
+button.role-chip:hover { color:var(--blue); background:#f2f5fb; }
+.role-chip .robot-avatar { width:23px; height:23px; border-radius:7px; }
+.role-chip>span:last-child { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#breadcrumb { flex:1; overflow:hidden; }
+#breadcrumb>span { flex:none; white-space:nowrap; }
+#breadcrumb>span:last-child { flex:1; min-width:0; }
+#capacity { flex:none; }
+.topbar { gap:16px; }
+#content { padding:18px 22px; }
+.board-toolbar { margin-bottom:14px; }
+.board-toolbar h2 { font-size:24px; }
+.column-head { padding:12px 7px; font-size:15px; }
+.column-body { gap:8px; padding:0 1px 8px; scrollbar-width:thin; }
+.project-card { padding:12px; box-shadow:0 1px 2px #1d294707; }
+.project-title { font-size:15px; margin:0 0 5px; line-height:1.5; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.card-stage { font-size:12px; color:#747d8d; margin-bottom:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.card-owners { display:flex; gap:6px 10px; flex-wrap:wrap; }
+.card-activity { margin-top:7px; padding-top:7px; font-size:12px; -webkit-line-clamp:1; }
+.card-actions { margin-top:9px; gap:6px; flex-wrap:nowrap; justify-content:space-between; }
+.card-actions button { font-size:12px; padding:5px 9px; white-space:nowrap; }
+.empty-column { min-height:112px; }
+#role-dock { height:94px; margin:0 22px 12px; }
+.avatar-button { flex:1 0 92px; }
+.avatar-button .robot-avatar { width:44px; height:44px; }
+.document-link, .message-links a, .message-links button.document-link, .artifact-heading a {
+  color:#5a6577; background:#f5f7fa; border:1px solid #e1e6ed; border-radius:6px;
+  font-weight:400; text-decoration:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px;
+}
+.document-link:hover, .message-links a:hover, .message-links button.document-link:hover { color:#263f6b; background:#ebeff6; border-color:#c7d0df; text-decoration:none; }
+.card-actions .document-link { background:transparent; border-color:transparent; padding:5px 0; }
+.project-header { padding:9px 24px; gap:10px; }
+.project-header h1 { font-size:16px; }
+.project-header a.document-link { padding:6px 10px; }
+.project-chat { padding:14px 24px 12px; }
+.conversation-title { padding-bottom:10px; gap:12px; }
+.conversation-title h2 { font-size:20px; }
+.chat-row { margin:14px 0; }
+.chat-bubble { padding:9px 12px; }
+.chat-bubble>strong { font-size:13px; margin-bottom:5px; color:#4f586b; }
+.history-actions { gap:10px; }
+.past-action { color:#8c94a2; font-size:11px; }
+.message-links .document-link { padding:4px 8px; font-size:12px; }
+.current-controls { padding:12px 14px; margin-top:16px; }
+.current-controls>p { margin:0 0 8px; }
+.current-controls .actions { margin:8px 0 0; gap:7px; align-items:center; }
+.current-controls input[data-draft=feedback] { flex:1; min-width:130px; width:auto; font-size:13px; height:34px; padding:6px 9px; }
+.current-controls .actions button { padding:6px 11px; white-space:nowrap; }
+.composer { padding:8px 10px; gap:7px; }
+.composer textarea { min-height:38px; padding:8px; }
+.recipient-avatar { display:inline-flex; }
+.recipient-avatar .robot-avatar { width:23px; height:23px; }
+.composer select { border:0; background:#f5f7fb; width:auto; max-width:180px; padding:3px 8px; }
+.new-messages { bottom:113px; }
+.artifact-timeline { padding:16px 18px; }
+.timeline-head { margin-bottom:15px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.timeline-head h2 { font-size:20px; }
+.artifact-event { padding:0 0 12px 16px; margin-left:5px; }
+.artifact-event>small { font-size:12px; margin-bottom:6px; }
+.artifact-item { padding:10px 11px; border-radius:8px; }
+.artifact-heading { display:flex; align-items:center; gap:8px; }
+.artifact-title { flex:1; min-width:0; margin:0; align-items:center; font-size:14px; line-height:1.5; }
+.artifact-title:hover { color:var(--blue); background:transparent; }
+.artifact-title .icon { width:17px; height:17px; }
+.artifact-heading>.document-link { width:28px; height:28px; justify-content:center; flex:none; }
+.artifact-author { display:flex; align-items:center; gap:8px; margin-top:6px; }
+.artifact-author .badge { margin-left:auto; font-size:11px; padding:1px 7px; }
+.artifact-document-title { font-size:12px; margin:5px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.timeline-footer { display:flex; gap:8px; justify-content:space-between; align-items:center; padding-top:8px; }
+.timeline-footer small { font-size:11px; }
+.timeline-footer button { font-size:12px; }
+.task-record { padding:12px 14px; margin-bottom:9px; }
+.current-assignment { padding:11px 14px; }
+.workflow-step .role-chip { margin-top:8px; }
+.workflow-task .role-chip { margin-top:5px; }
+@media(max-width:1250px) { #content{padding:16px 18px} #role-dock{margin:0 18px 10px} .project-chat{padding:12px 16px} .artifact-timeline{padding:14px} }
+@media(max-width:950px) { .project-header{flex-wrap:nowrap}.project-header h1{width:auto}.project-header a{max-width:115px}.current-controls{margin-left:0}.current-controls input[data-draft=feedback]{flex-basis:100%}.artifact-timeline .timeline-footer{flex-wrap:wrap} }
+@media(max-width:580px) { #content{padding:12px} #role-dock{height:85px;margin:0 10px 8px}.avatar-button{flex:0 0 78px}.avatar-button .robot-avatar{width:38px;height:38px}.project-header{padding:8px 12px;gap:7px}.project-header h1{font-size:14px}.project-header a{display:none}.project-header button{padding:5px 7px;font-size:12px}.project-chat{padding:10px}.card-actions button{min-height:32px}.topbar{gap:9px}.artifact-timeline{max-width:calc(100vw - 24px)} }
+
+#source-title,#artifact-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}#source-title .role-portrait{width:30px;height:30px;flex:none}
+
+.project-card{padding:10px 11px}
+.card-stage{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:0;min-height:23px}
+.card-stage>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.card-owners{flex:none;flex-wrap:nowrap;gap:3px}
+.card-owners .role-chip{font-size:11px;gap:4px;max-width:94px}
+.card-owners.multiple .role-chip>span:last-child{display:none}
+.card-actions{margin-top:7px}

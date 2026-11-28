@@ -51,6 +51,7 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
       reply(200, await engine.create({ package: data.package, text: data.text, requestId: data.requestId, options, ...event })); return true;
     }
     if (typeof data.chatId !== 'string' || !await engine.get(data.chatId)) throw Error('项目不存在');
+    if (url.pathname === '/api/packages/name') { reply(200, await engine.renameProject({ chatId: data.chatId, name: data.name, ...event })); return true; }
     if (url.pathname === '/api/packages/documents') { reply(200, await engine.syncDocuments({ chatId: data.chatId, ...event })); return true; }
     if (url.pathname === '/api/packages/action') {
       if (data.feedback !== undefined && (typeof data.feedback !== 'string' || data.feedback.length > 4000)) throw Error('修改意见过长');
@@ -61,8 +62,9 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
       const p = await engine.get(data.chatId); if (!p.roles.some(r => r.id === data.role)) throw Error('角色无效');
       const auth = await manager?.authorize({ project: p, identity, source: event.source, action: 'discuss' });
       if (auth && !auth.ok) throw Error(auth.reason);
-      if (!p.chatId.startsWith('web:')) await feishu.sendText(p.chatId, `${event.actor}（工作台）：${data.text}`, p.botBindings[data.role]);
-      await recorder?.add(data.chatId, { kind: 'user', role: data.role, text: data.text, actor: event.actor, source: '工作台', projectId: p.id });
+      let messageId;
+      if (!p.chatId.startsWith('web:')) messageId = await feishu.sendText(p.chatId, `${event.actor}（工作台）：${data.text}`, p.botBindings[data.role], { record: false });
+      await recorder?.add(data.chatId, { kind: 'user', role: data.role, text: data.text, actor: event.actor, source: '工作台', projectId: p.id, messageId, identity, authority: auth?.authority || 'member' });
       reply(200, await engine.message({ chatId: data.chatId, role: data.role, text: data.text, senderType: 'user', ...event })); return true;
     }
     reply(404, { error: '未找到' });
