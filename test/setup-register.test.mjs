@@ -8,13 +8,13 @@ import { ADDONS, installRetry, registerMissing, registerRole } from '../src/setu
 
 const qrcode = { async toFile(file) { writeFileSync(file, 'png'); } };
 
-test('新建基础版不申请全部群消息；多项目版才增补对应权限', async () => {
+test('基础版产品经理接收全部群消息；私聊和成员管理仅多项目版申请', async () => {
   const requested = [];
   const lark = { registerApp: async options => { requested.push(options.addons.scopes.tenant); return { client_id: 'cli_new', client_secret: 'test-only' }; } };
   await registerRole({ lark, role: { ...team[0], mode: 'basic' } });
   await registerRole({ lark, role: { ...team[0], mode: 'projects' } });
   for (const scope of ['im:message.group_msg', 'im:message.p2p_msg:readonly', 'im:chat.members:write_only']) {
-    assert.equal(requested[0].includes(scope), false);
+    assert.equal(requested[0].includes(scope), scope === 'im:message.group_msg');
     assert.equal(requested[1].includes(scope), true);
   }
 });
@@ -51,7 +51,7 @@ test('只给缺的角色出码；过期换码；每建成一个就保存；出�
       const name = options.appPreset.name;
       calls[name] = (calls[name] ?? 0) + 1;
       assert.equal(options.createOnly, true);
-      assert.deepEqual(options.addons, ADDONS);
+      assert.deepEqual(options.addons, name === 'AI 产品经理' ? {...ADDONS,scopes:{tenant:[...ADDONS.scopes.tenant,'im:message.group_msg']}} : ADDONS);
       options.onQRCodeReady({ url: `https://qr.test/${encodeURIComponent(name)}/${calls[name]}`, expireIn: 600 });
       await new Promise(r => setTimeout(r, 5));
       if (name === 'AI 设计' && calls[name] === 1) throw Object.assign(new Error('expired'), { code: 'expired_token' });

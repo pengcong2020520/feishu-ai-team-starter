@@ -1,3 +1,4 @@
+import { createLegacyCoordinator } from './projects/coordinator.mjs';
 import { createFeishu } from './feishu.mjs';
 import { createFlow } from './flow/index.mjs';
 import { createRecorder } from './workbench/recorder.mjs';
@@ -12,13 +13,13 @@ import { createPackageConnections } from './packages/connections.mjs';
 export function createTeam({ root = process.cwd(), env = process.env, credentials, workbenchBase, previewBase, agent, transport = createFeishu } = {}) {
   const mode = resolveTeamMode({ root, env });
   const recorder = createRecorder(root);
-  let flow, projects, packageProjects, packages, lobby;
+  let flow, projects, packageProjects, packages, lobby, legacyCoordinate;
   const feishu = transport({ credentials, recorder,
     roleOrder: async chatId => { const p = await packages.get(chatId); return p ? p.roles.map(r => p.botBindings[r.id]).filter(Boolean) : Object.keys(credentials || {}); },
     observe: (identity, name) => (packageProjects || projects)?.observe(identity, name),
     onDiscussion: async event => (await packages.get(event.chatId)) ? packages.syncContext(event.chatId) : flow.syncContext(event.chatId),
-    onUnaddressed: event => packages.followup(event),
-    onMessage: async event => (await packages.get(event.chatId)) ? packages.message(event) : await lobby.message(event) ? undefined : flow.handleMessage(event),
+    onUnaddressed: async event => (await packages.get(event.chatId)) ? packages.groupMessage(event) : legacyCoordinate(event),
+    onMessage: async event => (await packages.get(event.chatId)) ? event.chatType === 'group' ? packages.groupMessage(event) : packages.message(event) : await lobby.message(event) ? undefined : event.chatType === 'group' && await flow.getProject(event.chatId) ? legacyCoordinate(event) : flow.handleMessage(event),
     onAction: async event => {
       if (!event.value?.action?.startsWith('package_')) return flow.handleAction(event);
       // 飞书回调先返回；权限、过期校验和实际执行在同一个受控入口完成。
@@ -28,6 +29,7 @@ export function createTeam({ root = process.cwd(), env = process.env, credential
   });
   if (mode === 'projects') projects = createProjectManager({ root, feishu, recorder });
   flow = createFlow({ root, feishu, recorder, projects, workbenchBase, previewBase, ...(agent ? { agent } : {}) });
+  legacyCoordinate = createLegacyCoordinator({root,flow,recorder,agent});
   packageProjects = projects || createProjectManager({ root, feishu, recorder });
   packages = createPackageEngine({ root, feishu, recorder, projects: packageProjects, workbenchBase, bindings: id => readBindings(root, id), ...(agent ? { agent } : {}) });
   lobby = createPackageLobby({ root, engine: packages, projects: packageProjects, feishu, recorder });
