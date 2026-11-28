@@ -153,7 +153,7 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
         mkdirSync(configDir, { recursive: true });
         const check = (tool, input) => stewardPermission(root, tool, input, readOnly);
         const options = {
-          systemPrompt: { type: 'custom', prompt: readFileSync(path.join(root, 'src/admin/prompt.md'), 'utf8') + '\n' + conversationStyle },
+          systemPrompt: { type: 'custom', snapshot: false, prompt: readFileSync(path.join(root, 'src/admin/prompt.md'), 'utf8') + '\n' + conversationStyle },
           tools: readOnly ? READ_TOOLS : [...READ_TOOLS, ...WRITE_TOOLS],
           mcpServers: { admin: createServer({ name: 'admin', version: '1.0.0', alwaysLoad: true, tools }) },
           canUseTool: check,
