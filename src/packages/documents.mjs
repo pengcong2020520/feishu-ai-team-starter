@@ -23,7 +23,7 @@ export function createDocumentSync({ root, feishu, onFeedback = async () => {} }
   const transport = (p, pack) => feishu.documents(p.botBindings[pack.workflow.coordinator]);
   async function feedback(p, state, remote) {
     let changed = 0;
-    for (const item of Object.values(state.artifacts)) {
+    for (const item of Object.values(state.artifacts).flatMap(a => [a, ...(a.versions || [])])) {
       if (!item.id) continue;
       try {
         const comments = await remote.comments(item.id);
@@ -52,7 +52,7 @@ export function createDocumentSync({ root, feishu, onFeedback = async () => {} }
   return {
     async view(p) {
       const s = await load(p);
-      return { enabled: enabled(p), items: Object.entries(s.artifacts).map(([artifactId, a]) => ({ artifactId, name: a.name, url: a.id ? url(a.id) : null, shared: !!a.shared, status: a.status, updatedAt: a.updatedAt, error: a.error, feedbackError: a.feedbackError })), feedbackCount: Object.keys(s.comments).length };
+      return { enabled: enabled(p), items: Object.entries(s.artifacts).map(([artifactId, a]) => ({ artifactId, name: a.name, url: a.id ? url(a.id) : null, shared: !!a.shared, status: a.status, updatedAt: a.updatedAt, error: a.error, feedbackError: a.feedbackError || (a.versions || []).find(v=>v.feedbackError)?.feedbackError, versions: (a.versions || []).map(v => ({ url: url(v.id), updatedAt: v.updatedAt, status: v.status })) })), feedbackCount: Object.keys(s.comments).length };
     },
     sync(p, pack, { ids, status = '阶段交付', publish = true } = {}) {
       if (!enabled(p)) return Promise.resolve({ skipped: true });
@@ -67,7 +67,7 @@ export function createDocumentSync({ root, feishu, onFeedback = async () => {} }
           try {
             const finishPending = async () => {
               await remote.append(item.id, item.pending.markdown, item.pending.token, { assets: item.pending.assets || {}, state: item.pending.delivery ||= {}, save: () => atomicJson(file(p), s) });
-              item.hash = item.pending.hash; item.status = item.pending.status; item.updatedAt = new Date().toISOString(); delete item.pending;
+              item.contentVersion = 2; item.hash = item.pending.hash; item.status = item.pending.status; item.updatedAt = new Date().toISOString(); delete item.pending;
               await atomicJson(file(p), s);
             };
             // 旧版本已插入的图片优先续传；当前草稿正在改图或尚未写完时，不让旧图一直空白。
@@ -77,6 +77,13 @@ export function createDocumentSync({ root, feishu, onFeedback = async () => {} }
             }
             if (Buffer.byteLength(artifact.text) > 200000) throw Error('文档超过 200 KB，请拆分产物后同步');
             const visual = await prepareDocumentVisuals({ markdown: artifact.text, projectDir: path.join(root, 'workspace', p.id), artifactPath: a.path, cacheDir: path.join(root, 'data/document-assets', p.id) });
+            // 正文版本与流程状态分离。历史文档不可变，保留人工修改和评论。
+            const digest = hash(artifact.text + (Object.keys(visual.assets).length ? '\n' + visual.digest : ''));
+            if (item.id && item.hash && (item.contentVersion !== 2 || item.hash !== digest)) {
+              (item.versions ||= []).push({ id: item.id, name: item.name, updatedAt: item.updatedAt, status: item.status, shared: item.shared });
+              delete item.id; delete item.shared; delete item.hash;
+              await atomicJson(file(p), s);
+            }
             if (!item.id) {
               if (item.creating) throw Error('上次创建文档回执不确定，已停止重复创建；请核查飞书文档并恢复文档编号');
               item.creating = true; await atomicJson(file(p), s);
@@ -85,13 +92,21 @@ export function createDocumentSync({ root, feishu, onFeedback = async () => {} }
               await atomicJson(file(p), s);
             }
             if (!item.shared) { await remote.share(item.id, p.chatId); item.shared = true; await atomicJson(file(p), s); }
-            const digest = hash(artifact.text + '\n' + status + (Object.keys(visual.assets).length ? '\n' + visual.digest : ''));
+
             // 先续传旧版本，再在本次同步中追上最新文件和状态；否则归档时可能停留在旧草稿。
             while (item.hash !== digest || item.pending) {
-              item.pending ||= { token: randomUUID(), hash: digest, status, assets: visual.assets, markdown: formatDocument(visual.markdown, { fallback: a.name, status, updatedAt: new Date().toISOString() }).markdown };
+              item.pending ||= { token: randomUUID(), hash: digest, status, assets: visual.assets, markdown: formatDocument(visual.markdown, { fallback: a.name }).markdown };
               await atomicJson(file(p), s);
               await finishPending();
             }
+            // 旧卡片里的链接仍可用，文档顶部提供新版本入口；不删除原正文或人工评论。
+            const previous = item.versions?.at(-1);
+            if (previous && previous.id !== item.id && previous.redirectTo !== item.id) {
+              previous.redirectToken ||= randomUUID(); await atomicJson(file(p), s);
+              await remote.append(previous.id, `> 本文档为历史版本。[打开最新正文](${url(item.id)})。原有内容和评论已保留。`, previous.redirectToken, { startIndex: 0 });
+              previous.redirectTo = item.id;
+            }
+            item.status = status;
             delete item.error;
           } catch (e) { item.error = e.message; /* 保留批次进度与幂等号，后续失败不能让已写入部分重复追加。 */ }
           await atomicJson(file(p), s);

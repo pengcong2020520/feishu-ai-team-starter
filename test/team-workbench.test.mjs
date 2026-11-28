@@ -18,6 +18,7 @@ test('扫码重复点击只注册一轮，部分成功重试复用，凭据与�
  const lock=await installPackage('examples/team-package',root),pack=(await listPackages(root))[0],projects=createProjectManager({root});
  let calls=0,release;const connections=[];
  const service=createPackageConnections({root,projects,feishu:{connectCredentials:async c=>connections.push(Object.keys(c))},dependencies:async()=>({}),register:async({roles,save})=>{
+  for(const role of roles)assert.ok(pack.roles.some(r=>r.id===role.id),'扫码保留角色标识，头像不使用机器人凭据 key');
   calls++;if(calls===1)await new Promise(r=>{release=r;});
   await Promise.all(roles.map(async(role,i)=>{if(calls===1&&i===1)return;await save(role,{appId:'cli_'+role.key,appSecret:'test-secret',openId:'ou_'+role.key});}));
   return roles.map((role,i)=>({role,ok:calls>1||i===0}));
@@ -67,7 +68,9 @@ test('工作台首页是团队流程；人员管理接口和页面已删除；�
  const flow={packages:{snapshot:async()=>[]},connections:{status:()=>null,start:async()=>{started++;return {state:'scanning'};}},getState:async()=>({projects:[]})};
  const server=await startPreview({root,assetsRoot:process.cwd(),flow,workbenchPort:0,modelPort:0});const base=`http://127.0.0.1:${server.workbenchPort}`;
  try{
-  const html=await fetch(base).then(r=>r.text());assert.match(html,/teams.js/);assert.doesNotMatch(html,/人员与职责|人员名册/);
+  const html=await fetch(base).then(r=>r.text());assert.match(html,/teams.js/);assert.match(html,/团队生态/);assert.doesNotMatch(html,/<h2>我的 AI 团队/);
+  const model=await fetch(base+'/team-board.mjs');assert.equal(model.status,200);assert.match(model.headers.get('content-type'),/javascript/);assert.doesNotMatch(html,/人员与职责|人员名册/);
+  for(const asset of ['/role-portraits.mjs','/team-entry.mjs','/cyber.css']){const response=await fetch(base+asset);assert.equal(response.status,200);assert.match(response.headers.get('content-type'),asset.endsWith('css')?/text\/css/:/javascript/);}
   for(const route of ['/api/team','/api/team/person','/api/team/settings','/api/team/project','/api/team/import'])assert.equal((await fetch(base+route,{method:route==='/api/team'?'GET':'POST'})).status,404);
   const send=headers=>fetch(base+'/api/packages/connect',{method:'POST',headers,body:JSON.stringify({packageId:'example-team'})});
   assert.equal((await send({'Content-Type':'application/json','X-Workbench':'1',Origin:'http://evil.invalid'})).status,403);

@@ -37,7 +37,7 @@ export function createMessageReceiver({ ids, onMessage, onDiscussion, onUnaddres
     const targets = m.chat_type === 'p2p' ? [receivingRole] : orderedRoles.filter(role => m.mentions?.some(x => (x.id?.open_id || x.id) === ids.get(role)));
     if (!recorded.has(m.message_id)) {
       recorded.add(m.message_id);
-      await recorder?.add(m.chat_id, { kind: 'user', role: targets[0] || null, targetRoles: targets, text, actor, identity, messageId: m.message_id, source: '飞书', ...replyContext, sentAt: m.create_time });
+      await recorder?.add(m.chat_id, { kind: 'user', role: targets[0] || null, targetRoles: targets, text, actor, identity, authority: person?.authority || 'member', messageId: m.message_id, source: '飞书', ...replyContext, sentAt: m.create_time });
       await onDiscussion?.({ chatId: m.chat_id });
       // 只交给会话接续规则一次；有任何真实 @ 时，留给相应应用处理，不能误接到旧角色。
       if (m.chat_type === 'group' && !m.mentions?.length && text) await onUnaddressed?.({ chatId: m.chat_id, chatType: m.chat_type, text, senderType: 'user', identity, actor, source: 'feishu', messageId: m.message_id, ...replyContext });

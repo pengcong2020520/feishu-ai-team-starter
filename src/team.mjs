@@ -27,10 +27,10 @@ export function createTeam({ root = process.cwd(), env = process.env, credential
       return { toast: { type: 'info', content: '已收到，请看项目进度' } };
     },
   });
-  if (mode === 'projects') projects = createProjectManager({ root, feishu, recorder });
+  if (mode === 'projects') projects = createProjectManager({ root, feishu, recorder, env });
   flow = createFlow({ root, feishu, recorder, projects, workbenchBase, previewBase, ...(agent ? { agent } : {}) });
   legacyCoordinate = createLegacyCoordinator({root,flow,recorder,agent});
-  packageProjects = projects || createProjectManager({ root, feishu, recorder });
+  packageProjects = projects || createProjectManager({ root, feishu, recorder, env });
   packages = createPackageEngine({ root, feishu, recorder, projects: packageProjects, workbenchBase, bindings: id => readBindings(root, id), ...(agent ? { agent } : {}) });
   lobby = createPackageLobby({ root, engine: packages, projects: packageProjects, feishu, recorder });
   packages.newProject = event => lobby.message(event);

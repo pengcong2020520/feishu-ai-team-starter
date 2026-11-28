@@ -84,12 +84,12 @@ test('多人完整流程：分岗确认、同名跨项目拒绝、停用即时�
     const beforeCalls = calls.length;
     const wrong = await click(p, value, other);
     assert.match(wrong.toast.content, /人员分工/);
-    const wrongMember = await click(p, value, i === 3 ? product : owner);
+    const wrongMember = await click(p, value, i < 2 ? designer : product);
     assert.match(wrongMember.toast.content, /确认/);
     assert.equal(calls.length, beforeCalls); assert.equal(p.stage, gates[i]); assert.equal(p.cardId, value.cardId);
     if (i === 2) {
       await directory.upsert({ ...designer, active: false });
-      assert.match((await click(p, value, designer)).toast.content, /人员分工/);
+      assert.match((await click(p, value, designer)).toast.content, /身份/);
       assert.equal(calls.length, beforeCalls);
       await directory.upsert({ ...designer, active: true });
     }

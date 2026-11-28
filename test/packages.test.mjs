@@ -1,3 +1,4 @@
+import { fakeDelivery } from './helpers/delivery.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir, cp, symlink } from 'node:fs/promises';
@@ -23,6 +24,7 @@ const stats = { turns: 1, durationMs: 1, inputTokens: 1, outputTokens: 1 };
 const fixture = async fn => { const root = await mkdtemp(path.join(os.tmpdir(), 'team-package-test-')); try { return await fn(root); } finally { await rm(root, { recursive: true, force: true }); } };
 const put = async (dir, file, value) => { await mkdir(path.dirname(path.join(dir, file)), { recursive: true }); await writeFile(path.join(dir, file), typeof value === 'string' ? value : JSON.stringify(value)); };
 const fake = async args => {
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
   if (args.mode === 'chat') return { ok: true, text: '只读讨论', structured: { reply: '只读讨论', proposal: { action: 'none', detail: '' } }, stats };
   for (const s of args.definition.skills) args.onProgress?.({ tool: 'Skill', file: s, status: 'succeeded' });
   const out = args.role === 'writer' ? 'drafts/brief.md' : 'review/brief.md';
@@ -40,7 +42,8 @@ test('服务恢复仅接续崩溃前任务，不批准待审、恢复手工停�
   if(scenario!=='gate'){p.stage='review';p.busy=true;p.error=scenario==='failed'?'业务错误':null;}
   if(scenario==='stopped')p.stopRequested=true;if(scenario==='cooldown')p.lastAutoRecovery=new Date().toISOString();
   await put(root,'data/package-projects.json',state);
-  const create=()=>createPackageEngine({root,agent:async args=>{calls++;return fake(args);}});
+  const create=()=>createPackageEngine({root,agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);calls++;return fake(args);}});
   let engine=create();if(scenario==='startup-failure'){await engine.list();engine=create();}
   await engine.resumeInterrupted();await engine.resumeInterrupted();const end=await engine.waitForIdle(p.id);
   assert.equal(calls,['interrupted','startup-failure'].includes(scenario)?1:0,scenario);assert.equal(end.approvals?.length||0,0);
@@ -53,7 +56,8 @@ test('十分钟接续按真人和项目隔离，只有单角色点名建立上�
   const lock=await installPackage('examples/team-package',root),directory=createDirectory(root),calls=[];
   const alice=await directory.observe({unionId:'alice'},'甲');await directory.observe({unionId:'bob'},'乙');
   const projects={directory,prepare:async({projectId})=>({id:projectId,chatId:`web:${projectId}`,name:'测试'}),authorize:async()=>({ok:true}),syncContext:async()=>{},notice:async()=>''};
-  const engine=createPackageEngine({root,projects,recorder:createRecorder(root),agent:async args=>{if(args.mode==='chat')calls.push(args.prompt);return fake(args);}});
+  const engine=createPackageEngine({root,projects,recorder:createRecorder(root),agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);if(args.mode==='chat')calls.push(args.prompt);return fake(args);}});
   let p=await engine.create({package:lock,text:'甲项目'});p=await engine.waitForIdle(p.id);
   let other=await engine.create({package:lock,text:'乙项目'});other=await engine.waitForIdle(other.id);
   const base={chatId:p.chatId,chatType:'group',source:'feishu',senderType:'user',identity:{unionId:'alice'}};
@@ -71,6 +75,7 @@ test('十分钟接续按真人和项目隔离，只有单角色点名建立上�
 test('完成项目中的新写作目标与后续补充可提出开工卡，仍由原关口确认且不污染旧流程', () => fixture(async root => {
   const lock=await installPackage('examples/team-package',root),recorder=createRecorder(root),requests=[];let chats=0;
   const engine=createPackageEngine({root,recorder,agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     if(args.mode!=='chat')return fake(args);
     chats++;assert.match(args.prompt,/AI 爱好者/);assert.doesNotMatch(args.prompt,/先读 context\/discussion/);
     return {ok:true,structured:{reply:'信息已齐，确认后建新项目。',proposal:{action:'start',detail:'产品即分发；AI 爱好者；2000字以内；联网核实。'}},stats};
@@ -89,18 +94,20 @@ test('完成项目中的新写作目标与后续补充可提出开工卡，仍�
 test('群聊排队与超时有独立回执，重试只重答原问题，不改变任务阶段或确认卡', () => fixture(async root => {
   const lock=await installPackage('examples/team-package',root),recorder=createRecorder(root);let chats=0,work=0;
   const engine=createPackageEngine({root,recorder,agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     if(args.mode!=='chat'){work++;return fake(args);}
     chats++;assert.equal(args.prompt.includes('读者怎么定'),true);assert.equal(args.queueTimeoutMs,300000);
     args.onQueued?.(true);
+    assert.equal((await engine.snapshot())[0].liveActivities[0].status,'queued');
     if(chats===1)return {ok:false,queueTimedOut:true,error:'等待执行名额超时',stats};
-    args.onQueued?.(false);return {ok:true,structured:{reply:'建议面向 AI 爱好者。',proposal:{action:'none',detail:''}},stats};
+    args.onQueued?.(false);assert.equal((await engine.snapshot())[0].liveActivities[0].status,'running');return {ok:true,structured:{reply:'建议面向 AI 爱好者。',proposal:{action:'none',detail:''}},stats};
   }});
   let p=await engine.create({package:lock,text:'当前项目'});p=await engine.waitForIdle(p.id);const cardId=p.cardId;
   await engine.message({chatId:p.chatId,role:'writer',text:'读者怎么定'});p=await engine.waitForIdle(p.id);
   assert.equal(p.lastChatFailure.queueTimedOut,true);assert.equal(p.stage,'scope');assert.equal(p.cardId,cardId);assert.equal(p.error,null);
   const cards=(await recorder.list(p.chatId)).filter(r=>r.card);assert.ok(cards.some(r=>r.card.title.includes('排队')));assert.match(cards.at(-1).card.text.join(''),/尚未开始回答/);
   await engine.message({chatId:p.chatId,role:'writer',text:'重试'});p=await engine.waitForIdle(p.id);
-  assert.equal(chats,2);assert.equal(work,1);assert.equal(p.lastChatFailure,undefined);assert.equal(p.cardId,cardId);
+  assert.deepEqual((await engine.snapshot())[0].liveActivities,[]);assert.equal(chats,2);assert.equal(work,1);assert.equal(p.lastChatFailure,undefined);assert.equal(p.cardId,cardId);
 }));
 
 test('冗长模型交付保留完整工作区交接，群聊与确认卡只显示可读摘要', () => fixture(async root => {
@@ -121,6 +128,7 @@ test('进入后续任务后，进度卡不复用上一任务等待验收的回�
   const running = new Promise(resolve => { started = resolve; });
   const held = new Promise(resolve => { release = resolve; });
   const engine = createPackageEngine({ root, recorder, agent: async args => {
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     if (args.role === 'reviewer') { started(); await held; }
     return { ...await fake(args), text: '上一任务成果已提交，现在等待你验收。' };
   } });
@@ -138,6 +146,7 @@ test('Skill 只有尝试没有成功结果，即使交付文件有效也停下�
   const lock = await installPackage('examples/team-package', root);
   let calls = 0;
   const engine = createPackageEngine({ root, recorder: createRecorder(root), agent: async args => {
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     calls++;
     for (const s of args.definition.skills) args.onProgress?.({ tool: 'Skill', file: s, ...(calls > 1 ? { status: 'succeeded' } : {}) });
     await put(args.projectDir, 'drafts/brief.md', '# 有效简报\n目标、事实、待确认事项均已交付。');
@@ -161,6 +170,7 @@ test('重试执行时显示进度和停下按钮，同时将上次错误传给 A
   const running = new Promise(resolve => { started = resolve; });
   const held = new Promise(resolve => { release = resolve; });
   const engine = createPackageEngine({ root, recorder, agent: async args => {
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     if (++calls === 1) return { ok: false, text: '', error: '原始交付错误', stats };
     assert.match(args.prompt, /上次未通过：原始交付错误/);
     args.control.stop = release;
@@ -237,7 +247,8 @@ test('自定义第四包并行项目从导入到验收：项目、会话、卡�
   const ownerEvent={identity:{localPersonId:owner.id},source:'local'};
   await press(engine,pa,'confirm',ownerEvent);await assert.rejects(press(engine,pa,'confirm',ownerEvent),/过期/);
   const gate=await engine.waitForIdle(pa.id);assert.equal(gate.stage,'accept');
-  await assert.rejects(press(engine,gate,'confirm',ownerEvent),/确认人/);
+  const guest=await projects.directory.upsert({name:'旁观者',responsibilities:[]});
+  await assert.rejects(press(engine,gate,'confirm',{identity:{localPersonId:guest.id},source:'local'}),/人员分工/);
   await press(engine,gate,'confirm',{identity:{localPersonId:reviewer.id},source:'local'});assert.equal((await engine.waitForIdle(pa.id)).stage,'done');
   assert.equal((await engine.get(pb.id)).stage,'scope');
   assert.match(await readFile(path.join(root,'workspace',pa.id,'review/brief.md'),'utf8'),new RegExp(pa.id));
@@ -246,7 +257,8 @@ test('自定义第四包并行项目从导入到验收：项目、会话、卡�
 
 test('失败交付停下、重试原节点；打回需意见且会重新验收', () => fixture(async root => {
   const lock=await installPackage('examples/team-package',root);let fail=true,calls=0;
-  const engine=createPackageEngine({root,recorder:createRecorder(root),agent:async args=>{calls++;if(fail)return{ok:false,text:'',error:'模拟工具失败',stats};return fake(args);}});
+  const engine=createPackageEngine({root,recorder:createRecorder(root),agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);calls++;if(fail)return{ok:false,text:'',error:'模拟工具失败',stats};return fake(args);}});
   const p=await engine.create({package:lock,text:'简报'});let gate=await engine.waitForIdle(p.id);assert.match(gate.error,/模拟/);assert.equal(gate.stage,'draft');
   fail=false;await press(engine,gate,'retry');gate=await engine.waitForIdle(p.id);assert.equal(gate.stage,'scope');assert.equal(calls,2);
   await press(engine,gate,'reject');gate=await engine.get(p.id);assert.equal(gate.waitingFeedback,true);assert.equal(calls,2);
@@ -307,6 +319,7 @@ test('计划并行失败后保留成功任务，重启后重试只补失败项',
   const calls=[];let fails=true,active=0,peak=0;
   const peers=Promise.withResolvers(),started=new Set();
   const agent=async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     calls.push(args.role+(args.outputSchema?':plan':''));for(const s of args.definition.skills)args.onProgress?.({tool:'Skill',file:s,status:'succeeded'});
     if(args.outputSchema)return{ok:true,text:JSON.stringify({rationale:'公司与宏观并行，风险综合评审。每类须保留来源。',tasks}),structured:{rationale:'公司与宏观并行，风险综合评审',tasks},stats};
     active++;peak=Math.max(active,peak);
@@ -342,16 +355,19 @@ test('第三方 JSON 分支与自定义确认职责在同一引擎执行', () =>
   await put(source,'manifest.json',m);await put(source,m.workflow,w);const lock=await installPackage(source,root);
   const recorder=createRecorder(root),projects=createProjectManager({root,recorder});
   const owner=await projects.directory.upsert({name:'发起人',responsibilities:[]});const reviewer=await projects.directory.upsert({name:'编辑负责人',responsibilities:[{job:'编辑',scope:'内容',approvals:['editorial-review']}]});await projects.directory.settings({ownerId:owner.id});
-  const engine=createPackageEngine({root,recorder,projects,agent:async args=>{const result=await fake(args);if(args.role==='writer')await put(args.projectDir,'drafts/decision.json',{result:'ready'});return result;}});
+  const engine=createPackageEngine({root,recorder,projects,agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);const result=await fake(args);if(args.role==='writer')await put(args.projectDir,'drafts/decision.json',{result:'ready'});return result;}});
   let p=await engine.create({package:lock,text:'内容项目',options:{memberIds:[owner.id,reviewer.id],approvers:{'editorial-review':reviewer.id}}});p=await engine.waitForIdle(p.id);assert.equal(p.team.approvers['editorial-review'],reviewer.id);
-  await assert.rejects(press(engine,p,'confirm',{source:'local',identity:{localPersonId:owner.id}}),/编辑负责人/);
+  const guest=await projects.directory.upsert({name:'旁观者',responsibilities:[]});
+  await assert.rejects(press(engine,p,'confirm',{source:'local',identity:{localPersonId:guest.id}}),/人员分工/);
   await press(engine,p,'confirm',{source:'local',identity:{localPersonId:reviewer.id}});assert.equal((await engine.waitForIdle(p.id)).stage,'accept');
 }));
 
 test('停止会中断当前 Agent，服务重启时未完成任务不会自动执行', () => fixture(async root => {
   const lock=await installPackage('examples/team-package',root);let start,stop,calls=0;
   const started=new Promise(r=>start=r);
-  const engine=createPackageEngine({root,recorder:createRecorder(root),agent:async args=>{calls++;const promise=new Promise(r=>stop=()=>r({ok:false,error:'用户停下',stats}));args.control.stop=async()=>stop();start();return promise;}});
+  const engine=createPackageEngine({root,recorder:createRecorder(root),agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);calls++;const promise=new Promise(r=>stop=()=>r({ok:false,error:'用户停下',stats}));args.control.stop=async()=>stop();start();return promise;}});
   const p=await engine.create({package:lock,text:'测试停下'});await started;await press(engine,await engine.get(p.id),'stop');assert.match((await engine.waitForIdle(p.id)).error,/停下/);
   const stateFile=path.join(root,'data/package-projects.json'),state=JSON.parse(await readFile(stateFile));state.projects[0].busy=true;await put(root,'data/package-projects.json',state);
   const restarted=createPackageEngine({root,recorder:createRecorder(root),agent:async()=>{calls++;throw Error('不应自动执行');}});assert.match((await restarted.get(p.id)).error,/重启/);assert.equal(calls,1);
@@ -363,6 +379,7 @@ test('停止会中断当前 Agent，服务重启时未完成任务不会自动�
 test('标准网页包完整澄清、设计、开发、走查、验收与打回保持顺序', () => fixture(async root => {
   const lock=await installPackage('team-packages/web-studio',root);const stages=[];
   const agent=async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     for(const s of args.definition.skills)args.onProgress?.({tool:'Skill',file:s,status:'succeeded'});stages.push(args.role);
     if(args.role==='product'){
       if(!args.resume)await put(args.projectDir,'docs/questions.json',{round:1,why:'确认报名方式',questions:[{id:'q1',question:'是否报名',matters:'字段',options:['是','否'],recommended:0,reason:'按目标'}]});
@@ -457,4 +474,22 @@ test('SDK Skill 成功钩子才发成功证据，失败响应不伪报成功', (
   const events=[];
   const query=async function*({options}){const hook=options.hooks.PostToolUse[0].hooks[0];await hook({tool_name:'Skill',tool_input:{skill:'team:writer-method'},tool_response:{isError:true}});assert.equal(events.length,0);await hook({tool_name:'Skill',tool_input:{skill:'team:writer-method'},tool_response:{success:true}});yield{type:'result',subtype:'success',result:'loaded'};};
   const r=await createRunAgent(query)({role:'writer',definition,projectDir:dir,runtimeRoot:root,prompt:'加载技能',onProgress:e=>events.push(e)});assert.equal(r.ok,true);assert.deepEqual(events,[{tool:'Skill',file:'team:writer-method',status:'succeeded'}]);
+}));
+
+test('执行名额释放后工作台由排队恢复执行，完成后不保留虚假运行状态',()=>fixture(async root=>{
+  const lock=await installPackage('examples/team-package',root);
+  const queued=Promise.withResolvers(),resume=Promise.withResolvers(),running=Promise.withResolvers(),finish=Promise.withResolvers();
+  const engine=createPackageEngine({root,agent:async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
+    args.onQueued(true);queued.resolve();await resume.promise;
+    args.onQueued(false);running.resolve();await finish.promise;
+    return fake(args);
+  }});
+  const p=await engine.create({package:lock,text:'队列状态显示'});await queued.promise;
+  try {
+    assert.equal((await engine.snapshot())[0].activities.writer.status,'queued');
+    resume.resolve();await running.promise;
+    assert.equal((await engine.snapshot())[0].activities.writer.status,'running');
+  } finally {resume.resolve();finish.resolve();await engine.waitForIdle(p.id);}
+  const completed=(await engine.snapshot())[0];assert.equal(completed.activities.writer.status,'done');assert.deepEqual(completed.running,[]);assert.equal(completed.stage,'scope');
 }));

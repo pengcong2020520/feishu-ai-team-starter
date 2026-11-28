@@ -1,3 +1,4 @@
+import { fakeDelivery } from './helpers/delivery.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -14,6 +15,7 @@ async function prepare(root, mode, judge=()=>true, behavior={}) {
  const selected=['company-snapshot','macro-outlook','risk-assessment','synthesis'];
  const tasks=node.tasks.filter(t=>selected.includes(t.id)).map(t=>({id:t.id,after:t.after.filter(id=>selected.includes(id))}));
  const agent=async args=>{
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
   calls.push(args.mode+':'+args.role);
   if(args.mode==='review') {assert.deepEqual(args.definition.write,[]);assert.deepEqual(args.definition.tools,['Read','Glob']);assert.equal(args.resume,undefined);const records=JSON.parse(args.prompt.split('文件与任务：')[1].split('。只输出')[0]);if(!behavior.skipReads)for(const a of records.flatMap(r=>r.artifacts))args.onProgress?.({tool:'Read',file:path.join(args.projectDir,a.path),status:'succeeded'});if(!behavior.skipReads)args.onProgress?.({tool:'Read',file:path.join(args.projectDir,'context/plan.json'),status:'succeeded'});const ids=records.flatMap(r=>r.artifacts.map(a=>a.id));if(!ids.length)ids.push('plan');return {ok:true,structured:{passed:judge(),summary:'检查依据与范围',blockers:judge()?[]:['证据缺失'],evidence:ids.map(artifact=>({artifact,reason:'已核对文件中的范围与来源'}))}};}
   for(const s of args.definition.skills)args.onProgress?.({tool:'Skill',file:s,status:'succeeded'});

@@ -35,7 +35,8 @@ try {
 // 启动命令首跑：先选择部署位置，不能默默在本机启动机器人。
 const dir = mkdtempSync(path.join(os.tmpdir(), 'setup-smoke-'));
 try {
-  for (const item of ['setup.mjs', 'src', '.env.example', 'package.json']) cpSync(item, path.join(dir, item), { recursive: true });
+  // 身份舱与工作台共用 web/ 中的头像与转场模块，首跑副本也必须完整。
+  for (const item of ['setup.mjs', 'src', 'web', '.env.example', 'package.json']) cpSync(item, path.join(dir, item), { recursive: true });
   symlinkSync(path.resolve('node_modules'), path.join(dir, 'node_modules'), 'dir');
   const out = execFileSync(process.execPath, ['setup.mjs'], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] });
   if (!out.includes('== 下一步 ==') || !out.includes('选择部署在服务器还是本地电脑')) throw new Error(`启动命令首跑输出不对：\n${out}`);

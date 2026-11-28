@@ -15,6 +15,17 @@ export const matchesIdentity = (person, identity = {}) => Boolean(
   identity.userId && person.identity?.userId === identity.userId ||
   identity.openId && identity.role && person.identity?.openIds?.[identity.role] === identity.openId
 );
+// Match identities only within their application, or by Feishu's cross-app IDs.
+export function samePerson(a, b) {
+  if (!a || !b) return false;
+  const x = a.identity || {}, y = b.identity || {};
+  return Boolean(a.id === b.id || x.unionId && x.unionId === y.unionId || x.userId && x.userId === y.userId || Object.entries(x.openIds || {}).some(([role, id]) => id && id === y.openIds?.[role]));
+}
+export function equivalentPeople(person, people) {
+  const found = person ? [person] : [];
+  for (let i = 0; i < found.length; i++) for (const candidate of people) if (candidate.active && !found.some(p => p.id === candidate.id) && samePerson(found[i], candidate)) found.push(candidate);
+  return found;
+}
 export const recipient = (person, role = 'product') => person?.identity?.unionId ? { id: person.identity.unionId, type: 'union_id' }
   : person?.identity?.userId ? { id: person.identity.userId, type: 'user_id' }
   : person?.identity?.openIds?.[role] ? { id: person.identity.openIds[role], type: 'open_id' } : null;

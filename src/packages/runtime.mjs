@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile, rename, realpath } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { safeFile, inside } from './store.mjs';
@@ -58,5 +58,5 @@ export async function readArtifact(pack, directory, id) {
   const a = pack.manifest.artifacts.find(a => a.id === id); if (!a) throw Error('未声明这个产物');
   const file = await safeFile(directory, a.path); const bytes = await readFile(file);
   if (bytes.length > 5 * 1024 * 1024) throw Error('产物过大');
-  return { ...a, text: bytes.toString('utf8') };
+  return { ...a, updatedAt: (await stat(file)).mtime.toISOString(), text: bytes.toString('utf8') };
 }

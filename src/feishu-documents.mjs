@@ -43,7 +43,7 @@ export function documentTransport(client, call, { uploadMs = 60000 } = {}) {
     async share(id, chatId) {
       await call(() => client.drive.v1.permissionMember.batchCreate({ path: { token: id }, params: { type: 'docx', need_notification: false }, data: { members: [{ member_type: 'openchat', member_id: chatId, type: 'chat', perm: 'edit' }] } }));
     },
-    async append(id, markdown, token, { assets = {}, state = {}, save = async () => {} } = {}) {
+    async append(id, markdown, token, { assets = {}, state = {}, save = async () => {}, startIndex = -1 } = {}) {
       if (!state.batches) {
         const converted = await call(() => client.docx.v1.document.convert({ data: { content_type: 'markdown', content: markdown } }));
         const { blocks, first_level_block_ids: roots } = converted.data || {};
@@ -53,7 +53,7 @@ export function documentTransport(client, call, { uploadMs = 60000 } = {}) {
         const imageIds = new Set(blocks.filter(b => b.block_type === 27).map(b => b.block_id));
         if (imageIds.size !== images.length || new Set(images.map(i => i.block_id)).size !== images.length || images.some(i => !imageIds.has(i.block_id))) throw Error('图片块与素材映射不完整，已停止写入');
         state.images = images.map(i => ({ temporary: i.block_id, url: i.image_url }));
-        state.batches = documentBatches(blocks, roots); state.next = 0; await save();
+        state.batches = documentBatches(blocks, roots); if (startIndex === 0 && state.batches.length === 1) state.batches[0].index = 0; state.next = 0; await save();
       }
       for (let i = state.next; i < state.batches.length; i++) {
         state.inserted ||= {};

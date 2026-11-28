@@ -1,5 +1,6 @@
 import { listPackages, latestPackages, lockedPackage, roleSource } from './store.mjs';
 import { readBindings } from './bindings.mjs';
+import { saveRolePrompt } from './prompt-editor.mjs';
 
 // 与原工作台相同的本机身份和同源写入边界；绝不接受请求体提供的身份。
 export async function packageHttp({ req, res, url, root, flow, feishu, recorder, send }) {
@@ -19,6 +20,7 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
         reply(200, source); return true;
       }
       if (url.pathname === '/api/packages/artifact') { reply(200, await engine.artifact(url.searchParams.get('projectId'), url.searchParams.get('artifactId'))); return true; }
+      if (url.pathname === '/api/packages/archive') { reply(200, await engine.archive(url.searchParams.get('projectId'))); return true; }
       if (url.pathname === '/api/packages/evidence') { reply(200, await engine.evidence(url.searchParams.get('projectId'))); return true; }
       reply(404, { error: '未找到' }); return true;
     }
@@ -29,6 +31,9 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
     const data = JSON.parse(body);
     const admin = data.via === 'admin';
     if (admin && (!process.env.ADMIN_WORKBENCH_TOKEN || req.headers['x-admin-token'] !== process.env.ADMIN_WORKBENCH_TOKEN)) { reply(403, { error: '管理员身份不匹配' }); return true; }
+    if (url.pathname === '/api/packages/prompt') {
+      reply(200, await saveRolePrompt(root, data)); return true;
+    }
     const manager = flow.packageProjects || flow.projects;
     if (url.pathname === '/api/packages/connect') {
       if (!flow.connections) throw Error('扫码服务未启用');
@@ -47,6 +52,8 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
       reply(200, await engine.create({ package: data.package, text: data.text, requestId: data.requestId, options, ...event })); return true;
     }
     if (typeof data.chatId !== 'string' || !await engine.get(data.chatId)) throw Error('项目不存在');
+    if (url.pathname === '/api/packages/archive') { reply(200, await engine.refreshArchive({ chatId: data.chatId, ...event })); return true; }
+    if (url.pathname === '/api/packages/name') { reply(200, await engine.renameProject({ chatId: data.chatId, name: data.name, ...event })); return true; }
     if (url.pathname === '/api/packages/documents') { reply(200, await engine.syncDocuments({ chatId: data.chatId, ...event })); return true; }
     if (url.pathname === '/api/packages/action') {
       if (data.feedback !== undefined && (typeof data.feedback !== 'string' || data.feedback.length > 4000)) throw Error('修改意见过长');
@@ -57,8 +64,9 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
       const p = await engine.get(data.chatId); if (!p.roles.some(r => r.id === data.role)) throw Error('角色无效');
       const auth = await manager?.authorize({ project: p, identity, source: event.source, action: 'discuss' });
       if (auth && !auth.ok) throw Error(auth.reason);
-      if (!p.chatId.startsWith('web:')) await feishu.sendText(p.chatId, `${event.actor}（工作台）：${data.text}`, p.botBindings[data.role]);
-      await recorder?.add(data.chatId, { kind: 'user', role: data.role, text: data.text, actor: event.actor, source: '工作台', projectId: p.id });
+      let messageId;
+      if (!p.chatId.startsWith('web:')) messageId = await feishu.sendText(p.chatId, `${event.actor}（工作台）：${data.text}`, p.botBindings[data.role], { record: false });
+      await recorder?.add(data.chatId, { kind: 'user', role: data.role, text: data.text, actor: event.actor, source: '工作台', projectId: p.id, messageId, identity, authority: auth?.authority || 'member' });
       reply(200, await engine.message({ chatId: data.chatId, role: data.role, text: data.text, senderType: 'user', ...event })); return true;
     }
     reply(404, { error: '未找到' });

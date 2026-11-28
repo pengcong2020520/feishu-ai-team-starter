@@ -50,9 +50,9 @@ export function createFeishu({ credentials, onMessage, onAction, onDiscussion, o
   const call = fn => withRetry(fn);
   const api = {
     documents(role) { if (!clients[role]) throw Error('文档机器人尚未连接'); return documentTransport(clients[role], call); },
-    async sendText(chatId, text, role) {
+    async sendText(chatId, text, role, { record = true } = {}) {
       const r = await call(() => pick(chatId, role).im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }) } }));
-      await recorder?.add(chatId, { kind: 'text', role: role ?? owner.get(chatId) ?? 'product', text });
+      if (record) await recorder?.add(chatId, { kind: 'text', messageId: r.data?.message_id, role: role ?? owner.get(chatId) ?? 'product', text });
       return r.data?.message_id;
     },
     async sendCard(chatId, card, role) {
@@ -122,6 +122,9 @@ export function createFeishu({ credentials, onMessage, onAction, onDiscussion, o
       const chatId = r.data?.chat_id;
       if (!chatId) throw Error('创建项目群没有返回群号');
       return chatId;
+    },
+    async renameChat(chatId, name, role = 'product') {
+      await call(() => clients[role].im.v1.chat.update({ path: { chat_id: chatId }, data: { name } }));
     },
     async addBots(chatId, botRoles, creator) {
       if (botRoles.length > 5) throw Error('每批最多邀请 5 个机器人');
