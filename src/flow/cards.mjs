@@ -1,7 +1,9 @@
+import { linkLabel } from '../project-labels.mjs';
+import { plainText, publicReply } from '../presentation.mjs';
 const templates = { product: 'blue', designer: 'purple', developer: 'green' };
 const roleNames = { product: 'AI 产品经理', designer: 'AI 设计', developer: 'AI 程序员' };
 const roleOf = title => title?.startsWith('AI 设计') ? 'designer' : title?.startsWith('AI 程序员') ? 'developer' : 'product';
-const clean = value => String(value ?? '').replace(/<[^>]*>/g, '').replace(/(?:\*\*|__|~~|\`|\[|\]|^#{1,6}\s*|^>\s*)/gm, '').trim();
+const clean = plainText;
 const escape = value => clean(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const md = content => ({ tag: 'div', text: { tag: 'lark_md', content } });
 const gray = content => md(`<font color='grey'>${escape(content)}</font>`);
@@ -10,16 +12,14 @@ const header = (title, role = roleOf(title)) => ({ title: { tag: 'plain_text', c
 const config = { wide_screen_mode: true, update_multi: true };
 const image = ({ imageKey, imageError }) => imageKey ? [{ tag: 'img', img_key: imageKey, alt: { tag: 'plain_text', content: '页面一览' } }]
   : imageError ? [gray(`一览图未生成（${imageError}）`)] : [];
-const linkRows = links => [...links.map(({ label, url }) => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: label }, url }] })), ...(links.length ? [gray('链接在本机打开（飞书电脑版）')] : [])];
-const processLine = ({ reads = 0, writes = 0, stats = {} }) => `过程：读了 ${reads} 个文件、写了 ${writes} 个文件，${stats.turns ?? 0} 轮，用时 ${Math.round((stats.durationMs ?? 0) / 1000)} 秒，模型读入 ${((stats.inputTokens ?? 0) / 10000).toFixed(2)} 万、写出 ${((stats.outputTokens ?? 0) / 10000).toFixed(2)} 万 token`;
+const linkRows = links => [...links.map(({ label, url }) => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: linkLabel(label) }, type: 'default', url }] })), ...(links.length ? [gray('链接在本机打开（飞书电脑版）')] : [])];
 
 export function gateCard({ stage, projectId, cardId, title, description = '', points = [], process, links = [], imageKey, imageError }) {
   const labels = { confirm_prd: ['确认 PRD', '打回 PRD'], confirm_design: ['确认设计', '打回设计'], accept: ['验收通过', '打回网页'] };
   if (!labels[stage]) throw new Error('未知关口');
   const value = action => ({ action, stage, projectId, cardId });
   return { config, header: header(title), elements: [
-    md(escape(description)), { tag: 'hr' }, ...points.map(point => md(escape(point))),
-    ...(process ? [gray(processLine(process))] : []),
+    md(escape(publicReply(description))), { tag: 'hr' }, ...points.filter(point => !/^文件[：:]/.test(point)).map(point => md(escape(point))),
     ...image({ imageKey, imageError }), ...linkRows(links),
     { tag: 'action', actions: [button(labels[stage][0], value('confirm'), 'primary'), button(labels[stage][1], value('reject'))] },
   ] };
@@ -27,8 +27,7 @@ export function gateCard({ stage, projectId, cardId, title, description = '', po
 
 export function resultCard({ role, title, description = '', points = [], process, links = [], imageKey, imageError }) {
   return { config, header: header(title, role), elements: [
-    md(escape(description)), { tag: 'hr' }, ...points.map(point => md(escape(point))),
-    ...(process ? [gray(processLine(process))] : []),
+    md(escape(publicReply(description))), { tag: 'hr' }, ...points.filter(point => !/^文件[：:]/.test(point)).map(point => md(escape(point))),
     ...image({ imageKey, imageError }), ...linkRows(links),
   ] };
 }
@@ -56,13 +55,13 @@ export function questionCard({ projectId, cardId, questions }) {
 
 export const toast = text => ({ toast: { type: 'info', content: text } });
 
-// 进度卡：任务一行 + 现在在做什么一行（一直在换）+ 灰字用时和步数 + 停下按钮；用户的引导单独列出
+// 进度卡：任务、当前活动、用时和停下按钮；用户的引导单独列出，工具与 token 明细留在工作台
 export function progressCard({ title, task = '正在处理这一步', current = '⏳ 在读任务', steps = 0, elapsedSeconds = 0, guides = [], stopValue, stats, done = false, ok = true, outcome = '✅ 已完成' }) {
   const role = roleOf(title);
   const elements = [md(escape(task)), md(escape(done ? outcome : current))];
   for (const text of guides.slice(-3)) elements.push(md(escape(`↪ 你的引导：${text}`)));
-  if (stats) elements.push(gray(`用时 ${Math.round((stats.durationMs ?? 0) / 1000)} 秒 · ${steps} 步；读入 ${stats.inputTokens ?? 0} / 写出 ${stats.outputTokens ?? 0} token`));
-  else elements.push(gray(`已用 ${elapsedSeconds} 秒 · 第 ${steps} 步`));
+  if (stats) elements.push(gray(`用时 ${Math.round((stats.durationMs ?? 0) / 1000)} 秒`));
+  else elements.push(gray(`已用 ${elapsedSeconds} 秒`));
   if (!done && stopValue) elements.push({ tag: 'action', actions: [button('停下', stopValue)] });
   return { config, header: header(done ? `${roleNames[role]} · ${ok ? '完成' : '停下了'}` : title, role), elements };
 }
@@ -126,5 +125,5 @@ export function closedCard(title, text, role = roleOf(title)) {
 }
 
 export function completeCard({ url }) {
-  return resultCard({ role: 'product', title: 'AI 产品经理 · 网页已完成', description: '网页已验收完成，index.html 文件见下一条消息。', points: ['网页：已可打开'], links: [{ label: '打开网页', url }] });
+  return resultCard({ role: 'product', title: 'AI 产品经理 · 网页已完成', description: '网页已验收完成，可点击下方链接打开。网页文件见下一条消息。', points: ['网页：已可打开'], links: [{ label: '打开网页', url }] });
 }

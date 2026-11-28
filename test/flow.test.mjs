@@ -41,7 +41,7 @@ async function fixture(fn, agentOverride) {
   const calls = [];
   // 群聊对话的假回复：测试往里放 { reply, proposal }，没放时只回一句、不提议
   const chats = [];
-  const feishu = { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { if (card.header?.title?.content?.includes('澄清需求') && !card.schema || card.header?.title?.content?.includes('开发网页') || card.header?.title?.content?.includes('画线框与主题') || card.header?.title?.content?.includes('走查网页') || card.header?.title?.content?.includes('修改') || card.header?.title?.content === 'AI 程序员 · 网页已完成') return 'progress'; cards.push(card); return `m${cards.length}`; }, patchCard: async (messageId, card) => { if (messageId !== 'progress') patched.push({ messageId, card }); } };
+  const feishu = { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { if (card.header?.title?.content?.includes('澄清需求') && !card.schema || card.header?.title?.content?.includes('开发网页') || card.header?.title?.content?.includes('画线框与主题') || card.header?.title?.content?.includes('走查网页') || card.header?.title?.content?.includes('修改') || card.header?.title?.content?.endsWith('AI 程序员 · 网页已完成')) return 'progress'; cards.push(card); return `m${cards.length}`; }, patchCard: async (messageId, card) => { if (messageId !== 'progress') patched.push({ messageId, card }); } };
   const agent = agentOverride ?? (async ({ role, prompt, projectDir, resume, onProgress, mode }) => {
     if (mode === 'chat') {
       calls.push({ role, prompt, mode, projectDir });
@@ -77,7 +77,7 @@ test('完整流程：两轮澄清、自动走查、验收与持久化', () => fi
   assert.match(calls[2].prompt, /这是最后一轮/);
   assert.equal(calls[1].resume, 'product-1');
   assert.equal(cards[2].config.update_multi, true);
-  assert.ok(cards[2].elements.some(element => element.tag === 'action' && element.actions?.[0]?.text?.content === '打开结构图'));
+  assert.ok(cards[2].elements.some(element => element.tag === 'action' && element.actions?.[0]?.text?.content === '↗ 打开结构图'));
   assert.match(await readFile(path.join(dir, 'workspace', (await flow.getProject('group')).id, 'shots/outline.html'), 'utf8'), /页面结构图/);
   await flow.handleAction({ chatId: 'group', value: value(cards[2]) });
   await flow.waitForIdle('group');
@@ -147,7 +147,7 @@ test('干活时对它说话先记下，做完再回；交付文件错误后停�
     } });
   await local.handleMessage({ chatId: 'busy', text: '报名页', intent: 'demand' });
   assert.equal((await local.handleMessage({ chatId: 'busy', text: '又发一次' })).queued, true);
-  assert.equal(sent.at(-1).header.title.content, 'AI 产品经理 · 先记下了');
+  assert.ok(sent.at(-1).header.title.content.endsWith('AI 产品经理 · 先记下了'));
   assert.match(JSON.stringify(sent.at(-1)), /这句话会在这一步做完后回复/);
   assert.equal((await local.handleMessage({ chatId: 'busy', text: '重试' })).busy, true);
   assert.match(messages.at(-1), /AI 产品经理正在澄清需求，做完会在群里发新卡片/);
@@ -157,7 +157,7 @@ test('干活时对它说话先记下，做完再回；交付文件错误后停�
   assert.equal(stuck.stage, 'clarifying');
   assert.match(stuck.error, /questions\.json/);
   assert.equal(stuck.errorBrief, '交付的澄清问题没通过格式检查');
-  assert.equal(sent.at(-1).header.title.content, 'AI 产品经理 · 这一步停下了');
+  assert.ok(sent.at(-1).header.title.content.endsWith('AI 产品经理 · 这一步停下了'));
   await local.handleMessage({ chatId: 'busy', role: 'product', text: '重试' }); await local.waitForIdle('busy');
   assert.equal((await local.getProject('busy')).error, null);
 }));
@@ -190,7 +190,7 @@ test('web 会话的进度和问题卡只写工作台消息记录', () => fixture
   await flow.handleMessage({ chatId: 'web:local', text: '做一个网页', intent: 'demand' });
   await flow.waitForIdle('web:local');
   const records = await recorder.list('web:local');
-  assert.ok(records.some(record => record.card?.title === 'AI 产品经理 · 有几个问题'));
+  assert.ok(records.some(record => record.card?.title?.endsWith('AI 产品经理 · 有几个问题')));
   assert.ok(records.some(record => record.kind === 'card_update'));
 }));
 
@@ -234,7 +234,7 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
     const p = await local.waitForIdle('g');
     assert.equal(p.busy, false);
     assert.match(p.error, /团队服务重启过/);
-    assert.equal(sent[0].header.title.content, 'AI 产品经理 · 这一步停下了');
+    assert.ok(sent[0].header.title.content.endsWith('AI 产品经理 · 这一步停下了'));
     assert.match(JSON.stringify(sent[0]), /团队服务重启过，这一步没做完/);
     const [listed] = (await local.getState()).projects;
     assert.deepEqual([listed.number, listed.waitingFor, listed.retryRole], [1, '重试', 'product']);
@@ -260,7 +260,7 @@ test('确认卡片没发出去就停掉：重试只重发确认卡片，不再�
     let agentCalls = 0;
     const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { cards.push(card); return 'm3'; }, patchCard: async () => {} }, agent: async () => { agentCalls++; return { ok: false, error: '不该调用' }; } });
     await local.waitForIdle('g');
-    assert.equal(cards[0].header.title.content, 'AI 产品经理 · 这一步停下了');
+    assert.ok(cards[0].header.title.content.endsWith('AI 产品经理 · 这一步停下了'));
     await local.handleMessage({ chatId: 'g', role: 'product', text: '重试' }); await local.waitForIdle('g');
     assert.equal(agentCalls, 0);
     assert.equal(cards.length, 2);
@@ -280,7 +280,7 @@ test('智能体报错不自动重试，机器人消息不触发任务', () => fi
   assert.match(p.error, /AI 产品经理执行失败：模型暂不可用/);
   assert.equal(p.errorBrief, 'AI 产品经理这一步没做完：模型暂不可用');
   const stuck = cards.at(-1);
-  assert.equal(stuck.header.title.content, 'AI 产品经理 · 这一步停下了');
+  assert.ok(stuck.header.title.content.endsWith('AI 产品经理 · 这一步停下了'));
   assert.deepEqual(stuck.elements.at(-1).actions.map(b => [b.text.content, b.value.action]), [['重试', 'retry'], ['结束项目', 'end']]);
 }, async () => ({ ok: false, text: '', sessionId: null, error: '模型暂不可用', stats: { turns: 0, durationMs: 1, inputTokens: 0, outputTokens: 0 } })));
 
@@ -297,7 +297,7 @@ test('模型只口头提议、没有写文件：停在本阶段，进度卡不�
   assert.equal(p.stage, 'clarifying');
   assert.match(p.error, /docs\/questions\.json：文件不存在/);
   assert.equal(p.sessions.product, 's');
-  assert.equal(updates.at(-1).header.title.content, 'AI 产品经理 · 停下了');
+  assert.ok(updates.at(-1).header.title.content.endsWith('AI 产品经理 · 停下了'));
   assert.match(JSON.stringify(updates.at(-1)), /⚠️ 没做完/);
   assert.doesNotMatch(JSON.stringify(updates), /✅ 已完成/);
 }));
@@ -375,7 +375,7 @@ test('结束项目：停下卡上直接结束；文字“结束”先确认，�
   assert.equal((await local.getProject('x')).demand, '读书会');
   await local.handleMessage({ chatId: 'x', text: '结束' });
   const confirm = cards.at(-1);
-  assert.equal(confirm.header.title.content, 'AI 产品经理 · 结束这个项目？');
+  assert.ok(confirm.header.title.content.endsWith('AI 产品经理 · 结束这个项目？'));
   // 有项目且出错时，文字“结束”同样先确认
   await local.handleAction({ chatId: 'x', value: confirm.elements.at(-1).actions[1].value });
   assert.match(messages.at(-1), /好的，继续做/);
@@ -427,7 +427,7 @@ test('群聊对话：“你好”只聊天不开项目；说清需求后提议�
   await flow.handleMessage({ chatId: 'g', role: 'product', text: '想做个读书会报名页' }); await flow.waitForIdle('g');
   assert.equal(await flow.getProject('g'), null);
   const offer = cards.at(-1);
-  assert.equal(offer.header.title.content, 'AI 产品经理 · 要开始做吗？');
+  assert.ok(offer.header.title.content.endsWith('AI 产品经理 · 要开始做吗？'));
   assert.deepEqual(buttons(offer).map(b => [b.text.content, b.value.action]), [['就按这个开始', 'start'], ['再聊聊', 'dismiss']]);
   await flow.handleAction({ chatId: 'g', value: buttons(offer)[0].value }); await flow.waitForIdle('g');
   const p = await flow.getProject('g');
@@ -449,7 +449,7 @@ test('群聊对话：关口上对负责角色提修改意见，点“按这个�
   assert.match(calls.at(-1).prompt, /- revise：/);
   assert.equal((await flow.getProject('g')).stage, 'confirm_design');
   const offer = cards.at(-1);
-  assert.equal(offer.header.title.content, 'AI 设计 · 要按这个改吗？');
+  assert.ok(offer.header.title.content.endsWith('AI 设计 · 要按这个改吗？'));
   assert.equal(offer.header.template, 'purple');
   await flow.handleAction({ chatId: 'g', value: buttons(offer)[0].value }); await flow.waitForIdle('g');
   assert.match(calls.at(-1).prompt, /^用户对设计的修改意见：主色换成绿色/);
@@ -481,7 +481,7 @@ test('群聊对话：澄清时文字回答可提交；新提议替换旧提议�
   const [older, offer] = cards.slice(-2);
   assert.ok(patched.some(x => x.messageId === `m${cards.indexOf(older) + 1}` && /以最新那条为准/.test(x.card.elements[0].text.content)));
   assert.match((await flow.handleAction({ chatId: 'g', value: buttons(older)[0].value })).toast.content, /过期/);
-  assert.equal(offer.header.title.content, 'AI 产品经理 · 把这段当回答提交？');
+  assert.ok(offer.header.title.content.endsWith('AI 产品经理 · 把这段当回答提交？'));
   await flow.handleAction({ chatId: 'g', value: buttons(offer)[0].value }); await flow.waitForIdle('g');
   assert.equal(calls.filter(x => !x.mode).at(-1).prompt, '用户的回答：不需要电话');
   assert.equal((await flow.getProject('g')).questionRound, 2);
@@ -517,14 +517,14 @@ test('干活时：“现在引导”插进这一步；进度卡“停下”和�
   const text = card => JSON.stringify(card);
   await local.handleMessage({ chatId: 'w', text: '报名页', intent: 'demand' }); await started();
   const progress = sent[0];
-  assert.equal(progress.header.title.content, 'AI 产品经理 · 澄清需求');
+  assert.ok(progress.header.title.content.endsWith('AI 产品经理 · 澄清需求'));
   assert.match(text(progress), /读你的需求，看还要问什么/);
   assert.ok(patches.some(x => x.messageId === 'm1' && /🧰 在用「澄清」技能/.test(text(x.card))));
   assert.match((await local.getState()).projects[0].activity, /在用「澄清」技能/);
   // 对正在干活的产品经理说话：先记下，点“现在引导”插进这一步
   assert.equal((await local.handleMessage({ chatId: 'w', role: 'product', text: '加上电话字段' })).queued, true);
   const queuedCard = sent.at(-1);
-  assert.equal(queuedCard.header.title.content, 'AI 产品经理 · 先记下了');
+  assert.ok(queuedCard.header.title.content.endsWith('AI 产品经理 · 先记下了'));
   assert.equal((await local.handleAction({ chatId: 'w', value: buttons(queuedCard)[0].value })).toast.content, '已插进这一步');
   assert.deepEqual(steered, ['加上电话字段']);
   assert.match(text(patches.at(-1).card), /↪ 已插进这一步：加上电话字段/);
@@ -533,9 +533,9 @@ test('干活时：“现在引导”插进这一步；进度卡“停下”和�
   await local.waitForIdle('w');
   let p = await local.getProject('w');
   assert.equal(p.errorBrief, '小王让 AI 产品经理停下了这一步');
-  assert.equal(sent.at(-1).header.title.content, 'AI 产品经理 · 这一步停下了');
+  assert.ok(sent.at(-1).header.title.content.endsWith('AI 产品经理 · 这一步停下了'));
   const final = patches.filter(x => x.messageId === 'm1').at(-1).card;
-  assert.equal(final.header.title.content, 'AI 产品经理 · 停下了');
+  assert.ok(final.header.title.content.endsWith('AI 产品经理 · 停下了'));
   assert.match(text(final), /⏹ 已停下/);
   assert.match(text(final), /↪ 你的引导：加上电话字段/);
   // 文字“停止”

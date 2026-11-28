@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateQuestions, validatePrd, validateDesign, validateSite, validateWalkthrough, validateStage } from '../src/flow/validate.mjs';
@@ -48,6 +48,12 @@ test('线框大纲覆盖状态且主题令牌齐备', () => fixture(async (dir, 
   await put('design/wireframe.html', '<!doctype html><html><section data-screen="page" data-state="default"></section><script type="application/json" id="design-outline">{"groups":[{"id":"signup","title":"报名","screens":[{"id":"page","title":"报名页","states":["default"]}]}]}</script><script>addEventListener("hashchange",()=>{}); // #screen=page&state=default</script></html>');
   await put('design/theme.json', { preset: 'modern-minimalist', name: '现代极简', reason: '适合', tokens: { colors: Object.fromEntries(['background', 'surface', 'text', 'muted', 'border', 'primary', 'onPrimary', 'accent', 'success', 'warning', 'error', 'disabled'].map(x => [x, '#123456'])), typography: { body: 'system' }, radii: { small: 4 }, spacing: { sm: 8 }, shadows: { none: 'none' } } });
   assert.equal((await validateDesign(dir)).ok, true);
+  const wireframe = await readFile(path.join(dir, 'design/wireframe.html'), 'utf8');
+  await put('design/wireframe.html', wireframe.replace('"states":["default"]', '"states":[{"id":"default","name":"默认"}]'));
+  const malformed = await validateDesign(dir);
+  assert.equal(malformed.ok, false);
+  assert.match(malformed.errors.join(' '), /状态 ID 字符串数组/);
+  await put('design/wireframe.html', wireframe);
   await put('docs/outline.json', { title: '报名', blocks: [], states: [{ id: 'success', name: '成功', desc: '完成' }] });
   assert.match((await validateDesign(dir)).errors.join(' '), /缺少 PRD 状态 success/);
 }));

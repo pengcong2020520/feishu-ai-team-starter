@@ -1,6 +1,9 @@
+import { projectLabel } from '../project-labels.mjs';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { readProgress } from '../setup/progress.mjs';
+import { readBindings } from '../packages/bindings.mjs';
 import { approvalNames, createDirectory, matchesIdentity, recipient } from './directory.mjs';
 
 const decisionStage = stage => ({ revise_prd: 'confirm_prd', revise_design: 'confirm_design', revise_build: 'accept' }[stage] || stage);
@@ -42,18 +45,28 @@ export function createProjectManager({ root = process.cwd(), feishu, recorder, d
         if (!request) {
           const team = await directory.plan({ text, scope: options.scope, ownerId: options.ownerId, memberIds: options.memberIds, approvers: options.approvers, identity, stages: options.approvalStages });
           if (channel === 'feishu' && !feishu?.createProjectGroup) throw Error('尚未连接飞书，请选择本机项目');
-          if (channel === 'feishu' && team.people.some(p => !recipient(p))) throw Error('项目成员缺少飞书身份，请先从现有群导入这些人员，或选择本机项目');
-          request = { projectId, sourceChatId, text, fingerprint, name: String(options.name || text).trim().slice(0, 60), team, channel, createdAt: new Date().toISOString() };
+          if (channel === 'feishu' && team.people.some(p => !recipient(p, options.botRoles?.[0] || 'product'))) throw Error('项目发起人缺少本团队飞书身份，请先私聊团队负责人机器人或完成扫码连接');
+          request = { projectId, sourceChatId, text, fingerprint, name: projectLabel(text, options.name), team, channel, createdAt: new Date().toISOString() };
           registry.requests[requestId] = request; await save();
         }
         if (!request.chatId) {
-          request.chatId = channel === 'local' ? `web:${request.projectId}` : await feishu.createProjectGroup({ projectId: request.projectId, name: request.name, team: request.team, ...(options.botRoles ? { botRoles: options.botRoles } : {}) });
+          request.chatId = channel === 'local' ? `web:${request.projectId}` : await feishu.createProjectGroup({ projectId: request.projectId, name: request.name, groupLabel: options.groupLabel, team: request.team, ...(options.botRoles ? { botRoles: options.botRoles } : {}) });
           await save();
+        }
+        // 飞书建群一次最多邀请 5 个机器人。群号先保存，再分批补齐大团队；
+        // 任一批失败时不派工，重试沿用同一个群，并跳过已成功的批次。
+        if (channel === 'feishu') {
+          const extraBots = (options.botRoles || []).slice(6);
+          for (let i = request.extraBotsInvited || 0; i < extraBots.length; i += 5) {
+            if (!feishu.addBots) throw Error('当前接入层不支持分批邀请团队机器人');
+            await feishu.addBots(request.chatId, extraBots.slice(i, i + 5), options.botRoles[0]);
+            request.extraBotsInvited = Math.min(i + 5, extraBots.length); await save();
+          }
         }
         // 群号先落盘，再邀请人员。加人失败或重启后只补邀请，不重建群。
         if (channel === 'feishu' && !request.membersAdded) {
           try {
-            await feishu.addMembers?.(request.chatId, request.team.people.filter(p => p.id !== request.team.ownerId));
+            await feishu.addMembers?.(request.chatId, request.team.people.filter(p => p.id !== request.team.ownerId), options.botRoles?.[0] || 'product');
             request.membersAdded = true;
             delete request.invitationWarning;
           } catch (error) { request.invitationWarning = error.message; }
@@ -63,7 +76,17 @@ export function createProjectManager({ root = process.cwd(), feishu, recorder, d
       })().finally(() => inflight.delete(requestId));
       inflight.set(requestId, { fingerprint, task }); return task;
     },
-    async localIdentity() { const { ownerId, people } = await directory.get(); const person = people.find(p => p.id === ownerId && p.active); return { localPersonId: person?.id, source: 'local' }; },
+    async localIdentity(packageId) {
+      const { ownerId, people } = await directory.get();
+      const bound = packageId ? (await readBindings(root, packageId)).localOwnerId : null;
+      let person = people.find(p => p.id === (bound || ownerId) && p.active);
+      if (!person && !bound) {
+        const openId = readProgress(root).ownerOpenId;
+        if (openId) { person = await directory.observe({ role: 'product', openId }, '项目发起人'); await directory.settings({ ownerId: person.id }); }
+        else person = await directory.ensureLocalOperator();
+      }
+      return { localPersonId: person?.id, source: 'local' };
+    },
     async authorize({ project, identity, action, source }) {
       if (!project?.dedicated) return { ok: true }; // 旧项目保持兼容，新项目执行人员分工。
       const { people } = await directory.get();

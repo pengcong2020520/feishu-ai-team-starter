@@ -3,14 +3,62 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRunAgent } from '../src/agents/run.mjs';
+import { createRunAgent, runAgent } from '../src/agents/run.mjs';
+import { acquireCapacity } from '../src/agents/capacity.mjs';
 import { roles } from '../src/agents/roles.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+test('三个执行名额占满时，群聊排队超时与主动停止分开，尚未调用模型',async()=>{
+  const runtime=await mkdtemp(path.join(root,'test-project-')),releases=[];let queued=false;
+  try{
+    const limit=Number(process.env.AGENT_CONCURRENCY||3);
+    for(let i=0;i<limit;i++)releases.push(await acquireCapacity({root:runtime,limit,role:'busy',project:'p'}));
+    const result=await runAgent({runtimeRoot:runtime,projectDir:path.join(runtime,'workspace','chat'),role:'product',mode:'chat',prompt:'你好',timeoutMs:1000,queueTimeoutMs:25,onQueued:v=>{queued=v;}});
+    assert.equal(queued,true);assert.equal(result.queueTimedOut,true);assert.equal(result.stopped,undefined);assert.equal(result.stats.turns,0);assert.match(result.error,/尚未开始回答/);
+  }finally{for(const release of releases)await release();await rm(runtime,{recursive:true,force:true});}
+});
+test('研究任务提供 PDF 与确定性计算和交付预算，聊天仍只读且隔离', async () => {
+  const project = await mkdtemp(path.join(root, 'test-project-')), captured = [];
+  const fake = async function* ({ options }) { captured.push(options); yield { type: 'result', subtype: 'success', result: '完成' }; };
+  const definition = { name:'研究员', tools:['Read','Write','Glob','Skill','WebFetch','WebSearch','Calculate'], write:['report'], read:['context','report'], skills:[], sharedPrompt:'', promptText:'', pluginPath:path.join(root,'team-skills'), model:'default' };
+  try {
+    const run = createRunAgent(fake);
+    await run({ role:'quant', projectDir:project, prompt:'研究', definition });
+    const o = captured[0]; assert.equal(o.maxTurns,60); assert.ok(o.mcpServers.research);
+    assert.ok(!o.tools.includes('Calculate')); assert.match(o.systemPrompt.prompt,/尽早 Write/);
+    for (const tool of ['mcp__research__read_pdf','mcp__research__calculate']) assert.equal((await o.canUseTool(tool,{})).behavior,'allow');
+    assert.equal((await o.canUseTool('Bash',{})).behavior,'deny');
+    await run({ role:'quant', projectDir:project, prompt:'问答', definition, mode:'chat' });
+    assert.equal(captured[1].maxTurns,6); assert.equal(captured[1].mcpServers,undefined);
+    assert.equal((await captured[1].canUseTool('mcp__research__calculate',{})).behavior,'deny');
+    await run({ role:'quant', projectDir:project, prompt:'制定计划', definition, mode:'plan', outputSchema:{type:'object',properties:{tasks:{type:'array'}}} });
+    const plan=captured[2];assert.deepEqual(plan.tools,['Read','Glob','Skill']);assert.equal(plan.mcpServers,undefined);
+    assert.equal((await plan.canUseTool('Write',{file_path:path.join(project,'report/early.md')})).behavior,'deny');
+    assert.equal((await plan.canUseTool('mcp__research__calculate',{})).behavior,'deny');
+    assert.equal((await plan.canUseTool('StructuredOutput',{tasks:[]})).behavior,'allow');
+    assert.doesNotMatch(plan.systemPrompt.prompt,/尽早 Write/);
+  } finally { await rm(project,{recursive:true,force:true}); }
+});
 // 不依赖本机 .env：给一组假的模型配置，fakeQuery 不会真的发请求
 process.env.MODEL_BASE_URL ??= 'https://model.test';
 process.env.MODEL_API_KEY ??= 'test-key';
 process.env.MODEL_NAME ??= 'test-model';
+
+test('任务摘要与完整结果分开，结构化计划保持原契约，不放宽文件权限', async () => {
+  const project = await mkdtemp(path.join(root, 'test-project-'));
+  const captured=[];
+  const fakeQuery=async function*({options}) { captured.push(options); yield {type:'result',subtype:'success',is_error:false,result:'内部工具与文件交接记录',structured_output:{reply:'已更新研究结论，关键年份仍需核实。'},session_id:'summary',num_turns:1,duration_ms:1}; };
+  try {
+    const run=createRunAgent(fakeQuery),result=await run({role:'product',projectDir:project,prompt:'正式任务'});
+    assert.equal(result.text,'已更新研究结论，关键年份仍需核实。');assert.equal(result.rawText,'内部工具与文件交接记录');
+    assert.equal(captured[0].outputFormat.schema.properties.reply.maxLength,240);
+    assert.equal((await captured[0].canUseTool('StructuredOutput',{reply:result.text})).behavior,'allow');
+    assert.equal((await captured[0].canUseTool('Write',{file_path:'context/task-history.json'})).behavior,'deny');
+    const schema={type:'object',properties:{tasks:{type:'array'}},required:['tasks']};
+    const plan=await run({role:'product',projectDir:project,prompt:'结构化计划',outputSchema:schema});
+    assert.equal(captured[1].outputFormat.schema,schema);assert.equal(plan.text,'内部工具与文件交接记录');
+  } finally {await rm(project,{recursive:true,force:true});}
+});
 
 test('新项目的 SDK 存储按项目和角色隔离，同一角色续用原目录', async () => {
   const a=await mkdtemp(path.join(root,'test-project-')), b=await mkdtemp(path.join(root,'test-project-')), configs=[];
@@ -178,4 +226,14 @@ test('干活时插话和停下：引导以 priority now 送进这一步、以最
     const stopped = await createRunAgent(stopQuery)({ role: 'designer', prompt: '画线框', projectDir: project, control: stopControl });
     assert.deepEqual([stopped.ok, stopped.stopped, interrupted, stopped.sessionId], [false, true, true, 's2']);
   } finally { await rm(project, { recursive: true, force: true }); }
+});
+
+test('自动审核使用独立只读会话，不复用作者 resume，不提供 Skill、写入或联网',async()=>{
+ const project=await mkdtemp(path.join(root,'test-project-')),options=[];
+ const run=createRunAgent(async function*({options:o}){options.push(o);yield {type:'result',subtype:'success',structured_output:{passed:true},result:'审核'};});
+ const definition={name:'审核',tools:['Read','Write','Glob','Skill','WebSearch'],write:[],read:['context','report'],skills:[],sharedPrompt:'',promptText:'',pluginPath:path.join(root,'team-skills'),model:'default'};
+ try{for(let i=0;i<2;i++)await run({role:'chief',projectDir:project,prompt:'审核',definition,mode:'review',isolateSession:true,resume:'author-session',outputSchema:{type:'object',properties:{passed:{type:'boolean'}}}});
+  assert.notEqual(options[0].env.CLAUDE_CONFIG_DIR,options[1].env.CLAUDE_CONFIG_DIR);
+  for(const o of options){assert.deepEqual(o.tools,['Read','Glob']);assert.equal(o.resume,undefined);assert.equal(o.plugins,undefined);assert.equal(o.mcpServers,undefined);assert.equal((await o.canUseTool('Write',{file_path:'report/a.md'})).behavior,'deny');assert.equal((await o.canUseTool('Skill',{skill:'team:test'})).behavior,'deny');assert.equal((await o.canUseTool('StructuredOutput',{passed:true})).behavior,'allow');}
+ }finally{await rm(project,{recursive:true,force:true});}
 });

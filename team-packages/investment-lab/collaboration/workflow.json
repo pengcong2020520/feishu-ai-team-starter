@@ -9,33 +9,43 @@
     },
     {
       "from": "chief",
-      "to": "radar",
+      "to": "equity",
       "kind": "dispatch"
     },
     {
       "from": "chief",
-      "to": "analyst",
+      "to": "macro",
       "kind": "dispatch"
     },
     {
       "from": "chief",
-      "to": "judge",
+      "to": "quant",
       "kind": "dispatch"
     },
     {
       "from": "chief",
-      "to": "venture",
+      "to": "risk",
       "kind": "dispatch"
     },
     {
-      "from": "chief",
-      "to": "recommender",
-      "kind": "dispatch"
-    },
-    {
-      "from": "venture",
-      "to": "judge",
+      "from": "equity",
+      "to": "risk",
       "kind": "review"
+    },
+    {
+      "from": "macro",
+      "to": "risk",
+      "kind": "review"
+    },
+    {
+      "from": "quant",
+      "to": "risk",
+      "kind": "review"
+    },
+    {
+      "from": "risk",
+      "to": "chief",
+      "kind": "synthesize"
     }
   ],
   "nodes": [
@@ -45,14 +55,13 @@
       "type": "task",
       "role": "chief",
       "skills": [
-        "chief-method"
+        "full-analysis"
       ],
-      "prompt": "围绕 {{demand}} 写 brief/result.md：研究对象、用途、时间范围、已有来源、关键问题与边界。用户反馈：{{feedback}}。",
+      "prompt": "围绕 {{demand}} 写 brief/result.md：研究对象、用途、期限、已有资料、问题和边界。用户反馈：{{feedback}}。本步只明确范围，不提前执行整个研究。",
       "outputs": [
-        "chief"
+        "brief"
       ],
-      "next": "confirm-scope",
-      "validator": "files"
+      "next": "confirm-scope"
     },
     {
       "id": "confirm-scope",
@@ -65,110 +74,321 @@
     },
     {
       "id": "research",
-      "name": "研究与交叉评审",
+      "name": "专家协作研究",
       "type": "plan",
       "role": "chief",
       "skills": [
-        "chief-method"
+        "full-analysis"
       ],
-      "prompt": "按已确认研究范围组织任务，执行全部六项。分析师与创投评审在资料齐备后可以并行。不得越过依赖关系。",
+      "prompt": "根据已确认范围选择必要的研究任务。综合公司研究通常包括 company-snapshot、macro-outlook、performance-comparison、risk-assessment、scenario-analysis、thesis-review、synthesis；不适用的任务说明原因后不选。具体任务可以只调用对应技能。after 只引用本次选中的任务，保留目录中对已选任务的全部依赖。相同角色按顺序工作，三个专业方向可并行。最终必须 synthesis。",
       "tasks": [
         {
-          "id": "radar",
-          "name": "检索公开资料，记录出处和日期",
-          "role": "radar",
+          "id": "company-snapshot",
+          "name": "公司速览",
+          "role": "equity",
           "skills": [
-            "radar-method"
+            "company-snapshot"
           ],
-          "prompt": "先读用户给的来源 URL；需要新来源时调用搜索。逐条保存标题、URL、日期、关键原文摘要。搜索未配置或网页无法读取时明确缺材料，绝不伪造来源。\n交付 sources/result.md。",
+          "after": [],
+          "prompt": "按 company-snapshot 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 equity/company-snapshot.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
           "outputs": [
-            "radar"
-          ],
-          "after": []
-        },
-        {
-          "id": "analyst",
-          "name": "分析收益驱动因素、风险和情景",
-          "role": "analyst",
-          "skills": [
-            "analyst-method"
-          ],
-          "prompt": "从有出处的数据分析单位经济、收益驱动因素、风险及敏感性。没有数据时写计算方法和待补数据，不编造金额、增速或概率。\n交付 analysis/result.md。",
-          "outputs": [
-            "analyst"
-          ],
-          "after": [
-            "radar"
+            "company-snapshot"
           ]
         },
         {
-          "id": "judge",
-          "name": "比较证据与反证，形成判断",
-          "role": "judge",
+          "id": "filing-review",
+          "name": "公告与财报阅读",
+          "role": "equity",
           "skills": [
-            "judge-method"
-          ],
-          "prompt": "对照研究目标评估支持与反对证据。区分已验证事实和假设，说明哪些新证据会改变判断。\n交付 judgment/result.md。",
-          "outputs": [
-            "judge"
+            "filing-review"
           ],
           "after": [
-            "analyst",
-            "venture"
+            "company-snapshot"
+          ],
+          "prompt": "按 filing-review 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 equity/filing-review.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "filing-review"
           ]
         },
         {
-          "id": "venture",
-          "name": "检查市场、团队、壁垒和执行风险",
-          "role": "venture",
+          "id": "earnings-preview",
+          "name": "业绩预览",
+          "role": "equity",
           "skills": [
-            "venture-method"
-          ],
-          "prompt": "从创投视角挑战市场规模、产品壁垒、团队执行与融资假设；列举反例、缺失证据和可检验问题，不能只是赞同。\n交付 review/result.md。",
-          "outputs": [
-            "venture"
+            "earnings-preview"
           ],
           "after": [
-            "radar"
+            "company-snapshot",
+            "filing-review"
+          ],
+          "prompt": "按 earnings-preview 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 equity/earnings-preview.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "earnings-preview"
           ]
         },
         {
-          "id": "recommender",
-          "name": "输出后续尽调与观察清单",
-          "role": "recommender",
+          "id": "earnings-review",
+          "name": "业绩复盘",
+          "role": "equity",
           "skills": [
-            "recommender-method"
-          ],
-          "prompt": "形成基于证据的后续尽调计划、观察指标和停止条件，不代用户下单。\n交付 recommendations/result.md。",
-          "outputs": [
-            "recommender"
+            "earnings-review"
           ],
           "after": [
-            "judge"
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview"
+          ],
+          "prompt": "按 earnings-review 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 equity/earnings-review.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "earnings-review"
+          ]
+        },
+        {
+          "id": "dcf-valuation",
+          "name": "现金流估值",
+          "role": "equity",
+          "skills": [
+            "dcf-valuation"
+          ],
+          "after": [
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview",
+            "earnings-review"
+          ],
+          "prompt": "按 dcf-valuation 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 equity/dcf-valuation.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "dcf-valuation"
+          ]
+        },
+        {
+          "id": "relative-valuation",
+          "name": "相对估值",
+          "role": "equity",
+          "skills": [
+            "relative-valuation"
+          ],
+          "after": [
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview",
+            "earnings-review",
+            "dcf-valuation"
+          ],
+          "prompt": "按 relative-valuation 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 equity/relative-valuation.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "relative-valuation"
+          ]
+        },
+        {
+          "id": "macro-outlook",
+          "name": "宏观展望",
+          "role": "macro",
+          "skills": [
+            "macro-outlook"
+          ],
+          "after": [],
+          "prompt": "按 macro-outlook 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 macro/macro-outlook.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "macro-outlook"
+          ]
+        },
+        {
+          "id": "market-brief",
+          "name": "市场简报",
+          "role": "macro",
+          "skills": [
+            "market-brief"
+          ],
+          "after": [
+            "macro-outlook"
+          ],
+          "prompt": "按 market-brief 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 macro/market-brief.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "market-brief"
+          ]
+        },
+        {
+          "id": "sector-review",
+          "name": "行业研究",
+          "role": "macro",
+          "skills": [
+            "sector-review"
+          ],
+          "after": [
+            "macro-outlook",
+            "market-brief"
+          ],
+          "prompt": "按 sector-review 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 macro/sector-review.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "sector-review"
+          ]
+        },
+        {
+          "id": "performance-comparison",
+          "name": "表现比较",
+          "role": "quant",
+          "skills": [
+            "performance-comparison"
+          ],
+          "after": [],
+          "prompt": "按 performance-comparison 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 quant/performance-comparison.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "performance-comparison"
+          ]
+        },
+        {
+          "id": "technical-analysis",
+          "name": "技术分析",
+          "role": "quant",
+          "skills": [
+            "technical-analysis"
+          ],
+          "after": [
+            "performance-comparison"
+          ],
+          "prompt": "按 technical-analysis 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 quant/technical-analysis.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "technical-analysis"
+          ]
+        },
+        {
+          "id": "risk-assessment",
+          "name": "风险评估",
+          "role": "risk",
+          "skills": [
+            "risk-assessment"
+          ],
+          "after": [
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview",
+            "earnings-review",
+            "dcf-valuation",
+            "relative-valuation",
+            "macro-outlook",
+            "market-brief",
+            "sector-review",
+            "performance-comparison",
+            "technical-analysis"
+          ],
+          "prompt": "按 risk-assessment 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 risk/risk-assessment.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "risk-assessment"
+          ]
+        },
+        {
+          "id": "portfolio-review",
+          "name": "组合审查",
+          "role": "risk",
+          "skills": [
+            "portfolio-review"
+          ],
+          "after": [
+            "risk-assessment",
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview",
+            "earnings-review",
+            "dcf-valuation",
+            "relative-valuation",
+            "macro-outlook",
+            "market-brief",
+            "sector-review",
+            "performance-comparison",
+            "technical-analysis"
+          ],
+          "prompt": "按 portfolio-review 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 risk/portfolio-review.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "portfolio-review"
+          ]
+        },
+        {
+          "id": "scenario-analysis",
+          "name": "情景分析",
+          "role": "chief",
+          "skills": [
+            "scenario-analysis"
+          ],
+          "after": [
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview",
+            "earnings-review",
+            "dcf-valuation",
+            "relative-valuation",
+            "macro-outlook",
+            "market-brief",
+            "sector-review",
+            "performance-comparison",
+            "technical-analysis",
+            "risk-assessment",
+            "portfolio-review"
+          ],
+          "prompt": "对照已完成研究写 scenarios/scenario-analysis.md，明确基准、乐观与悲观情景的假设、敏感变量和失效条件。概率没有依据就不分配。",
+          "outputs": [
+            "scenario-analysis"
+          ]
+        },
+        {
+          "id": "thesis-review",
+          "name": "反方审查",
+          "role": "risk",
+          "skills": [
+            "thesis-review"
+          ],
+          "after": [
+            "risk-assessment",
+            "portfolio-review",
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview",
+            "earnings-review",
+            "dcf-valuation",
+            "relative-valuation",
+            "macro-outlook",
+            "market-brief",
+            "sector-review",
+            "performance-comparison",
+            "technical-analysis",
+            "scenario-analysis"
+          ],
+          "prompt": "按 thesis-review 方法研究本次目标，先读 brief/result.md、inputs/ 和已完成的相关研究。交付 risk/thesis-review.md。资料不足时明确局限；来源、日期与反证必须可追溯。",
+          "outputs": [
+            "thesis-review"
           ]
         },
         {
           "id": "synthesis",
-          "name": "汇总研究报告",
+          "name": "综合研究报告",
           "role": "chief",
           "skills": [
-            "chief-method"
-          ],
-          "prompt": "汇总所有已完成角色的文件，写 report/final.md，保留来源与分歧、时间戳和待补资料。",
-          "outputs": [
-            "report"
+            "full-analysis"
           ],
           "after": [
-            "recommender"
+            "company-snapshot",
+            "filing-review",
+            "earnings-preview",
+            "earnings-review",
+            "dcf-valuation",
+            "relative-valuation",
+            "macro-outlook",
+            "market-brief",
+            "sector-review",
+            "performance-comparison",
+            "technical-analysis",
+            "risk-assessment",
+            "portfolio-review",
+            "scenario-analysis",
+            "thesis-review"
+          ],
+          "prompt": "汇总所有已完成任务到 report/final.md。回答研究问题，保留事实/假设/推断、专业分歧、反方意见、停止条件、缺口及来源。公开网页来源与 context/source-ledger.jsonl 核对；不把演示数据当作真实市场数据。",
+          "outputs": [
+            "report"
           ]
         }
       ],
       "required": [
-        "radar",
-        "analyst",
-        "judge",
-        "venture",
-        "recommender",
         "synthesis"
       ],
       "final": "synthesis",

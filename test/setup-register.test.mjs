@@ -81,6 +81,21 @@ test('等扫码超时、手机上拒绝，都按角色报出来', async () => {
   assert.deepEqual(results.map(r => [r.role.key, r.ok, r.error?.code]), [['product', false, 'timeout'], ['designer', false, 'access_denied']]);
 });
 
+test('一位角色生成二维码失败，仍打开页面让其他角色继续扫码', async () => {
+  const qrDir = mkdtempSync(path.join(os.tmpdir(), 'setup-qr-partial-'));
+  let opened = 0;
+  const lark = { async registerApp(options) {
+    if (options.appPreset.name === 'AI 产品经理') throw Object.assign(new Error('denied'), { code: 'access_denied' });
+    options.onQRCodeReady({ url: 'https://qr.test/available', expireIn: 600 });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(opened, 1);
+    return { client_id: 'cli_created', client_secret: 'test-only' };
+  } };
+  const results = await registerMissing({ lark, qrcode, roles: team.slice(0, 2), qrDir, save: async () => {}, open: () => { opened++; }, log: () => {} });
+  assert.deepEqual(results.map(r => r.ok), [false, true]);
+  assert.equal(opened, 1);
+});
+
 test('重试也没救回来的断网：换一张新码继续等，不让这个角色直接失败', async () => {
   const qrDir = mkdtempSync(path.join(os.tmpdir(), 'setup-qr-'));
   let calls = 0; const logs = [];

@@ -20,6 +20,7 @@ const { mode, flow, feishu, recorder } = createTeam({ credentials: allCredential
 const preview = await startPreview({ flow, feishu, recorder, host: process.env.PREVIEW_HOST || '127.0.0.1', previewBase, workbenchPort: port, modelPort: port + 1 });
 try {
   await feishu.start();
+  flow.packages.startDocumentPolling();
   console.log(`${Object.keys(allCredentials).length} 个机器人已连上飞书`);
   console.log(`当前版本：${teamModeNames[mode]}`);
   console.log(`预览地址：${previewBase}；走查与工作台地址：${workbenchBase}`);
@@ -29,4 +30,4 @@ try {
   console.error(error.message);
   process.exitCode = 1;
 }
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { feishu.close(); await preview.close(); process.exit(); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { flow.packages.stopDocumentPolling(); feishu.close(); await preview.close(); process.exit(); });

@@ -102,15 +102,33 @@ export async function installPackage(source, root = process.cwd()) {
     return { id: p.manifest.id, version: p.manifest.version, hash: p.hash, directory: destination };
   } finally { await rm(temp, { recursive: true, force: true }); }
 }
+// Keep immutable history for existing projects; new projects default to the latest version.
+// Equal versions with different hashes remain visible, rather than silently selecting one.
+export function latestPackages(packages) {
+  const compare = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
+  const versions = new Map();
+  for (const p of packages) if (!versions.has(p.id) || compare(p.version, versions.get(p.id)) > 0) versions.set(p.id, p.version);
+  return packages.filter(p => p.version === versions.get(p.id));
+}
 export async function listPackages(root = process.cwd()) {
   const result = [];
   const entries = async dir => readdir(dir, { withFileTypes: true }).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
   for (const id of await entries(path.join(root, 'data/packages'))) if (id.isDirectory()) for (const v of await entries(path.join(root, 'data/packages', id.name))) if (v.isDirectory()) for (const h of await entries(path.join(root, 'data/packages', id.name, v.name))) if (h.isDirectory() && /^[a-f0-9]{64}$/.test(h.name)) {
     const p = await loadPackage(path.join(root, 'data/packages', id.name, v.name, h.name));
     if (p.hash !== h.name || p.manifest.id !== id.name || p.manifest.version !== v.name) throw Error('已安装包被修改，请重新安装');
-    result.push({ id: id.name, version: v.name, hash: h.name, name: p.manifest.name, description: p.manifest.description, coordinator: p.workflow.coordinator, roles: p.manifest.roles.map(({ id, name, description }) => ({ id, name, description })), gates: p.workflow.nodes.filter(n => n.type === 'gate').map(({ id, name, approval }) => ({ id, name, approval })), examples: p.manifest.examples, license: p.manifest.license });
+    result.push({ ...packageView(p), gates: p.workflow.nodes.filter(n => n.type === 'gate').map(({ id, name, approval }) => ({ id, name, approval })) });
   }
   return result;
+}
+export function packageView(p) {
+  const { id, version, name, description, roles, skills, artifacts, examples, license } = p.manifest;
+  return { id, version, hash: p.hash, name, description, coordinator: p.workflow.coordinator,
+    roles: roles.map(({ id, name, description, color, skills, read, write }) => ({ id, name, description, color, skills, read, write })),
+    skills: skills.map(({ id, name, description }) => ({ id, name, description })), artifacts, examples, license, workflow: p.workflow };
+}
+export function roleSource(p, role) {
+  const r = p.manifest.roles.find(r => r.id === role); if (!r) throw Error('角色不存在');
+  return { name: r.name, prompt: p.files.get(r.prompt).toString(), skills: r.skills.map(id => { const s = p.manifest.skills.find(s => s.id === id); return { ...s, text: p.files.get(s.path).toString() }; }), collaboration: p.files.get(p.manifest.collaboration).toString() };
 }
 export async function lockedPackage(root, lock) {
   if (!lock || !/^[a-z][a-z0-9-]{0,63}$/.test(lock.id) || !/^\d+\.\d+\.\d+$/.test(lock.version) || !/^[a-f0-9]{64}$/.test(lock.hash)) throw Error('团队包锁定信息无效');

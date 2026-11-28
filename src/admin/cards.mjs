@@ -1,6 +1,7 @@
 // AI 管理员助手的私聊卡片（卡片 1.0，橙色，和三个角色区分开）
 import { roles } from '../agents/roles.mjs';
 import { stageNames } from '../flow/stages.mjs';
+import { plainText } from '../presentation.mjs';
 
 export const ADMIN_NAME = 'AI 管理员助手';
 const grey = text => ({ tag: 'div', text: { tag: 'lark_md', content: `<font color='grey'>${text}</font>` } });
@@ -9,7 +10,7 @@ const button = (text, value, type = 'default') => ({ tag: 'button', text: { tag:
 const card = (title, elements) => ({ config: { wide_screen_mode: true, update_multi: true }, header: { template: 'orange', title: { tag: 'plain_text', content: `${ADMIN_NAME} · ${title}` } }, elements });
 // 模型和报错写的文字当不可信：去掉会被卡片当格式的符号，限长
 const plain = (text, max = 200) => String(text ?? '').replace(/[*`<>[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
-export const cleanReply = (text, max = 3000) => String(text ?? '').split('\n').map(row => row.replace(/^\s*[#>]+\s*/, '').replace(/\*\*|__|[`\[\]<>]/g, '')).join('\n').trim().slice(0, max);
+export const cleanReply = (text, max = 3000) => plainText(text).slice(0, max);
 
 export const since = (iso, now = Date.now()) => {
   const minutes = Math.floor((now - Date.parse(iso)) / 60000);

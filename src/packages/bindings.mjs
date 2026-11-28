@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { atomicJson, listPackages } from './store.mjs';
+import { atomicJson, listPackages, latestPackages } from './store.mjs';
 import { identifier } from './schema.mjs';
 
 export async function readBindings(root, id) {
@@ -10,12 +10,14 @@ export async function readBindings(root, id) {
 export async function bindRole(root, packageId, role, bot, env) {
   [packageId, role, bot].forEach(v => identifier.parse(v));
   if (bot === 'admin') throw Error('管理员助手不能兼任项目团队角色');
-  const pack = (await listPackages(root)).find(p => p.id === packageId);
+  const candidates = latestPackages(await listPackages(root)).filter(p => p.id === packageId);
+  if (candidates.length > 1) throw Error('同版本有多个包摘要，不能自动选择角色定义');
+  const pack = candidates[0];
   if (!pack?.roles.some(r => r.id === role)) throw Error('请先安装包并选择有效角色');
   const prefix = `FEISHU_${bot.replaceAll('-', '_').toUpperCase()}_`;
   if (!env[prefix + 'APP_ID'] || !env[prefix + 'APP_SECRET']) throw Error(`缺少 ${prefix}APP_ID 或 ${prefix}APP_SECRET`);
   const all = await readBindings(root), current = all[packageId] || { roles: {} };
-  if (Object.entries(current.roles).some(([r, b]) => r !== role && b === bot)) throw Error('一个团队中的每个角色需要独立机器人，不能一个机器人冒充多个角色');
+  if (Object.entries(current.roles).some(([r, b]) => r !== role && pack.roles.some(x => x.id === r) && b === bot)) throw Error('一个团队中的每个角色需要独立机器人，不能一个机器人冒充多个角色');
   current.roles[role] = bot; all[packageId] = current; await atomicJson(path.join(root, 'data/team-bindings.json'), all);
   return { packageId, role, bot };
 }

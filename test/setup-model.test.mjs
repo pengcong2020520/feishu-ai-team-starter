@@ -59,6 +59,18 @@ test('连通检查：请求格式与各种失败原因，原因里不含密钥',
     assert.match(r.reason, pattern);
     assert.doesNotMatch(r.reason, /sk-secret/);
   }
+  const overdue = await checkModel({ baseUrl: 'https://m.test', apiKey: 'sk-secret', model: 'm1', fetchImpl: reply(403, { error: { message: 'The request failed because your account has an overdue balance.' } }) });
+  assert.match(overdue.reason, /账户欠费/);
+  assert.doesNotMatch(overdue.reason, /密钥不对/);
   const down = await checkModel({ baseUrl: 'https://m.test', apiKey: 'k', model: 'm', fetchImpl: async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }); } });
   assert.match(down.reason, /连不上 MODEL_BASE_URL（ENOTFOUND）/);
+});
+
+test('OpenCode Go 连通检查携带本客户端身份与会话头，保持 Anthropic 协议', async () => {
+  let seen;
+  const result = await checkModel({ baseUrl: 'https://opencode.ai/inference/go/anthropic', apiKey: 'test-only', model: 'deepseek-v4.1-flash', fetchImpl: async (url, init) => { seen = { url, init }; return new Response('{}'); } });
+  assert.equal(result.ok, true);
+  assert.equal(seen.url, 'https://opencode.ai/inference/go/anthropic/v1/messages');
+  assert.match(seen.init.headers['user-agent'], /^feishu-ai-team\//);
+  assert.match(seen.init.headers['x-opencode-session'], /^setup-[a-f0-9-]+$/);
 });

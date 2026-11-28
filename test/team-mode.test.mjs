@@ -58,7 +58,7 @@ for (const mode of ['basic', 'projects']) test(`${mode} 正式装配：工作台
   try {
     const base = `http://127.0.0.1:${server.workbenchPort}`;
     assert.equal((await (await fetch(base + '/api/config')).json()).teamMode, mode);
-    assert.equal((await fetch(base + '/api/team')).status, mode === 'projects' ? 200 : 404);
+    assert.equal((await fetch(base + '/api/team')).status, 404);
     const response = await fetch(base + '/api/demand', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ text: '做一个报名页', requestId: 'test-mode' }) });
     assert.equal(response.status, 200);
     const result = await response.json();

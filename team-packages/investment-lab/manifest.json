@@ -2,54 +2,73 @@
   "schemaVersion": 1,
   "runtime": "feishu-team/1",
   "id": "investment-lab",
-  "name": "观澜 · 投研团队",
-  "version": "1.0.0",
-  "description": "公开资料研究、收益与风险分析、反方评审及尽调建议。",
-  "author": "Feishu AI Team contributors",
-  "license": "MIT",
+  "name": "观澜 · TradingAgents 投研团队",
+  "version": "2.1.0",
+  "description": "五角色十六技能，免费公开检索、PDF 阅读和本地可复核计算；实时行情数据库仍按需接入。",
+  "author": "TauricResearch; Feishu AI Team contributors",
+  "license": "Apache-2.0",
+  "files": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "agents/chief.md",
+    "agents/equity.md",
+    "agents/macro.md",
+    "agents/quant.md",
+    "agents/risk.md",
+    "collaboration/SKILL.md",
+    "collaboration/workflow.json",
+    "examples/author-mapping.md",
+    "manifest.json",
+    "skills/company-snapshot/SKILL.md",
+    "skills/dcf-valuation/SKILL.md",
+    "skills/earnings-preview/SKILL.md",
+    "skills/earnings-review/SKILL.md",
+    "skills/filing-review/SKILL.md",
+    "skills/full-analysis/SKILL.md",
+    "skills/macro-outlook/SKILL.md",
+    "skills/market-brief/SKILL.md",
+    "skills/performance-comparison/SKILL.md",
+    "skills/portfolio-review/SKILL.md",
+    "skills/relative-valuation/SKILL.md",
+    "skills/risk-assessment/SKILL.md",
+    "skills/scenario-analysis/SKILL.md",
+    "skills/sector-review/SKILL.md",
+    "skills/technical-analysis/SKILL.md",
+    "skills/thesis-review/SKILL.md",
+    "upstream/agents/equity.md",
+    "upstream/agents/macro.md",
+    "upstream/agents/quant.md",
+    "upstream/agents/risk.md",
+    "upstream/prompts.ts",
+    "upstream/skills/company-snapshot/SKILL.md",
+    "upstream/skills/dcf-valuation/SKILL.md",
+    "upstream/skills/earnings-preview/SKILL.md",
+    "upstream/skills/earnings-review/SKILL.md",
+    "upstream/skills/filing-review/SKILL.md",
+    "upstream/skills/full-analysis/SKILL.md",
+    "upstream/skills/macro-outlook/SKILL.md",
+    "upstream/skills/market-brief/SKILL.md",
+    "upstream/skills/performance-comparison/SKILL.md",
+    "upstream/skills/portfolio-review/SKILL.md",
+    "upstream/skills/relative-valuation/SKILL.md",
+    "upstream/skills/risk-assessment/SKILL.md",
+    "upstream/skills/scenario-analysis/SKILL.md",
+    "upstream/skills/sector-review/SKILL.md",
+    "upstream/skills/technical-analysis/SKILL.md",
+    "upstream/skills/thesis-review/SKILL.md",
+    "workspace/demo.md"
+  ],
   "workflow": "collaboration/workflow.json",
   "collaboration": "collaboration/SKILL.md",
   "roles": [
     {
       "id": "chief",
       "name": "AI 研究主理人",
-      "description": "澄清研究目标，编排任务并汇总证据",
+      "description": "组织研究、综合证据与情景",
       "prompt": "agents/chief.md",
       "skills": [
-        "chief-method"
-      ],
-      "tools": [
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Skill"
-      ],
-      "read": [
-        "brief",
-        "sources",
-        "analysis",
-        "judgment",
-        "review",
-        "recommendations",
-        "report",
-        "context"
-      ],
-      "write": [
-        "brief",
-        "report"
-      ],
-      "memory": "project",
-      "model": "default",
-      "color": "blue"
-    },
-    {
-      "id": "radar",
-      "name": "AI 信息雷达",
-      "description": "检索公开资料，记录出处和日期",
-      "prompt": "agents/radar.md",
-      "skills": [
-        "radar-method"
+        "full-analysis",
+        "scenario-analysis"
       ],
       "tools": [
         "Read",
@@ -58,96 +77,41 @@
         "Glob",
         "Skill",
         "WebFetch",
-        "WebSearch"
+        "WebSearch",
+        "Calculate"
       ],
       "read": [
+        "inputs",
         "brief",
-        "sources",
-        "analysis",
-        "judgment",
-        "review",
-        "recommendations",
         "report",
+        "scenarios",
+        "equity",
+        "macro",
+        "quant",
+        "risk",
         "context"
       ],
       "write": [
-        "sources"
+        "brief",
+        "report",
+        "scenarios"
       ],
       "memory": "project",
       "model": "default",
       "color": "blue"
     },
     {
-      "id": "analyst",
-      "name": "AI 收益与风险分析师",
-      "description": "分析收益驱动因素、风险和情景",
-      "prompt": "agents/analyst.md",
+      "id": "equity",
+      "name": "AI 公司研究员",
+      "description": "商业模式、财报与估值",
+      "prompt": "agents/equity.md",
       "skills": [
-        "analyst-method"
-      ],
-      "tools": [
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Skill"
-      ],
-      "read": [
-        "brief",
-        "sources",
-        "analysis",
-        "judgment",
-        "review",
-        "recommendations",
-        "report",
-        "context"
-      ],
-      "write": [
-        "analysis"
-      ],
-      "memory": "project",
-      "model": "default",
-      "color": "blue"
-    },
-    {
-      "id": "judge",
-      "name": "AI 投资判断师",
-      "description": "比较证据与反证，形成判断",
-      "prompt": "agents/judge.md",
-      "skills": [
-        "judge-method"
-      ],
-      "tools": [
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Skill"
-      ],
-      "read": [
-        "brief",
-        "sources",
-        "analysis",
-        "judgment",
-        "review",
-        "recommendations",
-        "report",
-        "context"
-      ],
-      "write": [
-        "judgment"
-      ],
-      "memory": "project",
-      "model": "default",
-      "color": "blue"
-    },
-    {
-      "id": "venture",
-      "name": "AI 创投评审",
-      "description": "检查市场、团队、壁垒和执行风险",
-      "prompt": "agents/venture.md",
-      "skills": [
-        "venture-method"
+        "company-snapshot",
+        "filing-review",
+        "earnings-preview",
+        "earnings-review",
+        "dcf-valuation",
+        "relative-valuation"
       ],
       "tools": [
         "Read",
@@ -156,267 +120,641 @@
         "Glob",
         "Skill",
         "WebFetch",
-        "WebSearch"
+        "WebSearch",
+        "Calculate"
       ],
       "read": [
+        "inputs",
         "brief",
-        "sources",
-        "analysis",
-        "judgment",
-        "review",
-        "recommendations",
         "report",
+        "scenarios",
+        "equity",
+        "macro",
+        "quant",
+        "risk",
         "context"
       ],
       "write": [
-        "review"
+        "equity"
       ],
       "memory": "project",
       "model": "default",
       "color": "blue"
     },
     {
-      "id": "recommender",
-      "name": "AI 研究建议师",
-      "description": "输出后续尽调与观察清单",
-      "prompt": "agents/recommender.md",
+      "id": "macro",
+      "name": "AI 宏观策略师",
+      "description": "宏观环境、市场与行业传导",
+      "prompt": "agents/macro.md",
       "skills": [
-        "recommender-method"
+        "macro-outlook",
+        "market-brief",
+        "sector-review"
       ],
       "tools": [
         "Read",
         "Write",
         "Edit",
         "Glob",
-        "Skill"
+        "Skill",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
       ],
       "read": [
+        "inputs",
         "brief",
-        "sources",
-        "analysis",
-        "judgment",
-        "review",
-        "recommendations",
         "report",
+        "scenarios",
+        "equity",
+        "macro",
+        "quant",
+        "risk",
         "context"
       ],
       "write": [
-        "recommendations"
+        "macro"
       ],
       "memory": "project",
       "model": "default",
       "color": "blue"
+    },
+    {
+      "id": "quant",
+      "name": "AI 量化研究员",
+      "description": "价格表现、技术指标与数据口径",
+      "prompt": "agents/quant.md",
+      "skills": [
+        "performance-comparison",
+        "technical-analysis"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "read": [
+        "inputs",
+        "brief",
+        "report",
+        "scenarios",
+        "equity",
+        "macro",
+        "quant",
+        "risk",
+        "context"
+      ],
+      "write": [
+        "quant"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "blue"
+    },
+    {
+      "id": "risk",
+      "name": "AI 风险分析师",
+      "description": "风险、组合暴露与反方审查",
+      "prompt": "agents/risk.md",
+      "skills": [
+        "risk-assessment",
+        "portfolio-review",
+        "thesis-review"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "read": [
+        "inputs",
+        "brief",
+        "report",
+        "scenarios",
+        "equity",
+        "macro",
+        "quant",
+        "risk",
+        "context"
+      ],
+      "write": [
+        "risk"
+      ],
+      "memory": "project",
+      "model": "default",
+      "color": "orange"
     }
   ],
   "skills": [
     {
-      "id": "chief-method",
-      "version": "1.0.0",
-      "path": "skills/chief-method/SKILL.md",
-      "description": "澄清研究目标，编排任务并汇总证据",
+      "id": "full-analysis",
+      "version": "2.1.0",
+      "path": "skills/full-analysis/SKILL.md",
+      "description": "综合研究",
       "inputs": [
-        "用户研究目标",
-        "已交接资料"
+        "研究目标",
+        "项目材料和公开来源"
       ],
       "outputs": [
-        "brief/result.md"
-      ],
-      "tools": [
-        "Read",
-        "Write"
-      ],
-      "resources": []
-    },
-    {
-      "id": "radar-method",
-      "version": "1.0.0",
-      "path": "skills/radar-method/SKILL.md",
-      "description": "检索公开资料，记录出处和日期",
-      "inputs": [
-        "用户研究目标",
-        "已交接资料"
-      ],
-      "outputs": [
-        "sources/result.md"
+        "brief/result.md",
+        "report/final.md"
       ],
       "tools": [
         "Read",
         "Write",
         "WebFetch",
-        "WebSearch"
+        "WebSearch",
+        "Calculate"
       ],
       "resources": []
     },
     {
-      "id": "analyst-method",
-      "version": "1.0.0",
-      "path": "skills/analyst-method/SKILL.md",
-      "description": "分析收益驱动因素、风险和情景",
+      "id": "scenario-analysis",
+      "version": "2.1.0",
+      "path": "skills/scenario-analysis/SKILL.md",
+      "description": "情景分析",
       "inputs": [
-        "用户研究目标",
-        "已交接资料"
+        "研究目标",
+        "项目材料和公开来源"
       ],
       "outputs": [
-        "analysis/result.md"
-      ],
-      "tools": [
-        "Read",
-        "Write"
-      ],
-      "resources": []
-    },
-    {
-      "id": "judge-method",
-      "version": "1.0.0",
-      "path": "skills/judge-method/SKILL.md",
-      "description": "比较证据与反证，形成判断",
-      "inputs": [
-        "用户研究目标",
-        "已交接资料"
-      ],
-      "outputs": [
-        "judgment/result.md"
-      ],
-      "tools": [
-        "Read",
-        "Write"
-      ],
-      "resources": []
-    },
-    {
-      "id": "venture-method",
-      "version": "1.0.0",
-      "path": "skills/venture-method/SKILL.md",
-      "description": "检查市场、团队、壁垒和执行风险",
-      "inputs": [
-        "用户研究目标",
-        "已交接资料"
-      ],
-      "outputs": [
-        "review/result.md"
+        "scenarios/scenario-analysis.md"
       ],
       "tools": [
         "Read",
         "Write",
         "WebFetch",
-        "WebSearch"
+        "WebSearch",
+        "Calculate"
       ],
       "resources": []
     },
     {
-      "id": "recommender-method",
-      "version": "1.0.0",
-      "path": "skills/recommender-method/SKILL.md",
-      "description": "输出后续尽调与观察清单",
+      "id": "company-snapshot",
+      "version": "2.1.0",
+      "path": "skills/company-snapshot/SKILL.md",
+      "description": "公司速览",
       "inputs": [
-        "用户研究目标",
-        "已交接资料"
+        "研究目标",
+        "项目材料和公开来源"
       ],
       "outputs": [
-        "recommendations/result.md"
+        "equity/company-snapshot.md"
       ],
       "tools": [
         "Read",
-        "Write"
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "filing-review",
+      "version": "2.1.0",
+      "path": "skills/filing-review/SKILL.md",
+      "description": "公告与财报阅读",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "equity/filing-review.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "earnings-preview",
+      "version": "2.1.0",
+      "path": "skills/earnings-preview/SKILL.md",
+      "description": "业绩预览",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "equity/earnings-preview.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "earnings-review",
+      "version": "2.1.0",
+      "path": "skills/earnings-review/SKILL.md",
+      "description": "业绩复盘",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "equity/earnings-review.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "dcf-valuation",
+      "version": "2.1.0",
+      "path": "skills/dcf-valuation/SKILL.md",
+      "description": "现金流估值",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "equity/dcf-valuation.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "relative-valuation",
+      "version": "2.1.0",
+      "path": "skills/relative-valuation/SKILL.md",
+      "description": "相对估值",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "equity/relative-valuation.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "macro-outlook",
+      "version": "2.1.0",
+      "path": "skills/macro-outlook/SKILL.md",
+      "description": "宏观展望",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "macro/macro-outlook.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "market-brief",
+      "version": "2.1.0",
+      "path": "skills/market-brief/SKILL.md",
+      "description": "市场简报",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "macro/market-brief.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "sector-review",
+      "version": "2.1.0",
+      "path": "skills/sector-review/SKILL.md",
+      "description": "行业研究",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "macro/sector-review.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "performance-comparison",
+      "version": "2.1.0",
+      "path": "skills/performance-comparison/SKILL.md",
+      "description": "表现比较",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "quant/performance-comparison.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "technical-analysis",
+      "version": "2.1.0",
+      "path": "skills/technical-analysis/SKILL.md",
+      "description": "技术分析",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "quant/technical-analysis.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "risk-assessment",
+      "version": "2.1.0",
+      "path": "skills/risk-assessment/SKILL.md",
+      "description": "风险评估",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "risk/risk-assessment.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "portfolio-review",
+      "version": "2.1.0",
+      "path": "skills/portfolio-review/SKILL.md",
+      "description": "组合审查",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "risk/portfolio-review.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
+      ],
+      "resources": []
+    },
+    {
+      "id": "thesis-review",
+      "version": "2.1.0",
+      "path": "skills/thesis-review/SKILL.md",
+      "description": "反方审查",
+      "inputs": [
+        "研究目标",
+        "项目材料和公开来源"
+      ],
+      "outputs": [
+        "risk/thesis-review.md"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "WebFetch",
+        "WebSearch",
+        "Calculate"
       ],
       "resources": []
     }
   ],
   "workspace": {
     "directories": [
+      "inputs",
       "brief",
-      "sources",
-      "analysis",
-      "judgment",
-      "review",
-      "recommendations",
-      "report"
+      "report",
+      "scenarios",
+      "equity",
+      "macro",
+      "quant",
+      "risk"
+    ],
+    "templates": [
+      {
+        "source": "workspace/demo.md",
+        "target": "inputs/demo.md"
+      }
     ]
   },
   "artifacts": [
     {
-      "id": "chief",
-      "name": "AI 研究主理人交付",
+      "id": "brief",
+      "name": "研究范围",
       "path": "brief/result.md",
       "format": "markdown",
-      "requiredKeys": [],
-      "minBytes": 1
-    },
-    {
-      "id": "radar",
-      "name": "AI 信息雷达交付",
-      "path": "sources/result.md",
-      "format": "markdown",
-      "requiredKeys": [],
-      "minBytes": 1
-    },
-    {
-      "id": "analyst",
-      "name": "AI 收益与风险分析师交付",
-      "path": "analysis/result.md",
-      "format": "markdown",
-      "requiredKeys": [],
-      "minBytes": 1
-    },
-    {
-      "id": "judge",
-      "name": "AI 投资判断师交付",
-      "path": "judgment/result.md",
-      "format": "markdown",
-      "requiredKeys": [],
-      "minBytes": 1
-    },
-    {
-      "id": "venture",
-      "name": "AI 创投评审交付",
-      "path": "review/result.md",
-      "format": "markdown",
-      "requiredKeys": [],
-      "minBytes": 1
-    },
-    {
-      "id": "recommender",
-      "name": "AI 研究建议师交付",
-      "path": "recommendations/result.md",
-      "format": "markdown",
-      "requiredKeys": [],
-      "minBytes": 1
+      "minBytes": 80
     },
     {
       "id": "report",
-      "name": "研究报告",
+      "name": "综合研究报告",
       "path": "report/final.md",
       "format": "markdown",
-      "requiredKeys": [],
-      "minBytes": 1
+      "minBytes": 80
+    },
+    {
+      "id": "scenario-analysis",
+      "name": "情景分析",
+      "path": "scenarios/scenario-analysis.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "company-snapshot",
+      "name": "公司速览",
+      "path": "equity/company-snapshot.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "filing-review",
+      "name": "公告与财报阅读",
+      "path": "equity/filing-review.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "earnings-preview",
+      "name": "业绩预览",
+      "path": "equity/earnings-preview.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "earnings-review",
+      "name": "业绩复盘",
+      "path": "equity/earnings-review.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "dcf-valuation",
+      "name": "现金流估值",
+      "path": "equity/dcf-valuation.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "relative-valuation",
+      "name": "相对估值",
+      "path": "equity/relative-valuation.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "macro-outlook",
+      "name": "宏观展望",
+      "path": "macro/macro-outlook.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "market-brief",
+      "name": "市场简报",
+      "path": "macro/market-brief.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "sector-review",
+      "name": "行业研究",
+      "path": "macro/sector-review.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "performance-comparison",
+      "name": "表现比较",
+      "path": "quant/performance-comparison.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "technical-analysis",
+      "name": "技术分析",
+      "path": "quant/technical-analysis.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "risk-assessment",
+      "name": "风险评估",
+      "path": "risk/risk-assessment.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "portfolio-review",
+      "name": "组合审查",
+      "path": "risk/portfolio-review.md",
+      "format": "markdown",
+      "minBytes": 80
+    },
+    {
+      "id": "thesis-review",
+      "name": "反方审查",
+      "path": "risk/thesis-review.md",
+      "format": "markdown",
+      "minBytes": 80
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://github.com/TauricResearch/TradingAgents",
+      "revision": "121265d18d467ac717f7af99cb0d669c15d2e73c",
+      "license": "Apache-2.0",
+      "notice": "THIRD_PARTY_NOTICES.md"
     }
   ],
   "examples": [
     {
-      "name": "开源商业模式研究",
-      "demand": "研究开源开发工具的商业模式。先明确范围，基于所提供的公开来源给出驱动因素、风险和下一步尽调问题。没有资料要明确列缺口。",
+      "name": "五角色协作演示（虚构公司）",
+      "demand": "对 inputs/demo.md 的虚构青禾软件做综合研究，仅验证研究协作，不当作真实投资依据。让公司、宏观、量化、风险四个专家分别工作；调用 company-snapshot、macro-outlook、performance-comparison、risk-assessment、scenario-analysis、thesis-review，主理人用 full-analysis 汇总。只使用给定演示数据，列出计算步骤、反证与缺口。",
+      "expectedArtifacts": [
+        "report"
+      ]
+    },
+    {
+      "name": "真实公司研究（请补来源）",
+      "demand": "请研究【公司名称】，研究截至日期【日期】，目标【研究问题】。我的公开原始资料 URL：【请填写】。先确认范围，再按需组织专家，区分来源事实与推断；缺数据先列清单，不补造行情。",
       "expectedArtifacts": [
         "report"
       ]
     }
-  ],
-  "sources": [],
-  "files": [
-    "LICENSE",
-    "agents/analyst.md",
-    "agents/chief.md",
-    "agents/judge.md",
-    "agents/radar.md",
-    "agents/recommender.md",
-    "agents/venture.md",
-    "collaboration/SKILL.md",
-    "collaboration/workflow.json",
-    "manifest.json",
-    "skills/analyst-method/SKILL.md",
-    "skills/chief-method/SKILL.md",
-    "skills/judge-method/SKILL.md",
-    "skills/radar-method/SKILL.md",
-    "skills/recommender-method/SKILL.md",
-    "skills/venture-method/SKILL.md"
   ]
 }

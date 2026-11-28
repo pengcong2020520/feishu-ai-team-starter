@@ -39,11 +39,12 @@ export async function installNewtype(root = process.cwd(), fetchImpl = fetch) {
       if (!instructions) throw Error(`无法解析上游角色 ${id}，停止适配`);
       await write(`upstream/${id}.toml`, toml);
       const adaptation = `\n\n## 飞书适配（本平台修改）\n用户已选择本团队，由平台执行角色调度；不要调用 spawn/wait/close、安装器、Bash 或修改全局配置。你只执行本次指定的角色任务，输出中文。跨角色交接通过项目文件，由平台决定下一步。必须使用 team:${id}-method 技能。只读本项目上下文；实际产物写入 ${folder}/。检索使用 mcp__research__search，网页读取用 mcp__research__read_url；工具不可用时记录缺口，不编造检索。PDF、音视频当前需用户提供提取文本。\n`;
-      await write(`agents/${id}.md`, instructions + adaptation);
+      const evidence = '\n来源审计：公开网页读取后由平台保存 context/source-ledger.jsonl 和 context/sources/，优先读这些缓存，保留 sourceId、URL、抓取时间与原文所属日期。搜索摘要不能充当已核实全文。用户提供的材料标为用户材料；演示材料不写成外部事实。确认审计：归档前读 context/approvals.json，只描述记录中的关口、动作、时间、actor 和 source；local 表示本机入口，admin 表示管理员代办，均不能据此声称某真人已经逐字审阅。没有记录就标记确认来源未知，不编造签字或通过结论。\n';
+      await write(`agents/${id}.md`, instructions + adaptation + evidence);
       const sid = id + '-method';
-      await write(`skills/${sid}/SKILL.md`, `---\nname: ${sid}\ndescription: ${description}\n---\n\n本技能改编自 Newtype，原始许可 SUL-1.0，参见包内 THIRD_PARTY_NOTICES.md。\n\n${instructions}${adaptation}\n以本次任务列出的文件为交付契约。引用资料时给出来源、日期和不确定性。\n`);
+      await write(`skills/${sid}/SKILL.md`, `---\nname: ${sid}\ndescription: ${description}\n---\n\n本技能改编自 Newtype，原始许可 SUL-1.0，参见包内 THIRD_PARTY_NOTICES.md。\n\n${instructions}${adaptation}${evidence}\n以本次任务列出的文件为交付契约。引用资料时给出来源、日期和不确定性。\n`);
       definitions.push({ id, name, description, prompt: `agents/${id}.md`, skills: [sid], tools: ['Read', 'Write', 'Edit', 'Glob', 'Skill', ...(network ? ['WebFetch', 'WebSearch'] : [])], read, write: [folder], memory: 'project', model: ['chief', 'writer'].includes(id) ? 'strong' : 'default', color: 'purple' });
-      skills.push({ id: sid, version: '1.0.0', path: `skills/${sid}/SKILL.md`, description, inputs: ['用户简报', '当前项目已有资料'], outputs: [folder + '/result.md'], tools: ['Read', 'Write', ...(network ? ['WebFetch', 'WebSearch'] : [])], resources: [] });
+      skills.push({ id: sid, version: '1.0.1', path: `skills/${sid}/SKILL.md`, description, inputs: ['用户简报', '当前项目已有资料'], outputs: [folder + '/result.md'], tools: ['Read', 'Write', ...(network ? ['WebFetch', 'WebSearch'] : [])], resources: [] });
       artifacts.push({ id, name: description, path: `${folder}/result.md`, format: 'markdown' });
     }
     artifacts.push({ id: 'archive-note', name: '已确认内容归档', path: '.newtype/knowledge/accepted.md', format: 'markdown' });
@@ -63,11 +64,12 @@ export async function installNewtype(root = process.cwd(), fetchImpl = fetch) {
     const workflow = { entry: 'planning', coordinator: 'chief', relations: definitions.map(r => ({ from: 'chief', to: r.id, kind: 'dispatch' })), nodes: [
       { id: 'planning', name: '选择协作方案', type: 'plan', role: 'deputy', skills: ['deputy-method'], prompt: '依据用户目标选择最小够用方案，只返回声明任务的 id 和依赖，不创建新角色。简单讨论仅 synthesis；已有草稿选 edit，不要无故 draft；新事实研究选 research 与必要核查；有资料先 extract；有历史知识先 lookup。synthesis 为最后一项。依赖按目录中的 after 约束执行（仅对选中的任务生效）。', tasks, required: ['synthesis'], final: 'synthesis', next: 'accept' },
       { id: 'accept', name: '验收内容', type: 'gate', role: 'chief', approval: 'accept', next: 'archive', reject: 'planning' },
-      { id: 'archive', name: '归档确认内容', type: 'task', role: 'archivist', skills: ['archivist-method'], prompt: '将人工已确认的 report/result.md 结论、来源及可复用知识归档至 .newtype/knowledge/accepted.md。只在当前项目保存。', outputs: ['archive-note'], next: 'done' },
+      { id: 'archive', name: '归档确认内容', type: 'task', role: 'archivist', skills: ['archivist-method'], prompt: '先读 context/approvals.json，核对 accept 关口最新 confirm 记录；按实际记录写确认入口、操作者和时间，不推断真人已阅读。将 report/result.md 的结论、来源及可复用知识归档至 .newtype/knowledge/accepted.md；附未证实事项和来源审计。只在当前项目保存。', outputs: ['archive-note'], next: 'done' },
       { id: 'done', name: '已完成', type: 'done' },
     ] };
     await write('collaboration/workflow.json', JSON.stringify(workflow, null, 2));
-    const manifest = { schemaVersion: 1, runtime: 'feishu-team/1', id: 'newtype-editorial', name: '文枢 · Newtype 内容团队', version: '1.0.0', description: 'Newtype 八角色的飞书适配；按目标选择研究、提取、写作、编辑、核查和归档。', author: 'newtype-01; Feishu adapter contributors', license: 'SUL-1.0', workflow: 'collaboration/workflow.json', collaboration: 'collaboration/SKILL.md', files: [...files].sort(), roles: definitions, skills, workspace: { directories, templates: [{ source: 'workspace/inputs.md', target: 'inputs/README.md' }] }, artifacts, examples: [{ name: '编辑已有短文', demand: '编辑这段文字为清楚简洁的短文：我们把团队工作过程分成角色定义、技能和协作规范，让一套本地验证过的流程可以被别人安装复现。不增加未经验证的新事实。', expectedArtifacts: ['editor', 'chief', 'archive-note'] }], sources: [{ url: 'https://github.com/newtype-01/newtype-codex', revision: NEWTYPE_REVISION, license: 'SUL-1.0', notice: 'THIRD_PARTY_NOTICES.md' }] };
+    await write('examples/author-mapping.md', '# Newtype 飞书映射\n\n保留八角色原文与协作规范，原文在 upstream/。宿主 spawn/wait 调度映射为 workflow 的限定任务目录；副主编规划、主编汇总、用户关口确认后归档。只使用项目内知识，公开来源由 research MCP 读取，原始网页缓存与确认事件由平台记录。PDF/音视频提取、跨项目知识和全局宿主安装未接入。许可 SUL-1.0 的限制与来源不确定性见 THIRD_PARTY_NOTICES.md。\n');
+    const manifest = { schemaVersion: 1, runtime: 'feishu-team/1', id: 'newtype-editorial', name: '文枢 · Newtype 内容团队', version: '1.0.1', description: 'Newtype 八角色的飞书适配；按目标选择研究、提取、写作、编辑、核查和归档。', author: 'newtype-01; Feishu adapter contributors', license: 'SUL-1.0', workflow: 'collaboration/workflow.json', collaboration: 'collaboration/SKILL.md', files: [...files].sort(), roles: definitions, skills, workspace: { directories, templates: [{ source: 'workspace/inputs.md', target: 'inputs/README.md' }] }, artifacts, examples: [{ name: '编辑已有短文', demand: '编辑这段文字为清楚简洁的短文：我们把团队工作过程分成角色定义、技能和协作规范，让一套本地验证过的流程可以被别人安装复现。不增加未经验证的新事实。', expectedArtifacts: ['editor', 'chief', 'archive-note'] }], sources: [{ url: 'https://github.com/newtype-01/newtype-codex', revision: NEWTYPE_REVISION, license: 'SUL-1.0', notice: 'THIRD_PARTY_NOTICES.md' }] };
     await write('manifest.json', JSON.stringify(manifest, null, 2));
     return await installPackage(dir, root);
   } finally { await rm(dir, { recursive: true, force: true }); }

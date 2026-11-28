@@ -319,3 +319,13 @@ test('扫管理员助手的码没拿到扫码人的身份：不写半截配置�
   assert.doesNotMatch(env0(root), /FEISHU_ADMIN_APP_ID/);
   assert.match(text, /AI 管理员助手没建成（没拿到扫码人的身份，请用飞书手机版重扫这一张码）/);
 });
+
+test('安装可选择审核模式，只更新配置，不扫码或重启已有项目', async () => {
+  const root = setupRoot(MODEL + BOTS), { deps, calls } = fakes();
+  const logs=[];
+  assert.equal(await runSetup({ root, argv:['review','auto'], deps, log:x=>logs.push(x) }),0);
+  assert.match(readFileSync(path.join(root,'.env'),'utf8'),/TEAM_REVIEW_MODE=auto/);
+  assert.equal(calls.scan.length,0);assert.equal(calls.service,0);assert.equal(calls.stop,0);
+  assert.equal(await runSetup({ root, argv:['review','invalid'], deps, log:()=>{} }),1);
+  assert.match(readFileSync(path.join(root,'.env'),'utf8'),/TEAM_REVIEW_MODE=auto/);
+});

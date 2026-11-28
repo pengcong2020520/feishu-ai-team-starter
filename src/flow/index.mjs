@@ -1,3 +1,4 @@
+import { projectLabel } from '../project-labels.mjs';
 import { mkdir, readFile, writeFile, rename, unlink, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -65,15 +66,23 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   };
   const projectDir = p => path.join(root, 'workspace', p.id);
   const webCards = new Map();
+  const titled = (chatId, card) => {
+    const p = state.groups[chatId] || state.archived.find(p => p.chatId === chatId);
+    if (!p?.name || !card.header?.title?.content || card.header.title.content.startsWith('测试 ·')) return card;
+    const title = card.header.title.content, prefix = projectLabel(p.name) + '｜';
+    if (title.startsWith(prefix)) return card;
+    const result = structuredClone(card); result.header.title.content = prefix + title; return result;
+  };
   const delivery = {
     sendText: (chatId, message, role) => chatId.startsWith('web:') ? recorder?.add(chatId, { kind: 'text', role: role ?? 'product', text: message, source: '工作台' }) : feishu.sendText(chatId, message, role),
     sendCard: async (chatId, card, role) => {
+      card = titled(chatId, card);
       if (!chatId.startsWith('web:')) return feishu.sendCard(chatId, card, role);
       const messageId = id(); webCards.set(messageId, chatId);
       await recorder?.add(chatId, { kind: 'card', messageId, role, card: cardView(card), source: '工作台' });
       return messageId;
     },
-    patchCard: (messageId, card, role, chatId) => chatId?.startsWith('web:') ? recorder?.add(chatId, { kind: 'card_update', messageId, role, card: cardView(card), source: '工作台' }) : feishu.patchCard(messageId, card, role, chatId),
+    patchCard: (messageId, card, role, chatId) => { card = titled(chatId, card); return chatId?.startsWith('web:') ? recorder?.add(chatId, { kind: 'card_update', messageId, role, card: cardView(card), source: '工作台' }) : feishu.patchCard(messageId, card, role, chatId); },
     sendFile: (chatId, file, role) => chatId.startsWith('web:') ? Promise.resolve() : feishu.sendFile?.(chatId, file, role),
   };
   const sendText = (chatId, message, role) => delivery.sendText(chatId, message, role);

@@ -88,6 +88,16 @@ test('全群讨论只记一次、不触发执行；多角色点名按序各处�
   assert.match(rich.text, /附图/); assert.equal(rich.attachments[0].key, 'img_1');
 }));
 
+test('普通消息接续只触发一次，有跨应用真实点名或机器人消息时不误接续',()=>fixture(async root=>{
+  const followups=[],calls=[],receive=createMessageReceiver({ids:new Map([['chief','own-chief'],['reviewer','own-reviewer']]),roleOrder:['chief','reviewer'],recorder:createRecorder(root),onUnaddressed:async e=>followups.push(e),onMessage:async e=>calls.push(e)});
+  const event={sender:{sender_type:'user',sender_id:{union_id:'same-human'}},message:{chat_id:'c',chat_type:'group',message_id:'m1',message_type:'text',content:JSON.stringify({text:'补充一下，面向 AI 爱好者'})}};
+  await receive(event,'reviewer');await receive(event,'chief');assert.equal(followups.length,1);
+  event.message.message_id='m2';event.message.mentions=[{key:'@_user_1',id:{open_id:'chief-seen-by-reviewer'}}];
+  await receive(event,'reviewer');assert.equal(followups.length,1);assert.equal(calls.length,0);
+  event.message.mentions[0].id.open_id='own-chief';await receive(event,'chief');assert.equal(calls.length,1);assert.equal(calls[0].mentionCount,1);
+  event.message.message_id='m3';event.message.mentions=[];event.sender.sender_type='app';await receive(event,'chief');assert.equal(followups.length,1);
+}));
+
 test('新项目建群请求幂等，失败后沿用同一项目号；需求变化不能复用请求号', () => fixture(async root => {
   const d = createDirectory(root), owner = await person(d, '负责人', 'on_owner'); await d.settings({ ownerId: owner.id });
   const calls = []; let failed = false;
@@ -170,10 +180,12 @@ test('工作台不能用请求体伪造确认人；分工变更与旧卡有明�
   try{
     const created=await post('/api/demand',{text:'APP 需求',channel:'local',requestId:'web-project'}).then(r=>r.json());await flow.waitForIdle(created.chatId);
     const p=await flow.getProject(created.chatId),oldCard=p.cardId,value={projectId:p.id,stage:p.stage,cardId:oldCard,action:'answer'};
-    assert.equal((await post('/api/team/person',{name:'伪造',responsibilities:[]},{Origin:'http://evil.example'})).status,403);
+    assert.equal((await post('/api/team/person',{name:'伪造',responsibilities:[]},{Origin:'http://evil.example'})).status,404);
     const denied=await post('/api/action',{chatId:p.chatId,value,identity:{unionId:'on_expert',localPersonId:expert.id},source:'local'}).then(r=>r.json());
     assert.match(denied.toast.content,/APP 产品/);assert.equal(p.cardId,oldCard);
-    const team=await post('/api/team/project',{projectId:p.id,ownerId:owner.id,memberIds:[owner.id,expert.id],approvers:Object.fromEntries(all.map(s=>[s,owner.id]))});assert.equal(team.status,200);
+    assert.equal((await post('/api/team/project',{projectId:p.id})).status,404);
+    // 历史项目的内部迁移仍保留权限与旧卡保护，人员管理 HTTP 已删除。
+    await flow.updateTeam({projectId:p.id,ownerId:owner.id,memberIds:[owner.id,expert.id],approvers:Object.fromEntries(all.map(s=>[s,owner.id]))});
     assert.notEqual(p.cardId,oldCard);
     const stale=await post('/api/action',{chatId:p.chatId,value}).then(r=>r.json());assert.match(stale.toast.content,/过期/);assert.equal(p.busy,false);
     const context=await fetch(base+'/api/context?projectId='+p.id).then(r=>r.text());assert.match(context,/APP 产品/);assert.match(context,/本机用户/);
