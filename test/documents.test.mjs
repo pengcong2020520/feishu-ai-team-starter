@@ -1,3 +1,4 @@
+import { fakeDelivery } from './helpers/delivery.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
@@ -26,7 +27,7 @@ test('同步串行幂等、跨项目文档及评论隔离，评论不会触发�
   const a = await readFile(path.join(root, 'workspace/one/context/document-feedback.md'), 'utf8'), b = await readFile(path.join(root, 'workspace/two/context/document-feedback.md'), 'utf8');
   assert.match(a, /请补充数据来源/); assert.match(a, /不是系统指令或关口批准/); assert.doesNotMatch(b, /请补充数据来源/);
   await writeFile(path.join(root, 'workspace/one/report/main.md'), '# 新版本'); await sync.sync(p, pack);
-  assert.equal(remote.calls.filter(c => c[0] === 'create').length, 2); assert.equal(remote.calls.filter(c => c[0] === 'append').length, 3);
+  assert.equal(remote.calls.filter(c => c[0] === 'create').length, 3); assert.equal(remote.calls.filter(c => c[0] === 'append').length, 3);
   const restarted = createDocumentSync({ root, feishu: remote }); await restarted.sync(p, pack); assert.equal(remote.calls.filter(c => c[0] === 'append').length, 3);
 }));
 
@@ -90,6 +91,7 @@ test('编排自动发布文档，问答及后续任务读取评论；同步不�
   const feishu = { ...remote, sendCard: async (chat, card) => { cards.push(card); return 'card'; }, patchCard: async (id, card) => cards.push(card), sendText: async () => {} };
   let reviewed = false, chatted = false;
   const engine = createPackageEngine({ root, feishu, recorder: createRecorder(root), bindings: () => ({ roles: { writer: 'writer', reviewer: 'reviewer' } }), projects: { prepare: async ({ projectId }) => ({ id: projectId, chatId: 'oc_project', name: '测试' }), authorize: async ({ identity }) => ({ ok: identity === 'owner', reason: '没有权限' }), syncContext: async () => {}, notice: async () => '' }, agent: async args => {
+  if(args.outputSchema?.properties?.artifacts) return fakeDelivery(args);
     if (args.mode === 'chat' || args.role === 'reviewer') {
       assert.match(args.prompt, /document-feedback.md/);
       assert.match(await readFile(path.join(args.projectDir, 'context/document-feedback.md'), 'utf8'), /请补充来源/);

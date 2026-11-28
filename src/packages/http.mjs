@@ -20,6 +20,7 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
         reply(200, source); return true;
       }
       if (url.pathname === '/api/packages/artifact') { reply(200, await engine.artifact(url.searchParams.get('projectId'), url.searchParams.get('artifactId'))); return true; }
+      if (url.pathname === '/api/packages/archive') { reply(200, await engine.archive(url.searchParams.get('projectId'))); return true; }
       if (url.pathname === '/api/packages/evidence') { reply(200, await engine.evidence(url.searchParams.get('projectId'))); return true; }
       reply(404, { error: '未找到' }); return true;
     }
@@ -51,6 +52,7 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
       reply(200, await engine.create({ package: data.package, text: data.text, requestId: data.requestId, options, ...event })); return true;
     }
     if (typeof data.chatId !== 'string' || !await engine.get(data.chatId)) throw Error('项目不存在');
+    if (url.pathname === '/api/packages/archive') { reply(200, await engine.refreshArchive({ chatId: data.chatId, ...event })); return true; }
     if (url.pathname === '/api/packages/name') { reply(200, await engine.renameProject({ chatId: data.chatId, name: data.name, ...event })); return true; }
     if (url.pathname === '/api/packages/documents') { reply(200, await engine.syncDocuments({ chatId: data.chatId, ...event })); return true; }
     if (url.pathname === '/api/packages/action') {

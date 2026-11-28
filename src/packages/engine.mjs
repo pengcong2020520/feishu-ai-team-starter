@@ -1,3 +1,5 @@
+import { createArchives, finalArtifactIds } from './archive.mjs';
+import { inspectDelivery } from './delivery-quality.mjs';
 import { artifactLabel, taskLabel } from './presentation.mjs';
 import { routingSchema, routingPrompt, validRouting, replyReference, isAcknowledgement, closesConversation } from './group-routing.mjs';
 import { readEnv } from '../setup/env-file.mjs';
@@ -85,6 +87,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
   }
   const value = (p, action) => ({ action: `package_${action}`, projectId: p.id, stage: p.stage, cardId: p.cardId });
   const documents = createDocumentSync({ root, feishu, onFeedback: (p, count) => record(p, { kind: 'text', actor: '文档同步', text: `已同步 ${count} 条文档评论更新；后续任务会参考，流程确认仍以按钮为准。` }) });
+  const archives = createArchives({ root, agent, recorder });
   let documentTimer;
   async function reviewStamp(p, pack, tasks) {
     const files = {};
@@ -178,7 +181,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
     if(!p.chatId.startsWith('web:')&&offer.replyId)await feishu.patchCard(offer.replyId,card,botFor(p,role),p.chatId);
     else await record(p,{kind:'card_update',messageId:offer.replyId,role,card:cardView(card)});
   }
-  async function runTask(p, pack, task, key, outputSchema) {
+  async function runTask(p, pack, task, key, outputSchema, repairRound = 0) {
     const control = {}, live = controls.get(p.id) || new Map(); controls.set(p.id, live); live.set(key, control);
     const definition = await roleDefinition(pack, task.role, root), used = new Set();
     if (p.reviewMode === 'auto') definition.sharedPrompt += '\n\n## 平台执行模式（优先于包内一般确认措辞）\n' + automaticReviewPolicy;
@@ -207,7 +210,19 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
       if (!result.ok) throw Error(result.error || 'Agent 未完成任务');
       for (const skill of task.skills) if (!used.has(`team:${skill}`) && !used.has(skill)) throw Error(`本步必需技能未加载成功：${skill}`);
       if (result.sessionId && !task.freshSession && !outputSchema) p.sessions[task.role] = result.sessionId;
-      if (!outputSchema) { await validateOutputs(pack, task, dir(p), round); await documentSync(p, pack, { ids: task.outputs || [], status: '阶段交付' }); }
+      if (!outputSchema) {
+        await validateOutputs(pack, task, dir(p), round);
+        if (task.validator === 'files' && (task.outputs || []).some(id => finalArtifactIds(pack).includes(id) && pack.manifest.artifacts.find(a => a.id === id)?.format === 'markdown')) {
+          p.activity = '检查成品内容'; p.activities[task.role].text = p.activity;
+          const quality = await inspectDelivery({ root, p, pack, task, agent, control, onQueued: waiting => { p.activities[task.role].status = waiting ? 'queued' : 'running'; } });
+          (p.deliveryReviews ||= []).push({ ...quality, at: new Date().toISOString(), task: key, repairRound }); await save();
+          if (!quality.passed) {
+            if (repairRound >= 2 || p.stopRequested) throw Error('成品检查未通过：' + (quality.blockers.join('；') || quality.summary));
+            await record(p, { kind: 'text', role: task.role, text: '成品检查发现需要修正的内容，正在完善后重新检查。' });
+            return await runTask(p, pack, { ...task, prompt: task.prompt + '\n成品检查发现以下问题，请在原文件中修正，不能只回复解释或让用户代改：' + (quality.blockers.join('；') || quality.summary) }, key, undefined, repairRound + 1);
+          }
+        }
+        await documentSync(p, pack, { ids: task.outputs || [], status: '阶段交付' }); }
       // 计划结果是供编排校验的结构化数据，不能从 JSON 中抽句子作为群聊摘要。
       const summary = outputSchema ? '协作方案已提交，核对后将按步骤继续。' : publicReply(result.text, { fallback: `「${task.name}」已提交，完整内容可在项目工作台查看。` });
       p.lastReply = summary;
@@ -605,6 +620,8 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
       }
     },
     async list() { await ready; return copy(state.projects); },
+    async archive(id) { await ready; const p = find(id); if (!p) throw Error('项目不存在'); return archives.view(p, await packFor(p), { full: true }); },
+    async refreshArchive(event) { await ready; const p = find(event.chatId); if (!p) throw Error('项目不存在'); await allowed(p, event, 'discuss'); return archives.refresh(copy(p), await packFor(p)); },
     async snapshot() {
       await ready;
       return Promise.all(state.projects.map(async p => {
@@ -618,7 +635,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
           artifacts.push({ id: a.id, name: artifactLabel(pack, { artifactId: a.id, name: a.name }), title: /^#\s+(.+)$/m.exec(file.text)?.[1]?.slice(0,160), format: a.format, updatedAt: file.updatedAt, role: writer, task: history?.task });
         } catch (e) { if (e.code !== 'ENOENT') throw e; } }
         const taskNames = Object.fromEntries((pack.workflow.nodes.find(node => node.id === p.plan?.node)?.tasks || []).map(t => [t.id, t.name]));
-        return { ...copy(p), liveActivities: [...liveActivities.values()].filter(a => a.projectId === p.id).map(copy), contextProposal: p.contextProposal?.stamp === contextStamp(p) ? copy(p.contextProposal) : null, documents: await documents.view(p), definition: packageView(pack), taskNames, stageName: p.ended ? '已结束' : p.pendingReview ? p.pendingReview.label + ' · 待审核' : n.name, stageType: p.pendingReview ? 'gate' : n.type, stuckCardId: p.error ? p.cardId : null, source: p.chatId.startsWith('web:') ? '本机项目' : '飞书项目群', waitingFor: p.error ? '重试' : p.pendingReview ? '阶段审核' : n.type === 'gate' ? n.name : null, activeRole: p.running?.[0] || null, retryRole: n.role, approval: n.approval, artifacts, currentActions: p.error ? ['retry', 'end', ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? ['reject'] : [])] : p.busy ? ['stop'] : p.pendingReview ? ['confirm', 'reject'] : n.type === 'gate' ? n.questions ? ['answer'] : ['confirm', ...(n.reject ? ['reject'] : [])] : [], questions: n.questions === true ? JSON.parse(await readFile(path.join(dir(p), 'docs/questions.json'), 'utf8')) : null };
+        return { ...copy(p), archive: await archives.view(p, pack), finalArtifacts: finalArtifactIds(pack), liveActivities: [...liveActivities.values()].filter(a => a.projectId === p.id).map(copy), contextProposal: p.contextProposal?.stamp === contextStamp(p) ? copy(p.contextProposal) : null, documents: await documents.view(p), definition: packageView(pack), taskNames, stageName: p.ended ? '已结束' : p.pendingReview ? p.pendingReview.label + ' · 待审核' : n.name, stageType: p.pendingReview ? 'gate' : n.type, stuckCardId: p.error ? p.cardId : null, source: p.chatId.startsWith('web:') ? '本机项目' : '飞书项目群', waitingFor: p.error ? '重试' : p.pendingReview ? '阶段审核' : n.type === 'gate' ? n.name : null, activeRole: p.running?.[0] || null, retryRole: n.role, approval: n.approval, artifacts, currentActions: p.error ? ['retry', 'end', ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? ['reject'] : [])] : p.busy ? ['stop'] : p.pendingReview ? ['confirm', 'reject'] : n.type === 'gate' ? n.questions ? ['answer'] : ['confirm', ...(n.reject ? ['reject'] : [])] : [], questions: n.questions === true ? JSON.parse(await readFile(path.join(dir(p), 'docs/questions.json'), 'utf8')) : null };
       }));
     },
     async roleSource(projectId, role) { await ready; const p = find(projectId); if (!p) throw Error('项目不存在'); return roleSource(await packFor(p), role); },

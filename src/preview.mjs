@@ -1,3 +1,4 @@
+import { legacyArchiveService, legacyArchiveHttp } from './workbench/archives.mjs';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,6 +15,7 @@ const valid = id => /^[a-zA-Z0-9-]{1,80}$/.test(id);
 export const adminRequestAllowed = (via, header, token) => via !== 'admin' || Boolean(token && header === token);
 
 export async function startPreview({ root = process.cwd(), assetsRoot = root, host = '127.0.0.1', modelPort = 4871, workbenchPort = 4870, previewBase = `http://127.0.0.1:${modelPort}`, flow, feishu, recorder } = {}) {
+  const legacyArchives = flow && legacyArchiveService({ root, assetsRoot, flow, recorder, previewBase });
   const model = http.createServer(async (req, res) => {
     const match = /^\/p\/([^/]+)\/(wireframe|site)$/.exec(new URL(req.url, 'http://localhost').pathname);
     if (req.method !== 'GET' || !match || !valid(match[1])) return send(res, 404, '未找到', true, 'text/plain; charset=utf-8');
@@ -24,6 +26,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
     const url = new URL(req.url, 'http://localhost');
     const hostValue = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost):\d+$/.test(hostValue)) return send(res, 403, 'Host 不允许', false, 'text/plain; charset=utf-8');
+    if (legacyArchives && await legacyArchiveHttp({ req, res, url, service: legacyArchives, send })) return;
     if (await packageHttp({ req, res, url, root, flow, feishu, recorder, send })) return;
     const qr = /^\/connect\/([a-z][a-z0-9-]{0,63})\/(index\.html|status\.js|[a-z][a-z0-9-]{0,63}\.png)$/.exec(url.pathname);
     if (req.method === 'GET' && qr) {
@@ -103,7 +106,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       try { return send(res, 200, await readFile(path.join(root, 'workspace', p.id, 'docs/questions.json'), 'utf8'), false, 'application/json; charset=utf-8'); }
       catch { return send(res, 404, '问题尚未生成', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs', '/teams.js', '/teams.css', '/team-board.mjs', '/team-ui.mjs', '/role-portraits.mjs', '/team-entry.mjs', '/cyber.css'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs', '/teams.js', '/teams.css', '/team-board.mjs', '/team-ui.mjs', '/team-archive.mjs', '/role-portraits.mjs', '/team-entry.mjs', '/cyber.css'].includes(url.pathname)) {
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web', url.pathname.slice(1)), 'utf8'), false, url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8'); }
       catch { return send(res, 404, '资源不存在', false, 'text/plain; charset=utf-8'); }
     }
