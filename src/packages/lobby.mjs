@@ -1,3 +1,4 @@
+import { projectLabel, projectGroupName } from '../project-labels.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -27,10 +28,10 @@ export function createPackageLobby({ root, engine, projects, feishu, recorder })
       if (!candidates.length) { await feishu.sendText(event.chatId, '请向这支团队的协调同事提出新目标，或在工作台“团队与项目”创建。', event.role); return true; }
       if (candidates.length !== 1) { await feishu.sendText(event.chatId, '这个机器人对应多个团队或版本，请在工作台“团队与项目”选择后创建项目。', event.role); return true; }
       if (!projects) { await feishu.sendText(event.chatId, '请先连接这支团队，再创建独立飞书项目群。', event.role); return true; }
-      const pack = candidates[0], proposal = { cardId: randomUUID(), requestId: randomUUID(), text: event.text, role: event.role, package: { id: pack.id, version: pack.version, hash: pack.hash }, identity: event.identity, source: event.source || 'feishu', sourceProjectId: event.sourceProjectId };
+      const pack = candidates[0], proposal = { cardId: randomUUID(), requestId: randomUUID(), text: event.text, name: projectLabel(event.text), role: event.role, package: { id: pack.id, version: pack.version, hash: pack.hash }, identity: event.identity, source: event.source || 'feishu', sourceProjectId: event.sourceProjectId };
       if (pending.has(event.chatId)) { await feishu.sendText(event.chatId, '正在创建刚才确认的项目，请稍后到新群继续。', event.role); return true; }
       state.proposals[event.chatId] = proposal; await save();
-      await feishu.sendCard(event.chatId, teamCard({ title: `${pack.name} · 要开始做吗？`, text: event.text, buttons: [{ label: '就按这个开始', primary: true, value: { action: 'package_start', projectId: 'new', stage: 'new', cardId: proposal.cardId } }] }), event.role);
+      await feishu.sendCard(event.chatId, teamCard({ title: `${pack.name} · 要开始做吗？`, text: `建议群名：${projectGroupName(proposal.name, pack.name)}\n有同名项目时会自动加编号。\n\n${event.text}`, buttons: [{ label: '就按这个开始', primary: true, value: { action: 'package_start', projectId: 'new', stage: 'new', cardId: proposal.cardId } }] }), event.role);
       return true;
     },
     async action(event) {
@@ -43,7 +44,7 @@ export function createPackageLobby({ root, engine, projects, feishu, recorder })
       try {
         const rows = await recorder?.list(event.chatId, { limit: Number.MAX_SAFE_INTEGER }) || [];
         const intake = proposal.sourceProjectId ? [] : rows.slice(state.cursors[event.chatId] || 0);
-        const p = await engine.create({ package: proposal.package, text: proposal.text, identity: event.identity, source: event.source || 'feishu', sourceChatId: event.chatId, requestId: proposal.requestId, options: { channel: 'feishu' }, intake });
+        const p = await engine.create({ package: proposal.package, text: proposal.text, identity: event.identity, source: event.source || 'feishu', sourceChatId: event.chatId, requestId: proposal.requestId, options: { channel: 'feishu', name: proposal.name }, intake });
         state.cursors[event.chatId] = rows.length;
         if (state.proposals[event.chatId]?.cardId === proposal.cardId) delete state.proposals[event.chatId]; await save();
         await feishu.sendText(event.chatId, `已创建「${p.name}」项目，请到独立项目群继续。${p.chatLink || ''}`, proposal.role); return { ok: true };

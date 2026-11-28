@@ -1,4 +1,4 @@
-import { projectLabel } from '../project-labels.mjs';
+import { projectLabel, teamLabel, projectGroupName } from '../project-labels.mjs';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -46,11 +46,15 @@ export function createProjectManager({ root = process.cwd(), feishu, recorder, d
           const team = await directory.plan({ text, scope: options.scope, ownerId: options.ownerId, memberIds: options.memberIds, approvers: options.approvers, identity, stages: options.approvalStages });
           if (channel === 'feishu' && !feishu?.createProjectGroup) throw Error('尚未连接飞书，请选择本机项目');
           if (channel === 'feishu' && team.people.some(p => !recipient(p, options.botRoles?.[0] || 'product'))) throw Error('项目发起人缺少本团队飞书身份，请先私聊团队负责人机器人或完成扫码连接');
-          request = { projectId, sourceChatId, text, fingerprint, name: projectLabel(text, options.name), team, channel, createdAt: new Date().toISOString() };
+          const topic = projectLabel(text, options.name), label = teamLabel(options.groupLabel);
+          const names = new Set(Object.values(registry.requests).filter(r => r.channel === channel).map(r => r.name));
+          let name = topic, number = 1;
+          while (names.has(name)) { const suffix = `（${++number}）`; name = Array.from(topic).slice(0, 24 - Array.from(suffix).length).join('') + suffix; }
+          request = { projectId, sourceChatId, text, fingerprint, name, groupLabel: label, groupName: projectGroupName(name, label), team, channel, createdAt: new Date().toISOString() };
           registry.requests[requestId] = request; await save();
         }
         if (!request.chatId) {
-          request.chatId = channel === 'local' ? `web:${request.projectId}` : await feishu.createProjectGroup({ projectId: request.projectId, name: request.name, groupLabel: options.groupLabel, team: request.team, ...(options.botRoles ? { botRoles: options.botRoles } : {}) });
+          request.chatId = channel === 'local' ? `web:${request.projectId}` : await feishu.createProjectGroup({ projectId: request.projectId, name: request.name, groupLabel: request.groupLabel || options.groupLabel, team: request.team, ...(options.botRoles ? { botRoles: options.botRoles } : {}) });
           await save();
         }
         // 飞书建群一次最多邀请 5 个机器人。群号先保存，再分批补齐大团队；
@@ -72,7 +76,7 @@ export function createProjectManager({ root = process.cwd(), feishu, recorder, d
           } catch (error) { request.invitationWarning = error.message; }
           await save();
         }
-        return { id: request.projectId, chatId: request.chatId, name: request.name, dedicated: true, team: request.team, sourceChatId, createdAt: request.createdAt, invitationWarning: request.invitationWarning || null, chatLink: channel === 'feishu' ? `https://applink.feishu.cn/client/chat/open?openChatId=${encodeURIComponent(request.chatId)}` : null };
+        return { id: request.projectId, chatId: request.chatId, name: request.name, groupName: request.groupName || projectGroupName(request.name, request.groupLabel || options.groupLabel), dedicated: true, team: request.team, sourceChatId, createdAt: request.createdAt, invitationWarning: request.invitationWarning || null, chatLink: channel === 'feishu' ? `https://applink.feishu.cn/client/chat/open?openChatId=${encodeURIComponent(request.chatId)}` : null };
       })().finally(() => inflight.delete(requestId));
       inflight.set(requestId, { fingerprint, task }); return task;
     },

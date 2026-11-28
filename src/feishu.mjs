@@ -1,3 +1,4 @@
+import { projectGroupName } from './project-labels.mjs';
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { cardView } from './workbench/recorder.mjs';
 import { createFeishuLogger } from './feishu-logger.mjs';
@@ -115,7 +116,7 @@ export function createFeishu({ credentials, onMessage, onAction, onDiscussion, o
       const owner = recipient(team.people.find(p => p.id === team.ownerId), creator);
       if (!owner) throw Error('项目负责人缺少飞书身份');
       const r = await call(() => clients[creator].im.v1.chat.create({ params: { user_id_type: owner.type, set_bot_manager: true, uuid: `project-${projectId}`.slice(0, 50) }, data: {
-        name: `${groupLabel} · ${name}`.slice(0, 80), description: '本群对应一个独立项目。讨论完整留档；@ AI 同事交流，按确认卡推进。',
+        name: projectGroupName(name, groupLabel), description: '本群对应一个独立项目。讨论完整留档；@ AI 同事交流，按确认卡推进。',
         owner_id: owner.id, user_id_list: [owner.id], bot_id_list: botRoles.filter(role => role !== creator).slice(0, 5).map(role => credentials[role].appId),
       } }));
       const chatId = r.data?.chat_id;
