@@ -11,6 +11,20 @@ import { createAssistant } from '../src/admin/assistant.mjs';
 const flush = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
+// 签字回调立即返回，Git 操作在后台执行；等结果卡，不能假设 CI 在 300ms 内完成。
+async function signAndWait(r, value) {
+  const before = r.patched.length;
+  const reply = await r.deploy.onSign(value);
+  if (reply !== '正在跑测试') return reply;
+  const deadline = Date.now() + 10000;
+  while (!r.patched.slice(before).some(p => !text(p.card).includes('正在跑测试'))) {
+    assert.ok(Date.now() < deadline, '签字后 10 秒内未收到测试或上线结果卡');
+    await flush(20);
+  }
+  return reply;
+}
+
+
 function repo() {
   const root = mkdtempSync(path.join(os.tmpdir(), 'admin-git-'));
   const files = { 'prompts/designer.md': '设计说明\n', 'src/flow/cards.mjs': 'export const a = 1;\n', 'src/admin/main.mjs': '// 管家自己\n', 'README.md': '说明\n', '.gitignore': '.admin-work/\ndata/\n' };
@@ -203,8 +217,7 @@ test('交代码类改动：发签字卡；点上线后跑测试、合并、重�
   assert.equal(live(r.root, 'src/flow/cards.mjs'), 'export const a = 1;\n');
   const sign = r.sent[0];
   assert.match(text(sign), /要上线这次代码改动吗？/);
-  assert.equal(await r.deploy.onSign({ ...valueOf(sign, '上线'), messageId: 'om_1' }), '正在跑测试');
-  await flush(300);
+  assert.equal(await signAndWait(r, { ...valueOf(sign, '上线'), messageId: 'om_1' }), '正在跑测试');
   assert.equal(live(r.root, 'src/flow/cards.mjs'), 'export const a = 2;\n');
   assert.equal(r.restarts(), 1);
   assert.match(text(r.patched.at(-1).card), /已上线，团队服务重启好了/);
@@ -217,8 +230,7 @@ test('点上线时有项目在干活：测试过了先等着，巡检发现空�
   await r.changes.ensure();
   edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
   await r.deploy.submit({ title: '改卡片', why: '要求' });
-  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-  await flush(300);
+  await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   assert.match(text(r.patched.at(-1).card), /#3 番茄钟 正在干活，我不打断它。做完后我会自动上线，不用再点/);
   assert.equal(r.restarts(), 0);
   await r.deploy.tick();
@@ -234,8 +246,7 @@ test('上线后团队服务起不来：自动 git revert 再重启，卡片说�
   await r.changes.ensure();
   edit(r.root, 'src/flow/cards.mjs', 'export const a = ;\n');
   await r.deploy.submit({ title: '改坏了', why: '演示' });
-  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-  await flush(400);
+  await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   assert.equal(r.restarts(), 2);
   assert.equal(live(r.root, 'src/flow/cards.mjs'), 'export const a = 1;\n');
   assert.match(text(r.patched.at(-1).card), /上线后团队服务起不来（起不来），已自动撤销。团队服务已恢复/);
@@ -258,8 +269,7 @@ test('点“不要”丢弃改动；管家又交了新改动时旧签字卡作�
   await f.changes.ensure();
   edit(f.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
   await f.deploy.submit({ title: '改卡片', why: '要求' });
-  await f.deploy.onSign({ ...valueOf(f.sent[0], '上线'), messageId: 'om_1' });
-  await flush(300);
+  await signAndWait(f, { ...valueOf(f.sent[0], '上线'), messageId: 'om_1' });
   assert.equal(f.restarts(), 0);
   assert.match(text(f.patched.at(-1).card), /测试没通过，没有上线。我接着改/);
   assert.match(f.handed[0], /在管理员同意后跑测试，测试没过（第 1 次，最多 3 次）[\s\S]*✖ 失败了/);
@@ -270,8 +280,7 @@ test('回退：代码类有项目在干活时不回退；空闲时回退并重�
   await r.changes.ensure();
   edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
   await r.deploy.submit({ title: '改卡片', why: '要求' });
-  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-  await flush(300);
+  await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   r.projects.push({ number: 4, name: '读书笔记', busy: true });
   const refused = await r.deploy.revert();
   assert.match(refused.error, /#4 读书笔记 正在干活/);
@@ -305,13 +314,11 @@ test('项目状态不可读时不重启、不上线、不撤销代码', async ()
   await r.deploy.submit({ title: '改卡片', why: '要求' });
   r.readable(false);
   assert.match((await r.deploy.restart()).error, /读不到项目状态，先不重启/);
-  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-  await flush(300);
+  await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   assert.match(text(r.patched.at(-1).card), /读不到项目状态，先不上线/);
   assert.equal(r.restarts(), 0);
   r.readable(true);
-  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-  await flush(300);
+  await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   r.readable(false);
   assert.match((await r.deploy.revert()).error, /读不到项目状态，先不撤销/);
   assert.equal(r.restarts(), 1);
@@ -323,8 +330,7 @@ test('上线失败且自动撤销失败时说明线上仍是这次改动并提�
   edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
   await r.deploy.submit({ title: '改卡片', why: '要求' });
   r.changes.revert = async () => ({ ok: false, error: '撤销冲突' });
-  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-  await flush(350);
+  await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   assert.match(text(r.patched.at(-1).card), /自动撤销也没成功，线上还是这次改动。请让搭团队的助手看 data\/service.log/);
   assert.equal(r.down.length, 1);
   assert.equal(live(r.root, 'src/flow/cards.mjs'), 'export const a = 2;\n');
@@ -354,8 +360,7 @@ test('多个项目干活时通过测试也等它们做完', async () => {
   await r.changes.ensure();
   edit(r.root, 'src/flow/cards.mjs', 'export const a = 2;\n');
   await r.deploy.submit({ title: '改卡片', why: '要求' });
-  await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-  await flush(300);
+  await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
   assert.match(text(r.patched.at(-1).card), /#3 番茄钟、#4 读书笔记 正在干活，我不打断它们。做完后我会自动上线，不用再点/);
 });
 
@@ -371,8 +376,7 @@ test('线上有未提交文件或提交已变化时签字卡说清没有上线',
       git(r.root, 'add', 'README.md');
       git(r.root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'later');
     }
-    await r.deploy.onSign({ ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
-    await flush(350);
+    await signAndWait(r, { ...valueOf(r.sent[0], '上线'), messageId: 'om_1' });
     const card = text(r.patched.at(-1).card);
     assert.match(card, kind === 'dirty' ? /没上线：线上目录里有人改了还没提交的文件（README.md），先处理掉再上线。这次改动已取消，线上没变/ : /没上线：线上代码在这期间变了，没法直接合并。跟我说一声，我按现在的代码再改一次。这次改动已取消，线上没变/);
     assert.equal(r.restarts(), 0);
