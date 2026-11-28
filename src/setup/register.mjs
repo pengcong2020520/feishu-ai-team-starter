@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { qrPage, qrStatusScript } from './qr-page.mjs';
 
 // 建应用时一并申请的权限、事件和回调（默认已带建群权限，这里再写一次只增不减）
 export const ADDONS = {
@@ -34,7 +35,8 @@ export function installRetry(http, { retries = 5, delayMs = 1000, log = () => {}
 }
 
 export async function registerRole({ lark, role, signal, onQr }) {
-  const addons = role.p2p ? ADMIN_ADDONS : role.mode === 'projects' || role.existingAppId ? PROJECT_ADDONS : ADDONS;
+  let addons = role.p2p ? ADMIN_ADDONS : role.mode === 'projects' || role.existingAppId ? PROJECT_ADDONS : ADDONS;
+  if (role.documents) addons = { ...addons, scopes: { tenant: [...new Set([...addons.scopes.tenant, 'docx:document', 'docs:permission.member:create'])] } };
   const result = await lark.registerApp({ ...(role.existingAppId ? { appId: role.existingAppId } : { createOnly: true }), signal, appPreset: { name: role.name, desc: role.desc }, addons, onQRCodeReady: onQr });
   if (role.existingAppId && result.client_id !== role.existingAppId) throw Error('返回的应用与现有机器人不一致，已停止，不替换机器人');
   return { appId: result.client_id, appSecret: result.client_secret, openId: result.user_info?.open_id ?? null };
@@ -45,36 +47,35 @@ export function openFile(file) {
   try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref(); } catch {}
 }
 
-const esc = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+export function registrationView(entries, teamName) {
+  return { teamName, phase: entries.every(e => e.done || e.error) ? entries.some(e => e.error) ? 'error' : 'created' : 'scanning', roles: entries.map(e => ({ key: e.role.key, name: e.role.name, desc: e.role.desc, capabilities: e.role.capabilities || [], updating: Boolean(e.role.existingAppId), state: e.done ? 'created' : e.error ? 'error' : 'waiting', url: e.url, version: e.version })) };
+}
 
-// 只有二维码的本地页面，每 3 秒自己刷新
-export async function writeQrPage({ qrDir, qrcode, entries }) {
+export async function writeQrPage({ qrDir, qrcode, entries, teamName }) {
   mkdirSync(qrDir, { recursive: true });
-  const cells = [];
-  const updating = entries.some(e => e.role.existingAppId);
   for (const e of entries) {
-    let body = '<p>正在生成二维码…</p>';
-    if (e.done) body = `<p class="ok">✓ 已${e.role.existingAppId ? '更新权限' : '创建'}</p>`;
-    else if (e.url) {
-      await qrcode.toFile(path.join(qrDir, `${e.role.key}.png`), e.url, { width: 360, margin: 1 });
-      body = `<img src="${e.role.key}.png?v=${e.version}" alt="${esc(e.role.name)} 的二维码"><p><a href="${esc(e.url)}">二维码扫不了时点这里</a></p>`;
+    if (!e.done && !e.error && e.url && e.renderedVersion !== e.version) {
+      await qrcode.toFile(path.join(qrDir, `${e.role.key}.png`), e.url, { width: 400, margin: 4 });
+      e.renderedVersion = e.version;
     }
-    cells.push(`<section><h2>${esc(e.role.name)}</h2>${body}</section>`);
   }
-  writeFileSync(path.join(qrDir, 'index.html'), `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta http-equiv="refresh" content="3"><title>${updating ? "更新现有机器人权限" : "扫码创建飞书机器人"}</title><style>body{font:16px system-ui;background:#f1f4fa;color:#1f2329;margin:0;padding:32px}h1{font-size:22px}main{display:flex;gap:24px;flex-wrap:wrap}section{background:#fff;border-radius:12px;padding:20px;width:340px;text-align:center;box-shadow:0 4px 16px #0001}img{width:300px;height:300px}.ok{color:#2a9d5c;font-size:20px}</style><h1>${updating ? "用飞书手机版扫码，确认给现有机器人增补权限（不新建）" : "用飞书手机版逐个扫码，并在手机上确认创建"}</h1><main>${cells.join('')}</main></html>`);
+  const state = registrationView(entries, teamName);
+  writeFileSync(path.join(qrDir, 'status.js'), qrStatusScript(state));
+  writeFileSync(path.join(qrDir, 'index.html'), qrPage(state));
 }
 
 const timeoutError = () => Object.assign(new Error('等待扫码超时'), { code: 'timeout' });
 
 // 给缺凭证的角色各出一张码并行等待；过期自动换码；每建成一个立即 save
-export async function registerMissing({ lark, qrcode, roles, qrDir, save, timeoutMs = 540000, retryDelayMs = 3000, open = openFile, log = console.log }) {
+export async function registerMissing({ lark, qrcode, roles, qrDir, save, timeoutMs = 540000, retryDelayMs = 3000, open = openFile, log = console.log, teamName, onUpdate = () => {} }) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
   const entries = roles.map(role => ({ role, url: null, done: false, version: 0 }));
   let opened = false;
   let writing = Promise.resolve();
-  const refresh = () => (writing = writing.then(() => writeQrPage({ qrDir, qrcode, entries })).then(() => {
-    if (!opened && entries.every(e => e.url || e.done)) { opened = true; open(path.join(qrDir, 'index.html')); }
+  const refresh = () => (writing = writing.then(() => writeQrPage({ qrDir, qrcode, entries, teamName })).then(() => {
+    onUpdate(registrationView(entries, teamName));
+    if (!opened && entries.every(e => e.url || e.done || e.error)) { opened = true; open(path.join(qrDir, 'index.html')); }
   }));
   const one = async entry => {
     while (!abort.signal.aborted) {
@@ -101,7 +102,7 @@ export async function registerMissing({ lark, qrcode, roles, qrDir, save, timeou
     throw timeoutError();
   };
   try {
-    const settled = await Promise.allSettled(entries.map(one));
+    const settled = await Promise.allSettled(entries.map(entry => one(entry).catch(async error => { entry.error = true; entry.url = null; await refresh(); throw error; })));
     await writing;
     return settled.map((s, i) => ({ role: roles[i], ok: s.status === 'fulfilled', error: s.status === 'rejected' ? s.reason : null }));
   } finally {

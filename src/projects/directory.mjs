@@ -15,9 +15,9 @@ export const matchesIdentity = (person, identity = {}) => Boolean(
   identity.userId && person.identity?.userId === identity.userId ||
   identity.openId && identity.role && person.identity?.openIds?.[identity.role] === identity.openId
 );
-export const recipient = person => person?.identity?.unionId ? { id: person.identity.unionId, type: 'union_id' }
+export const recipient = (person, role = 'product') => person?.identity?.unionId ? { id: person.identity.unionId, type: 'union_id' }
   : person?.identity?.userId ? { id: person.identity.userId, type: 'user_id' }
-  : person?.identity?.openIds?.product ? { id: person.identity.openIds.product, type: 'open_id' } : null;
+  : person?.identity?.openIds?.[role] ? { id: person.identity.openIds[role], type: 'open_id' } : null;
 
 export function createDirectory(root = process.cwd()) {
   const file = path.join(root, 'data/team.json');
@@ -62,13 +62,18 @@ export function createDirectory(root = process.cwd()) {
       });
     },
     settings({ ownerId }) { return mutate(() => { if (!state.people.some(p => p.id === ownerId && p.active)) throw Error('请选择有效的本机操作者'); state.ownerId = ownerId; return state; }); },
+    ensureLocalOperator() { return mutate(() => {
+      let person = state.people.find(p => p.id === state.ownerId && p.active);
+      if (!person) { person = { id: randomUUID(), name: '本机操作者', active: true, identity: {}, responsibilities: [] }; state.people.push(person); state.ownerId = person.id; }
+      return person;
+    }); },
     async plan({ text = '', scope = '', ownerId, memberIds, approvers = {}, identity, stages = approvalStages } = {}) {
       const snapshot = await api.get();
       const people = snapshot.people.filter(p => p.active);
-      const creator = identity ? people.find(p => matchesIdentity(p, identity)) : null;
+      const creator = identity ? people.find(p => identity.localPersonId ? p.id === identity.localPersonId : matchesIdentity(p, identity)) : null;
       if (identity && (identity.openId || identity.unionId || identity.userId) && !creator) throw Error('没有找到已启用的发起人，请先核对人员名册中的飞书身份');
       const owner = people.find(p => p.id === (ownerId || creator?.id || snapshot.ownerId));
-      if (!owner) throw Error('请先在“人员与职责”添加人员并设置本机操作者');
+      if (!owner) throw Error('请先扫码连接团队，或私聊团队负责人机器人发起项目');
       const haystack = clean(scope || text, 4000).toLocaleLowerCase();
       const matched = person => person.responsibilities.filter(row => scopeMatches(haystack, row.scope.toLocaleLowerCase()));
       const selected = memberIds === undefined ? people.filter(p => matched(p).length).map(p => p.id) : memberIds;

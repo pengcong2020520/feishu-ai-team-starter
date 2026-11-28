@@ -96,7 +96,7 @@ export async function validateDesign(projectDir) {
             if (!Array.isArray(group.screens) || !group.screens.length) errors.push(`design-outline.groups[${gi}].screens：应为非空数组`);
             else group.screens.forEach((screen, si) => {
               requireFields(screen, ['id', 'title'], `design-outline.groups[${gi}].screens[${si}]`, errors);
-              if (!Array.isArray(screen.states) || !screen.states.length || !screen.states.every(id)) errors.push(`design-outline.groups[${gi}].screens[${si}].states：状态无效`);
+              if (!Array.isArray(screen.states) || !screen.states.length || !screen.states.every(id)) errors.push(`design-outline.groups[${gi}].screens[${si}].states：必须为状态 ID 字符串数组（例如 ["default","success"]），不能使用 {id,name} 对象`);
               else for (const state of screen.states) {
                 stateIds.add(state);
                 if (!html.includes(`data-screen="${screen.id}"`) || !html.includes(`data-state="${state}"`)) errors.push(`design/wireframe.html：缺少 ${screen.id}/${state} 的 section`);

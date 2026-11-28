@@ -4,18 +4,23 @@
 
 先读 [团队包标准](docs/AI团队包规范.md)，搭建提示词在 [docs/prompts/ecosystem.md](docs/prompts/ecosystem.md)。原启航版、领航版及下文默认网页流程继续保留。
 
-- `node scripts/team-pack.mjs init` 安装筑页、观澜和文枢三包；Newtype 按固定提交下载到本机并保留 SUL 来源声明，不复制进 MIT 核心代码。
-- `/teams` 是动态团队和项目入口；本机项目不要求补建机器人，飞书独立项目群使用领航版。`bind` 复用已有机器人，`bots` 调用标准扫码注册流程补缺，不自行写扫码脚本。同一团队一角色一机器人，同一应用只有一条长连接。
+- `node scripts/team-pack.mjs init` 安装筑页、观澜和文枢三包；观澜 2.1 是 TradingAgents 固定提交的 Apache-2.0 适配，五角色十六技能，未接入 Tauric 专用数据与计算服务；Newtype 按固定提交下载到本机并保留 SUL 来源声明，不复制进 MIT 核心代码。
+- `/` 是团队工作台，`/teams` 是同一入口，`/legacy` 保留旧网页项目。团队页显示实际角色、Skill 和 workflow；本机项目不要求机器人。点“扫码连接飞书”或运行 `bots` 调用标准注册流程，各新团队创建自己的专属角色，当前团队已创建的才复用，不自行写扫码脚本。同一团队一角色一机器人，同一应用只有一条长连接。
 - 第三方通过清单、角色提示词、Skill、协作 Skill、workflow.json、Workspace 和交付契约定义团队，不改平台源码。作者打包应用 [skills/team-packager/SKILL.md](skills/team-packager/SKILL.md)，实际校验、导出、干净安装后分层记录验收；打包不等于公开发布。
 - `src/packages/` 是标准、不可变包存储、通用编排、工具与 HTTP；原 `src/flow/` 继续服务旧项目。新包统一使用共享 SDK/并发名额，按项目真实路径与角色隔离；锁定内容不能被源包更新静默替换。
-- 包不能包含凭据、运行状态、账号身份或安装钩子；工具范围由平台代码限制。搜索密钥可选 `BRAVE_SEARCH_API_KEY`，未配时说明缺检索，不编造；网页读取限公网 HTTPS，PDF/音视频需提供提取文本。
+- 团队包飞书文档见 [文档同步与反馈](docs/飞书文档同步与反馈.md)：协调机器人创建，群成员可编辑；只同步声明的 Markdown，草稿与交付按版本追加，保留人工编辑和评论。评论进入本项目 context/document-feedback.md，不得当作批准；正式任务与问答先读。保留 data/project-documents 映射，创建回执不确定时禁止重复创建。
+- 包不能包含凭据、运行状态、账号身份或安装钩子；工具范围由平台代码限制。搜索密钥可选 `BRAVE_SEARCH_API_KEY`，未配时使用免费 Bing RSS；搜索摘要仅作线索，相关性和覆盖不保证。网页与 PDF 只读公网 HTTPS，PDF 依赖宿主 pdftotext（Poppler），不支持扫描件 OCR。Calculate 提供有限运算、保留输入公式与来源，不开放命令行。
+- 团队包 Skill 门槛只认 SDK PostToolUse 成功回执；普通进度代表尝试，不算已成功加载。测试替身须发 `onProgress({ tool: "Skill", file: "team:<id>", status: "succeeded" })`，保持同一语义。
+- 来源工具由宿主写 `context/source-ledger.jsonl` 与 `context/sources/`，确认事件写 `context/approvals.json`；角色只读，不能自行声明真人已经审阅。新项目默认选最新语义版本，旧项目锁定不变，同版本多个摘要不得静默选一个。
+- 团队包旧群已完成后，新研究或新写作目标交给协调角色发开工卡；聊天补充也可由模型提出 `start`，代码校验角色与完成状态，只发提议，点卡后才建独立群。普通问答先给“已收到”卡，排队与回答更新同一张卡，不改正式确认卡。群聊等待名额最多 5 分钟，轮到后回答最多 1 分钟；明确区分排队超时与模型失败。“重试”优先恢复失败的正式步骤；没有正式失败时，只重答该角色上次失败的问题。
+- 最近群聊由平台直接提供，不要求每次先读整份旧报告；文档评论后台同步，聊天不等待逐份拉取评论。团队包项目中，同一真人单独 @ 一位角色后，10 分钟内无 @ 的补充继续交给该角色；按项目和可信人员身份隔离，任意真实 @ 优先，多人点名不猜后续接收人。“结束对话/暂停对话/不用回复了”关闭接续。其他普通群消息只留档，不能凭“好的”开工或批准；原网页项目行为不变。
 - 内置网页标准包保留原角色与 Skill 文本。修改默认 `prompts/` / `team-skills/` 不会自动改已安装包；需要同步包源文件、更新版本并安装，新项目选择新内容，已有项目不热迁移。
 
 给在这个目录里工作的 AI 编程助手（Codex、Claude Code、Grok 等）。每次开工前先读完本文件。仓库里已经是能直接运行的完整代码：用户要搭建，先选版本，再照「安装与运行」在对话里带着用户做；用户要改角色、技能或功能，照下面的约定改。想从零自己搭的人用 `learn` 分支。
 
 ## 先选版本（只给 GitHub 链接也适用）
 
-先读 [版本导航](docs/版本导航.md)，只展示导航中已可用的版本，不把未来构想当作已实现。用户没说明要搭哪种时，先问一次：**“你想搭启航版（一个群里做网页，推荐入门），还是领航版（每个项目独立群，并按人员职责分工）？”** 等用户选择后执行对应提示词。用户已经说单群、基础入门或不需要多项目，就选启航版；明确要求多项目、多群或职责分工，就选领航版。不要重复询问已明确的选择，也不要擅自给启航版加人员名册和独立项目群。
+先读 [版本导航](docs/版本导航.md)，只展示导航中已可用的版本，不把未来构想当作已实现。用户没说明要搭哪种时，先问一次：**“你想搭启航版（一个群里做网页，推荐入门），还是领航版（每个项目独立群、独立上下文和确认）？”** 等用户选择后执行对应提示词。用户已经说单群、基础入门或不需要多项目，就选启航版；明确要求多项目、多群，就选领航版。不要重复询问已明确的选择，不把已删除的人员职责管理作为可用功能。
 
 - 启航版提示词：[docs/prompts/basic.md](docs/prompts/basic.md)。新安装默认 `TEAM_MODE=basic`，用 `node setup.mjs mode basic` 确认选择。
 - 领航版提示词：[docs/prompts/projects.md](docs/prompts/projects.md)。先运行 `node setup.mjs mode projects`；已有机器人补权限用 `node setup.mjs upgrade-projects`。
@@ -28,10 +33,13 @@
 1. 运行 `node setup.mjs`（Node 24 以上；不用先 `npm install`，它会在后台装依赖）。它每次只做下一件能做的事，最后打印 `== 下一步 ==`：照着在对话里问用户、或告诉用户要做什么，拿到回答后再运行。不要自己写扫码、建群之类的脚本。
 2. 模型：问用户接口地址、密钥、模型名（Anthropic 兼容接口；火山方舟是 `https://ark.cn-beijing.volces.com/api/compatible`，不是 `/api/v3`）。密钥用户可以直接发给你，也可以自己填进 `.env` 的 `MODEL_API_KEY`。拿到后先用你的文件写入工具把密钥原样存成 `data/model-key.txt`（不要用 echo、printf 等 shell 命令写，密钥里的引号会破坏命令），再运行 `node setup.mjs model --base-url <地址> --model <模型名> --key-file data/model-key.txt`，它读完会删掉这个文件；不要把密钥放进命令行参数、不要复述。终端已有 `ANTHROPIC_*` 变量时 setup 会提示，用户说"沿用"就运行 `node setup.mjs --use-anthropic-env`。
 3. 扫码：先告诉用户马上会弹出二维码页面、用飞书手机版逐个扫码并在手机上确认（3 个 AI 同事 + AI 管理员助手，共 4 张；扫管理员助手那张的人就是管理员），再运行 `node setup.mjs scan`。它会等到扫完（最长 9 分钟）：把命令超时放宽到 10 分钟，或放到后台运行并查看输出。被打断就重跑，已建成的不用再扫。
-4. 扫完后它自动建入口群「AI 团队」（用户当群主）、3 个机器人发报到卡片、AI 管理员助手私聊管理员报到、后台启动团队服务。启航版直接在原群 @AI 产品经理提需求，点“就按这个开始”后在原群开工；领航版先完成下面的人员设置，再提需求，确认开工后去新项目群继续。
+4. 扫完后它自动建入口群「AI 团队」（用户当群主）、3 个机器人发报到卡片、AI 管理员助手私聊管理员报到、后台启动团队服务。启航版直接在原群 @AI 产品经理提需求，点“就按这个开始”后在原群开工；领航版通过扫码或真实私聊识别发起人，确认开工后去新项目群继续。
 5. 需要联网：Codex 先切到能联网、能运行命令的模式（默认沙箱不能联网）。
 
-领航版（新装和升级都要）：在工作台“人员与职责”从已有群导入真人、设置本机操作者，再维护“岗位＋负责范围＋确认事项”。已有机器人先运行 `node setup.mjs upgrade-projects`，扫码给**原 AI 产品经理**增补全部群消息、私聊和拉人权限，不重建机器人；成功后选择领航版，等当前步骤结束再重启服务。新装领航版扫码时已申请这些权限。新项目默认由产品经理新建独立群，邀请三位同事及匹配的人员；也可在表单选择“本机项目”。启航版跳过人员设置和增补权限。
+领航版：已有机器人运行 `node setup.mjs upgrade-projects` 给原产品经理增补权限，新装扫码已申请权限。人员职责页面和管理接口已删除，不再指导用户导入名册。可信扫码记录或真实私聊识别发起人。团队包连接使用 `src/packages/connections.mjs`，观澜创建 5 个专属角色、文枢创建 8 个；由包的协调机器人建群，禁止借用原产品经理。扫码完成自动连接，不必停止其他团队。当前团队绑定中断时复用凭据补绑定，不能重复创建。
+
+扫码页统一由 `src/setup/qr-page.mjs` 渲染数字生命身份舱：角色名称、职责、能力由角色资料与 workflow 的 Agent 任务派生，不把人工确认当作 Agent 能力。`status.js` 原位刷新真实回执，分别显示等待扫码、身份创建、团队连接；保留选中角色和键盘焦点。部分失败仍允许其他角色继续扫码。已连接团队可点“查看数字同事”复用原身份查看，不创建新机器人。
+
 
 日常：`npm start` 后台启动团队服务（实际起的是管理服务 `src/admin/main.mjs`，由它带起团队服务 `src/main.mjs`；日志 `data/service.log`），`npm stop` 停止，`npm run status` 查看；`node setup.mjs status` 看搭到哪了；`npm test` 跑离线测试。工作台端口是 `.env` 的 `PREVIEW_PORT`（默认 4870，被占用时 setup 会自动换）。同一组机器人只能有一处在连飞书，启动前先 `npm run status`。用户说飞书没反应、点卡片提示"目标回调服务不在线"、电脑重启或合过盖、工作台打不开时，运行 `node setup.mjs`：它会把服务拉起来，并列出停下来没做完的项目；照它的"下一步"问用户要不要接着做，要就运行它给的 `node setup.mjs resume <编号>`。以前搭好、还没有 AI 管理员助手的，`node setup.mjs` 会在服务拉起来之后提示补扫这一张码。
 
@@ -79,7 +87,7 @@ team-skills/            技能插件 team
 docs/                   施工图、实测复盘、动手搭建（从零搭的路线）
 src/agents/             run.mjs（runAgent）、roles.mjs（角色表）
 src/agents/capacity.mjs 管理员和团队共用的跨进程并发名额
-src/projects/           directory.mjs（人员职责）、manager.mjs（建群、权限、上下文）、events.mjs（完整讨论与按序点名）
+src/projects/           directory.mjs（可信身份与历史项目权限兼容）、manager.mjs（建群、权限、上下文）、events.mjs（完整讨论与按序点名）
 src/flow/               stages.mjs（阶段表）、index.mjs（编排）、validate.mjs（交付检查）、cards.mjs（飞书卡片）
 src/walkthrough-page.mjs 走查页模板
 src/outline.mjs         PRD 页面结构图
@@ -108,18 +116,18 @@ workspace/<项目号>/     每个项目的工作区：docs/ design/ site/（不�
 - 服务只监听 127.0.0.1；在容器里才监听 0.0.0.0，并且只发布到宿主的 127.0.0.1。
 - `AGENT_CONCURRENCY` 为整套服务的执行总上限，默认 3（含管理员、群聊问答和正式任务），不是每个机器人各 3 个。名额在 `data/agent-capacity/`，等待时不启动 SDK 子进程，停止可取消排队。
 
-### 3.1 多项目与人员职责
+### 3.1 多项目与确认权限
 
 本节仅用于领航版。启航版保留原群内按顺序做项目的行为，不启用名册与关口分权。
 
 - 新项目一群一个项目；结束后群和工作区保留，不把同一群复用于另一个新项目。新需求从产品经理私聊、原入口群或工作台进入。升级前的旧项目按原行为兼容。
 - 工作区按项目分开；SDK 工作会话存储按“项目真实路径＋角色”分开，续用号仍放在项目的 `sessions` 中。走查开新会话；只读问答每次用独立临时会话目录，避免管理员代问与正式任务同时改 SDK 配置。禁用 SDK 自动记忆，防止宿主目录记忆自动混入；跨项目共用角色说明和技能，不自动共享项目原文。
 - 完整讨论写 `data/messages/<群>.jsonl`，按顺序同步到 `workspace/<项目号>/context/discussion.md`；`context/project.json` 保存人员分工。每次派活提示先读讨论。人发的普通群消息只记下，@ 角色才回复；一条消息点名多人，依次产品、设计、程序员，群内对话排队，跨群可并发。附件保留类型和引用，不声称已读懂图片或语音。
-- `data/team.json` 保存人员和多条“岗位＋负责范围＋确认事项”，飞书身份只由真实入站事件或群成员接口绑定，不能在人员编辑接口伪造。不同应用的 open_id 分开存，用 union_id / user_id 关联同一个人。
-- 自动选人按本次范围（未填则需求原文）包含的职责范围匹配，不做隐式语义推断。多个确认人匹配同一关口时要求在表单指定；没有匹配时由项目负责人确认。新项目可显式选择成员及四个关口的确认人。
-- 群里所有人可以讨论；项目正式动作要求在项目成员中，回答澄清、确认、打回和修改指令只认该关口指定人，结束项目只认项目负责人。工作台是本机管理员入口，可管理名册和项目分工；普通操作用已设置的本机操作者身份。管理员助手代点也映射到管理员本人，不能绕过项目确认人。
-- 运行中的步骤结束后才能改项目分工；变更后旧确认卡失效，发新卡。移出项目分工不会自动把人踢出飞书群。人员停用立即禁止其动作；职责变更用于后续分配，既有项目分工在详情里显式调整。
-- 建群请求记入 `data/project-registry.json`，同一请求号重试复用原项目和群；群号先落盘再邀请成员。部分成员邀请失败或待审批时返回已建群的项目，群内和工作台明确提示尚未入群，可处理审批或调整成员后保存分工补邀。建项前本轮讨论随项目迁入新群的工作区，上一项目开工前的讨论不会重复带入。工作台人员写接口仍要求同源、`X-Workbench: 1`、JSON ≤ 16 KB。
+- `data/team.json` 保留可信身份和历史项目权限；应用 open_id 分开存，用 union_id / user_id 关联同一人。新团队扫码身份存入该团队绑定的 `localOwnerId`，不接受客户端传身份。
+- 工作台已删除人员名册、职责编辑、分工表单和 `/api/team`、`/api/team/person|settings|import|project` 接口。历史分工只保留内部兼容和权限校验，不在工作台暴露人员管理。
+- 新团队包项目默认只有发起人负责所有确认关口，不按旧名册匹配其他成员。普通群成员可以讨论；历史项目的已指定确认人、结束项目负责人仍要校验，管理员不得绕过。
+- 建群请求落盘 `data/project-registry.json`，同一请求号重试复用原项目和群；群号先落盘，再邀请成员。新包的协调机器人必须排在 botRoles 第一位，应用 open_id 只用在相同应用。
+- 工作台写接口要求同源、`X-Workbench: 1`、JSON ≤ 16 KB。扫码复用 setup 的 `registerMissing`，并串行写凭据和绑定；长连接按应用去重、可动态增加角色，不启动第二处连接。
 
 ## 4. Agent：一个函数，三个角色
 
@@ -146,7 +154,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 | `skills` | 这个角色的技能，如 `['team:clarify', 'team:prd-spec', 'team:spec-checklist']` |
 | `canUseTool` | 只能读写 projectDir 里的文件，写只能写本角色的目录；判断前先解析真实路径（macOS 的 /tmp 实为 /private/tmp），经软链接越界的拒绝；Skill 只放行本角色的技能 |
 | `settingSources` | `[]`，不读本机的 Claude Code 设置 |
-| `cwd`、`model`、`maxTurns` | projectDir、`MODEL_NAME`、30 |
+| `cwd`、`model`、`maxTurns` | projectDir、`MODEL_NAME`、默认 30；有研究 MCP 工具的正式任务 60，聊天 6 |
 | `env` | 只传 `PATH`、`HOME`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CONFIG_DIR`、`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`、`ANTHROPIC_DEFAULT_HAIKU_MODEL`；新项目配置目录在 `.claude-agent-config/isolated/<项目路径摘要>/<角色>/`，旧项目保留原会话目录；智能体拿不到飞书密钥 |
 | `resume` | 同一角色在同一项目里续用自己的会话；走查一律开新会话 |
 | `abortController` | `timeoutMs` 到了就 abort |
@@ -154,6 +162,8 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 **插话与停下**（传了 `control` 时）：`prompt` 改成流式输入，先送任务消息；`control.steer(text)` 把"用户在你干活时插话引导：……"以 `priority: 'now'` 送进当前这一步，第一个 `result` 到了就关上输入，之后 `steer` 返回 false。插话会让当前这一轮先出一个结果再接着干，**以最后一个 result 为准**。`control.stop()` 调 `query.interrupt()`（没有就 abort），返回 `{ ok: false, stopped: true }`；刚好做完时才点停下，按做完算。
 
 **对话模式**（`mode: 'chat'`，群里 @ 角色聊天时用）：`tools` 只给 `['Read', 'Glob']`，不给 `plugins`、`skills`，不续用会话，`maxTurns` 6；加 `outputFormat: { type: 'json_schema', schema }`，从结果的 `structured_output` 取 `{ reply, proposal: { action, detail } }`，`action` 只能是 none、start、revise、answer、retry、end。没有项目时工作目录用 `data/chat-room/`。`canUseTool` 和 PreToolUse 钩子要放行 `StructuredOutput`（SDK 让模型调用这个工具交结果；实测不放行时模型反复被拒，拿不到结构化结果，轮数用完）。
+
+**团队包规划模式**（`mode: 'plan'`）：只允许角色原有工具中的 `Read`、`Glob`、`Skill`，放行结构化计划输出，不挂研究 MCP、不写交付文件。编排验证计划后，再以正式任务模式开放该角色的研究和写入工具；workflow 的任务表与依赖不变。
 
 角色表：
 
@@ -229,12 +239,14 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 
 ### 7.1 卡片长相
 
+模型回复统一经过 `src/presentation.mjs`：先规范常见 Markdown，再用 `publicReply` 形成简短任务摘要，不能把“未通过”“未核实”改成成功。`runAgent` 共用表达规则：普通正式任务单独返回结构化 `{ reply }`（最多240字）；只读聊天和动态计划保留各自的原结构。SDK `StructuredOutput` 只交回结果，不授予文件权限。任务的 `text` 是面向用户的回复，`rawText` 保留原始结束输出，不改角色目录权限和 workflow。团队包的完整回复仍在项目 `history` 与宿主写入的 `context/task-history.json`，其他角色通过工作区读取，群里只发摘要。
+
 卡片是用户和 AI 同事打交道的主要界面，统一按下面做：
 
 - **每个角色一种颜色**：卡片 `header.template` 产品经理 `blue`、设计 `purple`、程序员 `green`；标题一律"角色名 · 在做什么"，如"AI 设计 · 画线框与主题""AI 程序员 · 网页已完成"。
-- **进度卡**：第一行用人话写这一步在做什么（`guide.mjs` 的 `taskLine`，如"按 PRD 画线框、选主题""按你的意见改设计：……"，不放发给智能体的任务消息）；第二行只放**现在在做什么**，每次工具调用换一句人话（`activityText`）：`📖 在看 PRD`、`🧰 在用「画线框」技能`、`✍️ 在写网页`、`✏️ 在改线框`、`🔍 在找文件`，15 秒没动静换成 `💭 在思考`，不逐行罗列；用户的引导单独一行"↪ 你的引导：……"；灰字"已用 N 秒 · 第 N 步"；最下面一个 [停下] 按钮（`value` 带 `{ action: 'stop', stage, projectId, cardId }`，`cardId` 是项目上的 `progressCardId`）。最多 2 秒更新一次，被挡下的随后补上，没动静时每 30 秒刷新用时。干完标题改"角色名 · 完成"（停下或出错改"角色名 · 停下了"），第二行"✅ 已完成 / ⏹ 已停下 / ⚠️ 没做完"，灰字改成"用时 N 秒 · N 步；读入 X / 写出 Y token"，去掉按钮。看板和工作台"干活中"那行用同一句人话（项目上的 `activity`）。
+- **进度卡**：第一行用人话写这一步在做什么（`guide.mjs` 的 `taskLine`，如"按 PRD 画线框、选主题""按你的意见改设计：……"，不放发给智能体的任务消息）；第二行只放**现在在做什么**，每次工具调用换一句人话（`activityText`）：`📖 在看 PRD`、`🧰 在用「画线框」技能`、`✍️ 在写网页`、`✏️ 在改线框`、`🔍 在找文件`，15 秒没动静换成 `💭 在思考`，不逐行罗列；用户的引导单独一行"↪ 你的引导：……"；灰字"已用 N 秒"；最下面一个 [停下] 按钮（`value` 带 `{ action: 'stop', stage, projectId, cardId }`，`cardId` 是项目上的 `progressCardId`）。最多 2 秒更新一次，被挡下的随后补上，没动静时每 30 秒刷新用时。干完标题改"角色名 · 完成"（停下或出错改"角色名 · 停下了"），第二行"✅ 已完成 / ⏹ 已停下 / ⚠️ 没做完"，灰字改成"用时 N 秒"，去掉按钮。看板和工作台"干活中"那行用同一句人话（项目上的 `activity`）。
 - **排队卡**：标题"<角色> · 先记下了"；"<角色>正在<阶段>（已用 N 分钟）。这句话会在这一步做完后回复。"，灰字"你说的：……"和"急的话点“现在引导”……"，按钮 [现在引导]（主按钮，action `steer`）[停下这一步]（action `stop`）。插进去后收起成"↪ 已插进这一步：……"，做完后收起成"这一步做完了，接着回复这句话：……"。
-- **结果卡**（PRD、设计、网页、走查）：先是智能体的一句话回复，再用 `{ tag: 'hr' }` 分隔要点（如"主题：……""主色：#……"），然后一行灰字过程："过程：读了 N 个文件、写了 N 个文件，N 轮，用时 N 秒，模型读入 X 万、写出 Y 万 token"；最后是链接按钮，下面一行灰字"链接在本机打开（飞书电脑版）"，需要人确认的再放确认/打回按钮。
+- **结果卡**（PRD、设计、网页、走查）：先是智能体的一句话回复，再用 `{ tag: 'hr' }` 分隔要点（如"主题：……""主色：#……"），工具次数、文件清单、轮数和 token 不在群里展示，保留在工作台记录；最后是链接按钮，下面一行灰字"链接在本机打开（飞书电脑版）"，需要人确认的再放确认/打回按钮。
 - **停下卡**：标题"<角色> · 这一步停下了"（这一步负责角色的颜色）；一句原因，一行灰字"点“重试”让某某再做一次；不想做了就点“结束项目”，文件都会保留。"，按钮 [重试]（蓝色主按钮）[结束项目]，`value` 带 `{ action: retry | end, stage, projectId, cardId }`（`cardId` 是项目上的 `stuckCardId`）。点过后收起成一句"✓ 某某点了重试"。**结束确认卡**：标题"AI 产品经理 · 结束这个项目？"，按钮 [结束项目]（红色）[继续做]。
 - **提议卡**（群聊对话里角色的提议）：标题"<角色> · 要开始做吗？ / 要按这个改吗？ / 把这段当回答提交？ / 要重试吗？ / 结束这个项目？"（提议角色的颜色）；先是角色的回复，再用 `hr` 隔开一行灰字"需求：…… / 要改的：…… / 回答：……"；按钮 [就按这个开始][再聊聊]、[按这个改][先不改]、[提交为回答][先不提交]、[重试][结束项目]、[结束项目（红色）][继续做]，`value` 带 `{ action, stage, projectId, cardId }`（action 是 start、revise、answer、retry、end，或 dismiss、keep；没有项目时 projectId、stage 写 none）。点过后收起成"✓ 某某点了“按这个改”：……"。
 - 提示语里提到按钮名用中文引号（"点“重试”"），不用方括号：卡片文字会去掉 Markdown 符号，方括号会被吃掉。
@@ -326,7 +338,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 - **停不掉服务时**：`npm stop` 报"没有权限停止团队服务"（AI 助手的沙箱不让给这个进程发信号），就请用户在自己的终端里进入项目目录运行 `npm stop`；不要用 osascript、管理员权限、计划任务之类的办法绕过，也不要手改 `data/state.json`。
 - **试跑要有输出**：试跑脚本边跑边打印每次工具调用；智能体一次要跑几分钟，等它跑完再下结论，不要中途停。
 - **先假后真**：编排先用假飞书、假智能体测；交付前再用假飞书加真实 `runAgent` 从启动跑到产品经理发出问题卡片；接上真飞书后每种卡片各发一次。
-- **用户看到的文字一律中文**：用中文角色名和步骤名（不显示 product、clarifying 这类标识）；文件路径写项目里的相对路径（如 `docs/prd.md`）；token 写成"读入 X / 写出 Y token"。
+- **用户看到的文字一律中文**：用中文角色名和步骤名（不显示 product、clarifying 这类标识）；群内任务回复只保留结果、重要限制和下一步；文件路径、工具记录和 token 留在工作区与工作台诊断中。用户主动询问技术细节时再解释。
 - `prompts/` 和 `team-skills/` 用户没要求就不改；用户要求时照「改角色和技能」改。
 - 每一步结束时报告：做了什么、怎么验证的（命令和结果）、哪里不确定、需要用户做什么。
 
@@ -335,3 +347,11 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 - 澄清、PRD、需求自查、需求覆盖检查四个技能改编自 [github/spec-kit](https://github.com/github/spec-kit)（MIT），把"先写清规格、再实现、再对照规格检查"的方法用在 AI 同事身上。
 - 线框、主题、走查、前端四个技能改编自 learn-codex-harness 的设计工作流；前端技能的原型来自 [anthropics/skills](https://github.com/anthropics/skills) 的 frontend-design（Apache-2.0）。
 - 参考文档：[Agent SDK 概览](https://code.claude.com/docs/en/agent-sdk/overview)、[Agent SDK 技能](https://code.claude.com/docs/en/agent-sdk/skills)、[TypeScript 接口](https://code.claude.com/docs/en/agent-sdk/typescript)、[飞书卡片表单容器](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/containers/form-container)、[飞书卡片交互](https://open.feishu.cn/document/feishu-cards/configuring-card-interactions)。
+
+## 文档补充规范
+
+遵循 [文档与飞书呈现补充规范](docs/文档与飞书呈现规范.md)。专业 Skill 的章节、字段、编号、篇幅和格式优先；平台只补文档定位、大纲组织、标题与飞书发布外观，不改锁定包，不给 JSON/HTML 套公文格式。历史文档不自动改名或重写。
+
+## 命名与阶段审核
+
+参见 [命名与审核模式](docs/命名与审核模式.md)。`src/project-labels.mjs` 管理项目短名与卡片标题；`src/packages/engine.mjs` 在原团队包依赖图外增加可选审核暂停，`src/agents/run.mjs` 的 review 模式提供隔离只读审核。安装命令 `node setup.mjs review human|auto` 只影响新团队包项目，旧项目和原始网页引擎不自动改方式。

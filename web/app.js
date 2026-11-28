@@ -6,8 +6,7 @@ const optionNode = (label, value) => { const node = el('option', label); node.va
 const colors = { product: '#3B82F6', designer: '#A86BF7', developer: '#2FBF71' };
 const tabs = [['prd','PRD'],['wireframe','线框'],['site','网页'],['walkthrough','走查页']];
 const artifactTabs = [...tabs, ['context','讨论']];
-const approvalStages = [['clarifying','需求澄清'],['confirm_prd','需求确认'],['confirm_design','设计确认'],['accept','最终验收']];
-const app = { state:{ groups:{},projects:[],colleagues:{} }, chats:[], team:null, teamMissing:false, teamError:'', view:'board', project:null, tab:'prd', role:'designer', roleProject:null, modelBase:'http://127.0.0.1:4871', refreshing:false, demandRequestId:null, roleDemandRequestId:null, editingPersonId:null, editingIdentity:null, projectTeamId:null, teamStale:false };
+const app = { state:{ groups:{},projects:[],colleagues:{} }, chats:[], view:'board', project:null, tab:'prd', role:'designer', roleProject:null, modelBase:'http://127.0.0.1:4871', refreshing:false, demandRequestId:null, roleDemandRequestId:null };
 const params = values => new URLSearchParams(values).toString();
 async function json(path) { const response = await fetch(path); if (!response.ok) throw Error(await response.text()); return response.json(); }
 async function post(path, body) {
@@ -18,16 +17,6 @@ async function post(path, body) {
   if (!response.ok) throw Error(result.error || text || '请求失败');
   return result;
 }
-async function loadTeam() {
-  const response = await fetch('/api/team');
-  if (response.status === 404) return { missing:true };
-  const text = await response.text();
-  let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = null; }
-  if (!response.ok) return { error:(body && body.error) || text || '人员名册读取失败' };
-  if (!body || !Array.isArray(body.people)) return { error:'人员名册格式不正确' };
-  return { value:body };
-}
 function notice(message) { const box=$('#notice'); box.textContent=message; box.classList.add('visible'); clearTimeout(notice.timer); notice.timer=setTimeout(()=>box.classList.remove('visible'),4500); }
 const project = id => app.state.projects.find(item => item.id === id);
 const active = item => item.stage !== 'done';
@@ -37,19 +26,6 @@ function personAvatar(name) {
   const node = el('span', name && name !== '你' ? Array.from(name)[0] : glyph.user, 'avatar user');
   if (name) node.title = name;
   return node;
-}
-const roster = () => (app.team?.people || []).filter(person => person && person.id && person.name);
-const activePeople = () => roster().filter(person => person.active !== false);
-const sameId = (left, right) => String(left ?? '') === String(right ?? '');
-const personById = (id, people = roster()) => people.find(person => sameId(person.id, id));
-function personOptionLabel(person) {
-  const job = person.responsibilities?.find(item => item?.job)?.job;
-  return job ? `${person.name}（${job}）` : person.name;
-}
-function identityLabel(identity) {
-  if (!identity || typeof identity !== 'object') return '';
-  const openIds = identity.openIds && typeof identity.openIds === 'object' ? Object.values(identity.openIds).some(Boolean) : false;
-  return identity.unionId || identity.userId || openIds ? '已绑定飞书身份' : '';
 }
 function safeLink(url) {
   if (typeof url !== 'string' || !url.trim()) return '';
@@ -112,7 +88,6 @@ function setView(view, { id, tab, role, roleProject } = {}) {
   render();
 }
 function header() {
-  $('#team-entry').hidden = app.teamMissing;
   const projects = app.state.projects, activeProjects = projects.filter(active), waiting = activeProjects.filter(item => item.waitingFor && !item.busy), working = activeProjects.filter(item => item.busy);
   $('#count-active').textContent = activeProjects.length;
   $('#count-waiting').textContent = waiting.length;
@@ -128,10 +103,6 @@ function header() {
     const p = project(app.project);
     $('#page-title').textContent = p ? `#${p.number} ${p.name}` : '项目详情';
     $('#page-subtitle').textContent=p?`${stageNames[p.stage]} · ${p.source}`:'';
-  } else if (app.view === 'team') {
-    const operator = personById(app.team?.ownerId);
-    $('#page-title').textContent = '人员与职责';
-    $('#page-subtitle').textContent = operator ? `本机操作者：${operator.name}` : '先设置本机操作者，再安排岗位和确认事项';
   } else {
     $('#page-title').textContent = '和 AI 同事聊天';
     $('#page-subtitle').textContent = '和在飞书群里 @ 它是一样的';
@@ -235,55 +206,12 @@ function renderFlow(item) {
   reason.hidden = !item.error;
   reason.textContent = item.error ? `卡住的原因：${item.error}` : '';
 }
-function assignmentPeople(team) {
-  const map = new Map();
-  for (const person of activePeople()) map.set(String(person.id), person);
-  for (const person of team?.people || []) if (person?.id && person.name) map.set(String(person.id), { ...map.get(String(person.id)), ...person });
-  for (const id of [team?.ownerId, ...(team?.memberIds || []), ...Object.values(team?.approvers || {})]) {
-    if (id && !map.has(String(id))) map.set(String(id), { id, name: personById(id)?.name || '未命名人员' });
-  }
-  return [...map.values()];
-}
-function renderProjectTeam(item) {
-  const box = $('#project-team');
-  if (!box || !item) return;
-  clear(box);
-  const team = item.team;
-  const link = safeLink(item.chatLink);
-  if (!team && !link && !item.dedicated) { box.hidden = true; return; }
-  box.hidden = false;
-  if (link) {
-    const anchor = el('a', '进入飞书群');
-    anchor.href = link;
-    anchor.target = '_blank';
-    anchor.rel = 'noopener';
-    box.append(anchor);
-  }
-  if (item.dedicated) box.append(el('p', '独立项目群'));
-  if (item.invitationWarning) box.append(el('p', `部分成员尚未入群：${item.invitationWarning}。处理审批或调整成员后，保存分工可重新邀请。`, 'flow-error'));
-  if (!team) return;
-  const people = assignmentPeople(team);
-  const nameOf = id => personById(id, people)?.name || '未命名人员';
-  box.append(el('h3', '项目成员'));
-  box.append(el('p', `负责人：${team.ownerId ? nameOf(team.ownerId) : '未指定'}`));
-  if (team.scope) box.append(el('p', `负责范围：${team.scope}`));
-  box.append(el('p', `成员：${(team.memberIds || []).map(nameOf).join('、') || '未指定'}`));
-  for (const [stage, label] of approvalStages) box.append(el('p', `${label}：${team.approvers?.[stage] ? nameOf(team.approvers[stage]) : '未指定'}`));
-  if (app.team) {
-    const edit = el('button', '调整分工');
-    edit.type = 'button';
-    edit.onclick = () => openProjectTeam(item);
-    box.append(edit);
-  }
-}
 function syncProjectTools(item) {
   const chat = $('#project-chat');
   const link = safeLink(item.chatLink);
   chat.hidden = !link;
   if (link) chat.href = link;
-  const button = $('#project-team-open');
-  button.hidden = !app.team;
-  button.onclick = () => openProjectTeam(item);
+
 }
 function renderPrd(text, box) {
   clear(box);
@@ -408,7 +336,6 @@ function renderProject() {
   const current = project(app.project);
   if (!current) { setView('board'); return; }
   renderFlow(current);
-  renderProjectTeam(current);
   syncProjectTools(current);
   renderArtifact(current);
   $('#project-form').hidden = !isCurrent(current);
@@ -475,346 +402,26 @@ async function loadRoleMessages() {
     box.scrollTop = box.scrollHeight;
   } catch (error) { if (app.view === 'roles' && app.role === role && app.roleMessageRequest === request) box.textContent = `消息读取失败：${error.message}`; }
 }
-function teamFormBusy() {
-  if ($('#person-dialog')?.open) return true;
-  const node = document.activeElement;
-  return Boolean(node && node.closest && node.closest('#team-view') && ['INPUT', 'SELECT', 'TEXTAREA'].includes(node.tagName));
-}
-function approvalText(list) {
-  const labels = approvalStages.filter(([stage]) => (list || []).includes(stage)).map(([, label]) => label);
-  return labels.length ? labels.join('、') : '未勾选确认事项';
-}
-function renderTeam() {
-  const side = $('#team-side'), list = $('#people-list');
-  if (!side || !list) return;
-  if (teamFormBusy()) { app.teamStale = true; return; }
-  app.teamStale = false;
-  const previousOperator = $('#operator-select')?.value ?? '';
-  const previousChat = $('#import-chat')?.value ?? '';
-  clear(side);
-  clear(list);
-  if (app.teamMissing || !app.team) {
-    $('#person-add').disabled = true;
-    list.append(el('div', app.teamMissing ? '当前服务没有人员名册。看板、项目和聊天仍按原来的方式使用。' : (app.teamError || '人员名册暂时读不出来。'), 'empty'));
-    return;
-  }
-  $('#person-add').disabled = false;
-  const operator = el('section', null, 'team-block');
-  operator.append(el('h2', '本机操作者'));
-  operator.append(el('p', '本机操作统一用此人的身份。飞书操作按实际登录账号校验。', 'muted'));
-  const currentOperator = personById(app.team.ownerId);
-  operator.append(el('p', currentOperator ? `当前：${currentOperator.name}` : '尚未设置'));
-  const operatorSelect = el('select');
-  operatorSelect.id = 'operator-select';
-  operatorSelect.append(optionNode('选择人员', ''));
-  for (const person of [...roster()].sort((left, right) => Number(left.active === false) - Number(right.active === false))) {
-    operatorSelect.append(optionNode(person.active === false ? `${person.name}（已停用）` : person.name, String(person.id)));
-  }
-  const operatorValue = previousOperator || (app.team.ownerId ? String(app.team.ownerId) : '');
-  if ([...operatorSelect.options].some(item => item.value === operatorValue)) operatorSelect.value = operatorValue;
-  const operatorButton = el('button', '设为本机操作者', 'primary');
-  operatorButton.type = 'button';
-  operatorButton.onclick = () => saveOperator(operatorSelect.value, operatorButton);
-  operator.append(operatorSelect, operatorButton);
-  const importer = el('section', null, 'team-block');
-  importer.append(el('h2', '从飞书群导入'));
-  importer.append(el('p', app.team.feishuAvailable === true ? '导入群里的真人成员。机器人不会当作人员导入。' : '飞书未连接，暂时不能从群里导入。', 'muted'));
-  const chatSelect = el('select');
-  chatSelect.id = 'import-chat';
-  chatSelect.append(optionNode('选择飞书群', ''));
-  for (const chat of app.chats || []) {
-    if (!chat?.chat_id) continue;
-    chatSelect.append(optionNode(chat.name || '未命名群', String(chat.chat_id)));
-  }
-  if ([...chatSelect.options].some(item => item.value === previousChat)) chatSelect.value = previousChat;
-  const importButton = el('button', '导入群成员');
-  importButton.type = 'button';
-  importButton.disabled = app.team.feishuAvailable !== true || chatSelect.options.length < 2;
-  importButton.onclick = () => importMembers(chatSelect.value, importButton);
-  importer.append(chatSelect, importButton);
-  importer.append(el('p', '没有飞书身份的人员可以手工新增，用于本机项目。这里不填写用户 ID。', 'muted'));
-  side.append(operator, importer);
-  if (!roster().length) list.append(el('div', '还没有人员。可以新增，或从飞书群导入。', 'empty'));
-  for (const person of roster()) {
-    const card = el('article', null, `person-card ${person.active === false ? 'inactive' : ''}`), top = el('div', null, 'person-top'), title = el('div');
-    title.append(el('strong', person.name));
-    const badges = el('div', null, 'tags');
-    if (person.active === false) badges.append(el('span', '已停用', 'tag'));
-    if (sameId(person.id, app.team.ownerId)) badges.append(el('span', '本机操作者', 'tag'));
-    const bound = identityLabel(person.identity);
-    if (bound) badges.append(el('span', bound, 'tag feishu'));
-    title.append(badges);
-    const actions = el('div', null, 'person-actions');
-    const edit = el('button', '编辑');
-    edit.type = 'button';
-    edit.onclick = () => openPerson(person);
-    const toggle = el('button', person.active === false ? '启用' : '停用');
-    toggle.type = 'button';
-    toggle.onclick = () => setPersonActive(person, person.active === false, toggle);
-    actions.append(edit, toggle);
-    top.append(title, actions);
-    card.append(top);
-    const duties = person.responsibilities || [];
-    if (!duties.length) card.append(el('div', '还没有岗位', 'muted'));
-    for (const duty of duties) {
-      const block = el('div', null, 'duty');
-      block.append(el('b', duty.job || '未填岗位'), document.createTextNode(` · ${duty.scope || '未填范围'}`), el('div', approvalText(duty.approvals), 'muted'));
-      card.append(block);
-    }
-    list.append(card);
-  }
-}
-function addDutyRow(duty = {}) {
-  const row = el('div', null, 'duty-row');
-  const known = new Set(approvalStages.map(([stage]) => stage));
-  row._extraApprovals = (duty.approvals || []).filter(stage => !known.has(stage));
-  const job = el('input');
-  job.placeholder = '岗位';
-  job.maxLength = 40;
-  job.value = duty.job || '';
-  job.className = 'duty-job';
-  const scope = el('input');
-  scope.placeholder = '负责范围';
-  scope.maxLength = 80;
-  scope.value = duty.scope || '';
-  scope.className = 'duty-scope';
-  const checks = el('div', null, 'duty-checks');
-  for (const [stage, label] of approvalStages) {
-    const labelNode = document.createElement('label');
-    labelNode.className = 'check';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.value = stage;
-    input.checked = (duty.approvals || []).includes(stage);
-    labelNode.append(input, document.createTextNode(label));
-    checks.append(labelNode);
-  }
-  const remove = el('button', '删除');
-  remove.type = 'button';
-  remove.onclick = () => { if ($('#duty-rows').children.length > 1) row.remove(); };
-  row.append(job, scope, checks, remove);
-  $('#duty-rows').append(row);
-}
-function openPerson(person) {
-  app.editingPersonId = person?.id ?? null;
-  app.editingIdentity = person?.identity && typeof person.identity === 'object' ? person.identity : null;
-  $('#person-title').textContent = person ? '编辑人员' : '新增人员';
-  $('#person-name').value = person?.name || '';
-  $('#person-active').checked = person ? person.active !== false : true;
-  $('#person-identity').textContent = identityLabel(app.editingIdentity);
-  clear($('#duty-rows'));
-  const duties = person?.responsibilities?.length ? person.responsibilities : [{}];
-  for (const duty of duties) addDutyRow(duty);
-  $('#person-dialog').showModal();
-}
-function collectPerson() {
-  const responsibilities = [...$('#duty-rows').children].map(row => {
-    const job = row.querySelector('.duty-job')?.value.trim() || '';
-    const scope = row.querySelector('.duty-scope')?.value.trim() || '';
-    const approvals = [...row.querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
-    return { job, scope, approvals: [...approvals, ...(row._extraApprovals || [])] };
-  }).filter(duty => duty.job || duty.scope || duty.approvals.length);
-  const body = { name: $('#person-name').value.trim(), active: $('#person-active').checked, responsibilities };
-  if (app.editingPersonId) body.id = app.editingPersonId;
-  if (app.editingIdentity) body.identity = app.editingIdentity;
-  return body;
-}
-async function saveOperator(ownerId, button) {
-  if (!ownerId) { notice('请选择本机操作者'); return; }
-  const person = personById(ownerId);
-  if (!person) { notice('找不到这个人员'); return; }
-  if (button.dataset.busy === '1') return;
-  button.dataset.busy = '1';
-  button.disabled = true;
-  try {
-    await post('/api/team/settings', { ownerId: person.id });
-    notice(`本机操作者已设为${person.name}`);
-    await refresh();
-  } catch (error) { notice(error.message); }
-  finally { button.disabled = false; delete button.dataset.busy; }
-}
-async function importMembers(chatId, button) {
-  if (!chatId) { notice('请选择飞书群'); return; }
-  if (app.team?.feishuAvailable !== true) { notice('飞书未连接，不能导入群成员'); return; }
-  if (button.dataset.busy === '1') return;
-  button.dataset.busy = '1';
-  button.disabled = true;
-  try {
-    const result = await post('/api/team/import', { chatId });
-    if (!result || !Array.isArray(result.people)) throw Error('导入结果不正确');
-    app.team = result;
-    app.teamMissing = false;
-    notice('已导入群成员');
-    renderTeam();
-    await refresh();
-  } catch (error) { notice(error.message); }
-  finally { button.disabled = app.team?.feishuAvailable !== true; delete button.dataset.busy; }
-}
-async function setPersonActive(person, activeState, button) {
-  if (button.dataset.busy === '1') return;
-  button.dataset.busy = '1';
-  button.disabled = true;
-  try {
-    const body = { id: person.id, name: person.name, active: activeState, responsibilities: person.responsibilities || [] };
-    if (person.identity) body.identity = person.identity;
-    await post('/api/team/person', body);
-    notice(activeState ? '已启用' : '已停用');
-    await refresh();
-  } catch (error) { notice(error.message); button.disabled = false; }
-  finally { delete button.dataset.busy; }
-}
-function checkedValues(root) { return [...root.querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value); }
-function fillPeopleSelect(select, people, selected, blankLabel) {
-  const previous = selected ?? select.value;
-  clear(select);
-  if (blankLabel !== undefined) select.append(optionNode(blankLabel, ''));
-  for (const person of people) select.append(optionNode(personOptionLabel(person), String(person.id)));
-  if ([...select.options].some(item => item.value === String(previous ?? ''))) select.value = String(previous ?? '');
-}
-function fillDemandPeople() {
-  const people = activePeople();
-  fillPeopleSelect($('#demand-owner'), people, $('#demand-owner').value, '自动匹配');
-  const members = $('#demand-members');
-  const checked = new Set(checkedValues(members));
-  clear(members);
-  members.append(el('p', '成员，不勾选则自动匹配', 'muted'));
-  for (const person of people) {
-    const label = document.createElement('label');
-    label.className = 'check';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.value = String(person.id);
-    input.checked = checked.has(String(person.id));
-    label.append(input, document.createTextNode(personOptionLabel(person)));
-    members.append(label);
-  }
-  const approvers = $('#demand-approvers');
-  const previous = Object.fromEntries(approvalStages.map(([stage]) => [stage, $(`#demand-approver-${stage}`)?.value || '']));
-  clear(approvers);
-  approvers.append(el('p', '确认人，不选则自动匹配', 'muted'));
-  for (const [stage, label] of approvalStages) {
-    const field = el('label', label);
-    const select = el('select');
-    select.id = `demand-approver-${stage}`;
-    fillPeopleSelect(select, people, previous[stage], '自动匹配');
-    field.append(select);
-    approvers.append(field);
-  }
-}
-function fillDemandForm() {
-  const extra = $('#demand-extra');
-  const team = app.teamMissing ? null : app.team;
-  extra.hidden = !team;
-  if (!team) {
-    $('#demand-hint').textContent = '群聊空闲时发给最近使用的群；群聊忙时在工作台单独开始。';
-    return;
-  }
-  const online = team.feishuAvailable === true;
-  $('#demand-hint').textContent = online ? '默认新建飞书项目群。人员留空则按负责范围匹配，未匹配的确认事项交给项目负责人。' : '飞书未连接，这次会创建本机项目。人员留空则按负责范围匹配，未匹配的确认事项交给项目负责人。';
-  $('#channel-feishu').disabled = !online;
-  $('#channel-feishu').checked = online;
-  $('#channel-local').checked = !online;
-  $('#channel-note').textContent = online ? '每个需求单独建群。提交失败再点一次会用同一次请求，避免重复建群。' : '连接飞书后可以改为新建项目群。';
-  fillDemandPeople();
-}
-function openDemand() {
-  const dialog = $('#demand-dialog');
-  if (!dialog.open) fillDemandForm();
-  dialog.showModal();
-}
-function demandBody() {
-  // 同一次需求失败重试沿用 requestId，避免重复建群。
-  const body = { text: $('#demand-text').value.trim() };
-  const withRequest = () => {
-    const fingerprint = JSON.stringify(body);
-    if (!app.demandRequestId || app.demandFingerprint !== fingerprint) app.demandRequestId = crypto.randomUUID();
-    app.demandFingerprint = fingerprint;
-    return { ...body, requestId: app.demandRequestId };
-  };
-  if ($('#demand-extra').hidden || !app.team) return withRequest();
-  const name = $('#demand-name').value.trim();
-  const scope = $('#demand-scope').value.trim();
-  if (name) body.name = name;
-  if (scope) body.scope = scope;
-  body.channel = app.team.feishuAvailable === true && $('#channel-feishu').checked ? 'feishu' : 'local';
-  const owner = personById($('#demand-owner').value, activePeople());
-  if (owner) body.ownerId = owner.id;
-  const memberIds = checkedValues($('#demand-members')).map(value => personById(value, activePeople())?.id).filter(Boolean);
-  if (memberIds.length) body.memberIds = memberIds;
-  const approvers = {};
-  for (const [stage] of approvalStages) {
-    const picked = personById($(`#demand-approver-${stage}`)?.value, activePeople());
-    if (picked) approvers[stage] = picked.id;
-  }
-  if (Object.keys(approvers).length) body.approvers = approvers;
-  return withRequest();
-}
-function memberChecklist(root, people, selected) {
-  clear(root);
-  const chosen = new Set((selected || []).map(id => String(id)));
-  if (!people.length) { root.append(el('p', '名册是空的，请先新增人员。', 'muted')); return; }
-  for (const person of people) {
-    const label = document.createElement('label');
-    label.className = 'check';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.value = String(person.id);
-    input.checked = chosen.has(String(person.id));
-    label.append(input, document.createTextNode(personOptionLabel(person)));
-    root.append(label);
-  }
-}
-function openProjectTeam(item) {
-  const dialog = $('#project-team-dialog');
-  if (!app.team) { notice('当前服务没有人员名册'); return; }
-  if (dialog.open) return;
-  app.projectTeamId = item.id;
-  const people = assignmentPeople(item.team);
-  const operator = personById(app.team.ownerId);
-  $('#project-team-hint').textContent = operator ? `本机管理员可以调整项目成员和确认人；飞书卡片仍按指定人员校验。` : '请先在人员与职责里设置本机操作者。';
-  $('#project-team-scope').textContent = item.team?.scope ? `负责范围：${item.team.scope}` : '';
-  fillPeopleSelect($('#project-owner'), people, item.team?.ownerId || app.team.ownerId || '', '选择负责人');
-  memberChecklist($('#project-members'), people, item.team?.memberIds || []);
-  const approvers = $('#project-approvers');
-  clear(approvers);
-  for (const [stage, label] of approvalStages) {
-    const field = el('label', label);
-    const select = el('select');
-    select.dataset.stage = stage;
-    fillPeopleSelect(select, people, item.team?.approvers?.[stage] || '', '选择确认人');
-    field.append(select);
-    approvers.append(field);
-  }
-  $('#project-team-save').disabled = !app.team.ownerId || !people.length;
-  dialog.showModal();
-}
+function openDemand() { $('#demand-dialog').showModal(); }
 function render() {
-  for (const view of ['board', 'project', 'roles', 'team']) $('#' + view + '-view').hidden = app.view !== view;
+  for (const view of ['board', 'project', 'roles']) $('#' + view + '-view').hidden = app.view !== view;
   header();
   if (app.view === 'board') renderBoard();
   else if (app.view === 'project') renderProject();
   else if (app.view === 'roles') renderRoles();
-  else renderTeam();
 }
 async function refresh() {
   if (app.refreshing) { app.refreshQueued = true; return; }
   app.refreshing = true;
   try {
-    const [state, chats, config, team] = await Promise.all([
+    const [state, chats, config] = await Promise.all([
       json('/api/state'),
       json('/api/chats').catch(() => []),
       json('/api/config').catch(() => ({})),
-      loadTeam(),
     ]);
     app.state = state;
     app.chats = Array.isArray(chats) ? chats : [];
     app.modelBase = config.modelBase || app.modelBase;
-    // 旧版冒烟服务没有 /api/team，404 时保持原来的工作台。
-    if (team.value?.approvalOptions) { approvalStages.splice(0, approvalStages.length, ...Object.entries(team.value.approvalOptions)); }
-    if (team.missing) { app.team = null; app.teamMissing = true; app.teamError = ''; }
-    else if (team.value) { app.team = team.value; app.teamMissing = false; app.teamError = ''; }
-    else if (team.error && team.error !== app.teamError) { app.teamError = team.error; notice(team.error); }
-    if ($('#demand-dialog')?.open && $('#demand-extra')?.hidden && app.team && !app.teamMissing) fillDemandForm();
     $('#sync-label').textContent = '飞书同步中';
     $('.sync').classList.remove('offline');
     render();
@@ -828,29 +435,13 @@ async function refresh() {
   }
 }
 $('#back').onclick = () => setView('board');
-$('#team-entry').onclick = () => setView('team');
 $('#new-demand').onclick = () => openDemand();
 $('#demand-cancel').onclick = () => $('#demand-dialog').close();
 $('#demand-form').onsubmit = async event => {
-  event.preventDefault();
-  const button = $('#demand-submit');
-  if (button.dataset.busy === '1') return;
-  const body = demandBody();
-  if (!body.text) { notice('请填写需求'); return; }
-  button.dataset.busy = '1';
-  button.disabled = true;
-  try {
-    const result = await post('/api/demand', body);
-    app.demandRequestId = null;
-    $('#demand-text').value = '';
-    $('#demand-name').value = '';
-    $('#demand-scope').value = '';
-    $('#demand-dialog').close();
-    notice(`需求已提交 · ${result.source || ''}`);
-    await refresh();
-    if (result.projectId) setView('project', { id: result.projectId });
-  } catch (error) { notice(error.message); }
-  finally { button.disabled = false; delete button.dataset.busy; }
+  event.preventDefault();const button=$('#demand-submit');if(button.disabled)return;button.disabled=true;
+  try { const text=$('#demand-text').value.trim(); if(app.demandText!==text){app.demandRequestId=crypto.randomUUID();app.demandText=text;}
+    const result=await post('/api/demand',{text,requestId:app.demandRequestId});$('#demand-text').value='';app.demandText=null;$('#demand-dialog').close();await refresh();if(result.projectId)setView('project',{id:result.projectId});
+  } catch(error){notice(error.message);}finally{button.disabled=false;}
 };
 $('#project-form').onsubmit = async event => {
   event.preventDefault();
@@ -889,65 +480,6 @@ $('#role-form').onsubmit = async event => {
   finally { button.disabled = $('#role-input').disabled; delete button.dataset.busy; }
 };
 for (const form of ['#project-form', '#role-form']) $(form + ' textarea').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $(form).requestSubmit(); } };
-$('#person-add').onclick = () => { if (!app.team) { notice(app.teamMissing ? '当前服务没有人员名册' : '人员名册还没读出来'); return; } openPerson(null); };
-$('#duty-add').onclick = () => addDutyRow();
-$('#person-cancel').onclick = () => $('#person-dialog').close();
-$('#person-form').onsubmit = async event => {
-  event.preventDefault();
-  const button = $('#person-form button.primary');
-  if (button.dataset.busy === '1') return;
-  const body = collectPerson();
-  if (!body.name) { notice('请填写姓名'); return; }
-  button.dataset.busy = '1';
-  button.disabled = true;
-  try {
-    await post('/api/team/person', body);
-    $('#person-dialog').close();
-    notice(body.id ? '人员已保存' : '人员已添加');
-    await refresh();
-  } catch (error) { notice(error.message); }
-  finally { button.disabled = false; delete button.dataset.busy; }
-};
-$('#person-dialog').addEventListener('close', () => { if (app.teamStale && app.view === 'team') renderTeam(); });
-$('#project-team-cancel').onclick = () => $('#project-team-dialog').close();
-$('#project-team-form').onsubmit = async event => {
-  event.preventDefault();
-  const button = $('#project-team-save');
-  if (button.dataset.busy === '1') return;
-  if (!app.team?.ownerId) { notice('请先设置本机操作者'); return; }
-  const current = project(app.projectTeamId);
-  if (!current) { notice('找不到这个项目'); return; }
-  const people = assignmentPeople(current.team);
-  const owner = personById($('#project-owner').value, people);
-  if (!owner) { notice('请选择项目负责人'); return; }
-  const approvers = {};
-  for (const select of $('#project-approvers').querySelectorAll('select')) {
-    const picked = personById(select.value, people);
-    if (!picked) { notice('请为每个关口选择确认人'); return; }
-    approvers[select.dataset.stage] = picked.id;
-  }
-  const memberIds = [...new Set([
-    owner.id,
-    ...checkedValues($('#project-members')).map(value => personById(value, people)?.id).filter(Boolean),
-    ...Object.values(approvers),
-  ])];
-  button.dataset.busy = '1';
-  button.disabled = true;
-  try {
-    const result = await post('/api/team/project', { projectId: current.id, ownerId: owner.id, memberIds, approvers });
-    if (result?.team) current.team = result.team;
-    $('#project-team-dialog').close();
-    notice('项目分工已保存');
-    await refresh();
-  } catch (error) { notice(error.message); }
-  finally { button.disabled = false; delete button.dataset.busy; }
-};
-document.addEventListener('focusout', event => {
-  if (!app.teamStale || app.view !== 'team') return;
-  const next = event.relatedTarget;
-  if (next && next.closest && next.closest('#team-view') && ['INPUT', 'SELECT', 'TEXTAREA'].includes(next.tagName)) return;
-  setTimeout(() => { if (!teamFormBusy() && app.view === 'team') renderTeam(); }, 0);
-});
 $('#role-source').onclick = async () => {
   try {
     const source = await json(`/api/role?${params({ role: app.role })}`);
@@ -962,7 +494,7 @@ function readHash() {
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get('view') === 'project') { app.view = 'project'; app.project = hash.get('project'); app.tab = hash.get('tab') || 'prd'; }
   else if (hash.get('view') === 'roles') { app.view = 'roles'; app.role = names[hash.get('role')] ? hash.get('role') : 'designer'; app.roleProject = hash.get('project'); }
-  else app.view = hash.get('view') === 'team' ? 'team' : 'board';
+  else app.view = 'board';
 }
 readHash();
 window.addEventListener('hashchange', () => { readHash(); render(); });

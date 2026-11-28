@@ -6,16 +6,18 @@ import { resolveTeamMode } from './team-mode.mjs';
 import { createPackageEngine } from './packages/engine.mjs';
 import { readBindings } from './packages/bindings.mjs';
 import { createPackageLobby } from './packages/lobby.mjs';
+import { createPackageConnections } from './packages/connections.mjs';
 
 // 两种版本共用 Agent、阶段表和管理员，只在入口装配项目管理能力。
 export function createTeam({ root = process.cwd(), env = process.env, credentials, workbenchBase, previewBase, agent, transport = createFeishu } = {}) {
   const mode = resolveTeamMode({ root, env });
   const recorder = createRecorder(root);
-  let flow, projects, packages, lobby;
+  let flow, projects, packageProjects, packages, lobby;
   const feishu = transport({ credentials, recorder,
     roleOrder: async chatId => { const p = await packages.get(chatId); return p ? p.roles.map(r => p.botBindings[r.id]).filter(Boolean) : Object.keys(credentials || {}); },
-    observe: (identity, name) => projects?.observe(identity, name),
+    observe: (identity, name) => (packageProjects || projects)?.observe(identity, name),
     onDiscussion: async event => (await packages.get(event.chatId)) ? packages.syncContext(event.chatId) : flow.syncContext(event.chatId),
+    onUnaddressed: event => packages.followup(event),
     onMessage: async event => (await packages.get(event.chatId)) ? packages.message(event) : await lobby.message(event) ? undefined : flow.handleMessage(event),
     onAction: async event => {
       if (!event.value?.action?.startsWith('package_')) return flow.handleAction(event);
@@ -26,9 +28,14 @@ export function createTeam({ root = process.cwd(), env = process.env, credential
   });
   if (mode === 'projects') projects = createProjectManager({ root, feishu, recorder });
   flow = createFlow({ root, feishu, recorder, projects, workbenchBase, previewBase, ...(agent ? { agent } : {}) });
-  packages = createPackageEngine({ root, feishu, recorder, projects, workbenchBase, bindings: id => readBindings(root, id), ...(agent ? { agent } : {}) });
-  lobby = createPackageLobby({ root, engine: packages, projects, feishu, recorder });
+  packageProjects = projects || createProjectManager({ root, feishu, recorder });
+  packages = createPackageEngine({ root, feishu, recorder, projects: packageProjects, workbenchBase, bindings: id => readBindings(root, id), ...(agent ? { agent } : {}) });
+  lobby = createPackageLobby({ root, engine: packages, projects: packageProjects, feishu, recorder });
+  packages.newProject = event => lobby.message(event);
+  flow.packageLobby = lobby;
   flow.packages = packages;
+  flow.packageProjects = packageProjects;
+  flow.connections = createPackageConnections({ root, feishu, projects: packageProjects });
   // 旧编排扫描 workspace 时会把未知目录视为已完成；团队包项目由自己的持久化状态补入。
   const legacyState = flow.getState;
   flow.getState = async () => {

@@ -4,7 +4,7 @@ export const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).refine(x =>
 export const relativePath = z.string().min(1).max(240).refine(p => !p.startsWith('/') && !/[\\\x00-\x1f:]/.test(p) && p.split('/').every(x => x && x !== '.' && x !== '..'), '必须是包内相对路径');
 const text = z.string().trim().min(1).max(24000);
 const list = schema => z.array(schema).max(200);
-const tools = z.enum(['Read', 'Write', 'Edit', 'Glob', 'Skill', 'WebFetch', 'WebSearch']);
+const tools = z.enum(['Read', 'Write', 'Edit', 'Glob', 'Skill', 'WebFetch', 'WebSearch', 'Calculate']);
 const version = z.string().regex(/^\d+\.\d+\.\d+$/);
 const artifact = z.object({ id: identifier, name: text, path: relativePath, format: z.enum(['markdown', 'text', 'json', 'html']), requiredKeys: list(identifier).default([]), minBytes: z.number().int().min(1).max(1000000).default(1) }).strict();
 export const manifestSchema = z.object({

@@ -2,7 +2,7 @@ FROM node:24-bookworm-slim
 
 RUN sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends chromium fonts-wqy-microhei ca-certificates git \
+    && apt-get install -y --no-install-recommends chromium fonts-wqy-microhei ca-certificates git poppler-utils \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --home-dir /home/app --create-home app \

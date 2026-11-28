@@ -20,7 +20,7 @@ export function messageContent(message, botIds = []) {
   return { text: text.trim(), attachments };
 }
 
-export function createMessageReceiver({ ids, onMessage, onDiscussion, observe, recorder, shouldRecord = async () => true, roleOrder = ['product', 'designer', 'developer'] }) {
+export function createMessageReceiver({ ids, onMessage, onDiscussion, onUnaddressed, observe, recorder, shouldRecord = async () => true, roleOrder = ['product', 'designer', 'developer'] }) {
   const recorded = new Set(), dispatched = new Set();
   const queues = new Map();
   const order = roleOrder;
@@ -38,12 +38,14 @@ export function createMessageReceiver({ ids, onMessage, onDiscussion, observe, r
       recorded.add(m.message_id);
       await recorder?.add(m.chat_id, { kind: 'user', role: targets[0] || null, targetRoles: targets, text, actor, identity, messageId: m.message_id, source: '飞书', attachments, sentAt: m.create_time });
       await onDiscussion?.({ chatId: m.chat_id });
+      // 只交给会话接续规则一次；有任何真实 @ 时，留给相应应用处理，不能误接到旧角色。
+      if (m.chat_type === 'group' && !m.mentions?.length && text) await onUnaddressed?.({ chatId: m.chat_id, chatType: m.chat_type, text, senderType: 'user', identity, actor, source: 'feishu', messageId: m.message_id });
     }
     for (const role of targets) {
       const key = `${m.message_id}:${role}`;
       if (dispatched.has(key)) continue;
       dispatched.add(key);
-      await onMessage({ chatId: m.chat_id, chatType: m.chat_type, role, text: text || '请说明本项目的现状和下一步。', senderType: 'user', user: identity.openId, identity, actor, source: 'feishu', messageId: m.message_id });
+      await onMessage({ chatId: m.chat_id, chatType: m.chat_type, role, text: text || '请说明本项目的现状和下一步。', senderType: 'user', user: identity.openId, identity, actor, source: 'feishu', messageId: m.message_id, mentionCount: m.mentions?.length || 0 });
     }
     if (recorded.size > 10000) { for (const key of [...recorded].slice(0, 5000)) recorded.delete(key); }
     if (dispatched.size > 30000) { for (const key of [...dispatched].slice(0, 15000)) dispatched.delete(key); }

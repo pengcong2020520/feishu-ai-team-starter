@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export const ANTHROPIC_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL'];
 
 // 终端里已有的 Anthropic 变量：返回变量名和地址给人看，值只交给 updateEnv 写入
@@ -16,11 +18,13 @@ export function anthropicEnv(env) {
 // 发一次 max_tokens 为 1 的请求；失败原因只写状态码和该改哪个变量
 export async function checkModel({ baseUrl, apiKey, model, fetchImpl = fetch, timeoutMs = 20000 }) {
   let res;
+  const go = /^https:\/\/opencode\.ai\/(?:inference|zen)\/go(?:\/|$)/.test(baseUrl);
   try {
     res = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/v1/messages`, {
       method: 'POST',
       signal: AbortSignal.timeout(timeoutMs),
-      headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
+      headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey,
+        ...(go ? { 'user-agent': 'feishu-ai-team/1.0', 'x-opencode-session': `setup-${randomUUID()}` } : {}) },
       body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
     });
   } catch (error) {
@@ -32,7 +36,10 @@ export async function checkModel({ baseUrl, apiKey, model, fetchImpl = fetch, ti
   if (apiKey) detail = detail.replaceAll(apiKey, '***');
   detail = detail.slice(0, 120);
   const s = res.status;
-  const why = s === 401 || s === 403 ? '密钥不对或没有权限：检查 MODEL_API_KEY'
+  const why = /overdue balance|AccountOverdue|ServiceOverdue/i.test(detail) ? '模型账户欠费：请检查服务商账户状态，资源包有余量也可能无法调用'
+    : /hosted outside Europe|Select Global/i.test(detail) ? '该模型需要 Global 区域：请在 OpenCode 控制台 Settings → Privacy → Regions 启用 Global'
+    : /missing x-opencode-session/i.test(detail) ? 'OpenCode Go 要求会话标识：请更新客户端的 x-opencode-session 请求头'
+    : s === 401 || s === 403 ? '密钥不对或没有权限：检查 MODEL_API_KEY'
     : s === 404 ? '接口地址不对：MODEL_BASE_URL 填 Anthropic 兼容入口，不带 /v1/messages'
     : s === 429 ? '额度或频率受限：稍后重试，或检查账户余额'
     : s >= 500 ? '模型服务出错：稍后重试'

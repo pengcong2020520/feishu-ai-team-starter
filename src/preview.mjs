@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { walkthroughPage } from './walkthrough-page.mjs';
 import { roles } from './agents/roles.mjs';
+import { listPackages } from './packages/store.mjs';
 import { packageHttp } from './packages/http.mjs';
 
 const headers = model => ({ 'Content-Security-Policy': model ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; form-action 'none'; connect-src 'none'" : "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' http://127.0.0.1:*; img-src 'self' data: blob:", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
@@ -22,7 +23,12 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
     const url = new URL(req.url, 'http://localhost');
     const hostValue = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost):\d+$/.test(hostValue)) return send(res, 403, 'Host 不允许', false, 'text/plain; charset=utf-8');
-    if (await packageHttp({ req, res, url, root, flow, recorder, send })) return;
+    if (await packageHttp({ req, res, url, root, flow, feishu, recorder, send })) return;
+    const qr = /^\/connect\/([a-z][a-z0-9-]{0,63})\/(index\.html|status\.js|[a-z][a-z0-9-]{0,63}\.png)$/.exec(url.pathname);
+    if (req.method === 'GET' && qr) {
+      try { const page = await flow?.connections?.page(qr[1], qr[2]); return send(res, page ? 200 : 404, page?.body || '未找到', false, page?.type); }
+      catch { return send(res, 500, '二维码读取失败'); }
+    }
     const match = /^\/p\/([^/]+)\/(walkthrough|outline|shot\/(?:outline|design|site|walkthrough))$/.exec(url.pathname);
     if (req.method === 'GET' && match && valid(match[1])) {
       try {
@@ -34,7 +40,6 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
     }
     if (req.method === 'GET' && url.pathname === '/api/state' && flow) return send(res, 200, JSON.stringify(await flow.getState()), false, 'application/json; charset=utf-8');
     if (req.method === 'GET' && url.pathname === '/api/config') return send(res, 200, JSON.stringify({ modelBase: previewBase, teamMode: flow?.projects ? 'projects' : 'basic' }), false, 'application/json; charset=utf-8');
-    if (req.method === 'GET' && url.pathname === '/api/team' && flow?.projects) return send(res, 200, JSON.stringify(await flow.projects.getTeam()), false, 'application/json; charset=utf-8');
     if (req.method === 'GET' && url.pathname === '/api/context' && flow?.projects) {
       const p = await flow.getProjectById(url.searchParams.get('projectId'));
       if (!p) return send(res, 404, '项目不存在', false, 'text/plain; charset=utf-8');
@@ -94,15 +99,15 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web', url.pathname.slice(1)), 'utf8'), false, url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8'); }
       catch { return send(res, 404, '资源不存在', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'GET' && url.pathname === '/') {
+    if (req.method === 'GET' && url.pathname === '/legacy') {
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web/index.html'), 'utf8')); }
       catch { return send(res, 404, '工作台尚未生成', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'GET' && url.pathname === '/teams') {
-      try { return send(res, 200, await readFile(path.join(assetsRoot, 'web/teams.html'), 'utf8')); }
+    if (req.method === 'GET' && ['/', '/teams'].includes(url.pathname)) {
+      try { return send(res, 200, await readFile(path.join(assetsRoot, (await listPackages(root)).length ? 'web/teams.html' : 'web/index.html'), 'utf8')); }
       catch { return send(res, 404, '团队工作台尚未生成', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'POST' && ['/api/demand', '/api/message', '/api/action', '/api/team/person', '/api/team/settings', '/api/team/import', '/api/team/project', '/api/team/admin-identity'].includes(url.pathname) && flow) {
+    if (req.method === 'POST' && ['/api/demand', '/api/message', '/api/action', '/api/team/admin-identity'].includes(url.pathname) && flow) {
       const origin = req.headers.origin;
       if (origin && origin !== `http://${hostValue}`) return send(res, 403, 'Origin 不允许', false, 'text/plain; charset=utf-8');
       if (req.headers['x-workbench'] !== '1' || !/^application\/json(?:;|$)/i.test(req.headers['content-type'] ?? '')) return send(res, 415, '请求格式不正确', false, 'text/plain; charset=utf-8');
@@ -118,12 +123,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
             await flow.projects.observe(data.identity, data.name);
             return send(res, 200, JSON.stringify({ ok: true }), false, 'application/json; charset=utf-8');
           }
-          if (data.via === 'admin') throw Error('人员分工请在本机工作台管理');
-          const result = url.pathname === '/api/team/person' ? await flow.projects.directory.upsert(data)
-            : url.pathname === '/api/team/settings' ? await flow.projects.directory.settings(data)
-            : url.pathname === '/api/team/import' ? await flow.projects.importMembers(data.chatId)
-            : await flow.updateTeam(data);
-          return send(res, 200, JSON.stringify(result), false, 'application/json; charset=utf-8');
+
         }
         if (url.pathname !== '/api/demand' && (typeof data.chatId !== 'string' || !data.chatId)) throw new Error('缺少项目会话');
         let result;

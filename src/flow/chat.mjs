@@ -1,5 +1,6 @@
 // 群聊对话：用户 @ 角色时，角色从专业角度回一句话，需要时提议一个动作（开工、修改、回答、重试、结束），由用户点按钮决定
 import { roles } from '../agents/roles.mjs';
+import { plainText } from '../presentation.mjs';
 import { roleFor, stageNames } from './stages.mjs';
 import { gateRole, retryRole, nextStep } from './guide.mjs';
 
@@ -67,4 +68,4 @@ export function chatPrompt({ p, role, text, recent = [], files = [] }) {
 }
 
 // 模型写的回复当不可信文字：去掉 Markdown 符号，限长
-export const tidy = text => String(text ?? '').replace(/(?:\*\*|__|`|^#{1,6}\s*|^>\s*)/gm, '').trim().slice(0, 300);
+export const tidy = text => plainText(text).slice(0, 300);

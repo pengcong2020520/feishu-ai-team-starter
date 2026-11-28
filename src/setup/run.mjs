@@ -61,6 +61,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     const mark = ok => (ok ? '✓' : '…');
     log(['', '== 当前进度 ==',
       `版本：${teamModeNames[resolveTeamMode({ root, env: fileEnv })]}`,
+      `团队包审核：${({ human: '人工确认', auto: '独立自动审核' })[fileEnv.TEAM_REVIEW_MODE] || '尚未选择（沿用原工作流关口）'}`,
       `${mark(progress.modelOk && !missingModel(fileEnv).length)} 模型`,
       `${mark(depsOk())} 依赖`,
       `${mark(bots === team.length)} 飞书机器人 ${bots}/${team.length}`,
@@ -71,26 +72,30 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     return code;
   };
 
-  if (command === 'mode') {
+  if (command === 'review') {
+    if (!['human', 'auto'].includes(rest[0])) return finish(1, ['请选择 node setup.mjs review human（人工确认）或 auto（独立自动审核）；仅影响新建团队包项目。']);
+    updateEnv(envFile, { TEAM_REVIEW_MODE: rest[0] });
+    return finish(0, [`新团队包项目默认采用${rest[0] === 'human' ? '人工确认' : '独立自动审核'}；已有项目保持原方式。运行 node setup.mjs 继续。`]);
+  } else if (command === 'mode') {
     const selected = rest[0];
     if (!Object.hasOwn(teamModeNames, selected)) return finish(1, ['请选择：node setup.mjs mode basic（启航版）或 node setup.mjs mode projects（领航版）']);
     const current = readEnv(envFile);
     if (serviceRunning() && resolveTeamMode({ root, env: current }) !== selected) return finish(1, ['请等正在执行的步骤结束后 npm stop，再选择版本；原数据会保留']);
     resolveTeamMode({ root, env: { TEAM_MODE: selected } });
     updateEnv(envFile, { TEAM_MODE: selected });
-    return finish(0, [`已选择${teamModeNames[selected]}。运行 node setup.mjs 继续；使用已有机器人升级多项目时，再按 docs/prompts/projects.md 补权限和人员分工。`]);
+    return finish(0, [`已选择${teamModeNames[selected]}。运行 node setup.mjs 继续；使用已有机器人升级多项目时，再按 docs/prompts/projects.md 补权限和验证发起人身份。`]);
   } else if (command === 'upgrade-projects') {
     if (!depsOk()) return finish(1, ['请先运行 node setup.mjs 安装依赖，再运行 node setup.mjs upgrade-projects']);
     const current = readEnv(envFile);
     if (missingBots(current).includes('product') || !current.FEISHU_PRODUCT_APP_ID || /^cli_x+$/.test(current.FEISHU_PRODUCT_APP_ID)) return finish(1, ['请先配置现有的 AI 产品经理机器人']);
     const f = await d.loadFeishu();
     f.installRetry(f.lark.defaultHttpInstance, { log });
-    log('给现有 AI 产品经理增补：记录全部群讨论、读取私聊、按职责拉人。不创建新机器人。请扫码查看权限差异并确认。');
+    log('给现有 AI 产品经理增补：记录全部群讨论、读取私聊、项目群成员管理。不创建新机器人。请扫码查看权限差异并确认。');
     const result = await f.registerMissing({ lark: f.lark, qrcode: f.qrcode, roles: [{ ...team[0], existingAppId: current.FEISHU_PRODUCT_APP_ID }], qrDir: path.join(root, 'qr'), log,
       save: async (_role, r) => { updateEnv(envFile, { FEISHU_PRODUCT_APP_SECRET: r.appSecret }); saveProgress(root, { projectScopesRequested: true, ...(r.openId ? { ownerOpenId: r.openId } : {}) }); },
     });
     if (result.every(r => r.ok)) updateEnv(envFile, { TEAM_MODE: 'projects' });
-    return finish(result.every(r => r.ok) ? 0 : 1, [result.every(r => r.ok) ? '现有机器人授权已更新，并选择领航版。等正在执行的步骤结束后重启本机服务，在工作台导入真人并设置本机操作者；验证普通群消息入档，权限是否生效以飞书接口检查为准。' : '授权未完成，重新运行 node setup.mjs upgrade-projects 即可。']);
+    return finish(result.every(r => r.ok) ? 0 : 1, [result.every(r => r.ok) ? '现有机器人授权已更新，并选择领航版。等正在执行的步骤结束后重启本机服务，验证扫码身份和私聊发起人；验证普通群消息入档，权限是否生效以飞书接口检查为准。' : '授权未完成，重新运行 node setup.mjs upgrade-projects 即可。']);
   } else if (command === 'model') {
     const updates = {};
     if (flag('--base-url')) updates.MODEL_BASE_URL = flag('--base-url');
@@ -265,11 +270,12 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       ...await stuckLines(fileEnv),
       '都好了。告诉用户：',
       resolveTeamMode({ root, env: fileEnv }) === 'projects'
-        ? '1. 先在工作台“人员与职责”从「AI 团队」导入真人、设置本机操作者，维护岗位、负责范围和确认事项；再提需求，产品经理会新建独立项目群。已有机器人需补权限时运行 node setup.mjs upgrade-projects。'
+        ? '1. 私聊产品经理提需求并确认开工，它会新建独立项目群；工作台从可信扫码记录识别发起人。已有机器人需补权限时运行 node setup.mjs upgrade-projects。'
         : '1. 打开飞书群「AI 团队」，@AI 产品经理 说一句需求，比如“做一个记录读书笔记的小网页”；它回一张“要开始做吗？”卡片，点“就按这个开始”后在原群开工，之后按卡片提示点按钮',
       progress.ownerSet ? null : progress.joinLink ? `   还不在群里的话，先打开这个链接进群：${progress.joinLink}` : '   还不在群里的话：在飞书里新建一个群，把 3 个机器人拉进来（群设置 → 群机器人 → 添加机器人）',
       `2. 本机工作台：${workbenchOf(readEnv(envFile))}`,
       '3. 飞书里私聊「AI 管理员助手」：发“状态”看团队现状；项目停下、团队服务出问题时它会私聊提醒',
+      !fileEnv.TEAM_REVIEW_MODE ? '首次启用团队包前，请问用户采用人工确认（推荐）还是自动审核；运行 node setup.mjs review human 或 auto。基础版原有四个关口保持人工确认。' : null,
       '4. 想改某个角色或技能，直接说（照 AGENTS.md「改角色和技能」改）',
       '停止服务 npm stop；查看状态 npm run status',
     ]);

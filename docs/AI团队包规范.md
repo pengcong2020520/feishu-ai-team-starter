@@ -54,7 +54,7 @@ workflow 具有 entry、coordinator、relations、nodes、maxSteps（默认 80�
 | --- | --- |
 | task | role、skills（本步必须调用）、prompt、outputs、next；可选 timeoutMinutes、freshSession、validator、questions 分支及 route |
 | gate | role、approval、next、可选 reject；questions=true 使用网页澄清表单。普通讨论不等于确认 |
-| plan | 规划角色 role、skills、prompt、可选任务 tasks、required、final、next；Agent 只能返回 `{rationale,tasks:[{id,after,brief?}]}` |
+| plan | 规划角色 role、skills、prompt、可选任务 tasks、required、final、next；只读项目资料并加载技能，不开放写入或研究 MCP，Agent 返回 `{rationale,tasks:[{id,after,brief?}]}`；正式任务按验证后的依赖执行 |
 | done | 结束。所有节点都必须可到达结束节点 |
 
 task 可声明 `route: {artifact, field, cases: {ready: "下一节点", revise: "修改节点"}}`，从本步已声明的 JSON 产物读取枚举结果；未知值即停，不执行任意表达式。
@@ -63,7 +63,7 @@ prompt 可使用 `{{demand}}`、`{{feedback}}`、`{{round}}`。task 的输出按
 
 plan 的任务目录也是 task 定义，增加 id/name/after。目录中的 after 表示“如果对方被选中，本任务必须等待对方”；required 指定不可省略任务；final 必须等待全部选中任务。验证未知任务、环、缺失依赖与必做任务后才执行。没有依赖的任务可并行，但不能共用角色会话或重叠写目录，整套服务仍共享 AGENT_CONCURRENCY。
 
-出错即停，已完成的计划任务落盘，重试只补失败任务；服务中断不自动继续，待用户重试。人工打回重新进入声明节点，可只重做相应步骤。包的 Skill、角色、流程与读写范围均不能由模型临时扩大。
+每步声明的 Skill 必须收到 SDK `PostToolUse` 成功回执（`onProgress` 的 `status: succeeded`）；仅出现调用尝试或生成文件都不算通过。替身 Agent 必须模拟同样的成功事件，不能用更宽松的签名。出错即停，已完成的计划任务落盘，重试只补失败任务；服务中断不自动继续，待用户重试。人工打回重新进入声明节点，可只重做相应步骤。包的 Skill、角色、流程与读写范围均不能由模型临时扩大。
 
 ## 安装、分享与更新
 
@@ -89,20 +89,35 @@ node scripts/team-pack.mjs list
 node scripts/team-pack.mjs bind web-studio product product
 node scripts/team-pack.mjs bind web-studio designer designer
 node scripts/team-pack.mjs bind web-studio developer developer
-# 无可复用机器人时，沿用项目的标准扫码注册流程
+# 为该团队创建专属角色；已创建的本团队角色不会重复扫码
 node scripts/team-pack.mjs bots newtype-editorial
 ```
 
-同一团队内一角色一机器人；不同团队可以复用机器人，但同一应用只有一条长连接。补配机器人后重启服务。产品经理作为平台建群入口仍会在新群中，另外邀请所选团队的全部角色；项目消息只调度当前包的角色，不用机器人互发消息触发 Agent。
+同一团队内一角色一机器人。观澜、文枢各自创建专属角色，不借用产品经理；由 workflow.coordinator 对应的机器人建群并邀请其余角色。扫码成功自动增加长连接，不重启其他团队，同一应用仍只有一条连接。只有明确要求复用时才用 bind；项目消息只调度锁定包的角色。
 
-在 `/teams` 选择包和目标，选择本机或飞书项目群，指定成员、负责人及关口确认人。独立协调机器人在私聊或入口群收到自然语言目标后，会发开工确认卡；发起人确认才新建群，建项前讨论按轮次迁入项目。默认产品经理入口仍保留旧网页工作流。
+工作台首页 `/`（`/teams` 同入口）选择包，显示该包的角色、Skill 与 workflow。先扫码连接，再选择目标创建飞书项目群；本机试跑可单独选择。人员名册和职责管理接口已移除，新项目默认发起人确认。独立协调机器人在私聊或入口群收到自然语言目标后，会发开工确认卡；发起人确认才新建群，建项前讨论按轮次迁入项目。默认产品经理入口仍保留旧网页工作流。
 
 身份来自可信飞书事件或本机操作者；项目确认继续受人员权限限制，不因换团队包而绕过。
 
-网络能力由平台 MCP 工具提供。WebFetch 映射为只读公网 HTTPS 的 read_url，返回来源与抓取时间；拒绝内网、保留地址，校验每次重定向并固定 DNS 解析地址。本机代理使用 198.18/15 Fake-IP 时，通过固定公网 DoH 服务核实真实公网地址再连接，不放行该保留网段。WebSearch 映射为 Brave 搜索，需要本机 `.env` 中的 `BRAVE_SEARCH_API_KEY`。未配置时明确失败，可提供来源 URL 继续；不能把模型记忆当作实时搜索结果。当前网页提取仅支持 HTML、文本、JSON；图片可用 SDK Read，PDF、音视频和复杂文档应先提供提取文本。
+网络能力由平台 MCP 工具提供。WebFetch 映射为只读公网 HTTPS 的 read_url，返回来源与抓取时间；拒绝内网、保留地址，校验每次重定向并固定 DNS 解析地址。本机代理使用 198.18/15 Fake-IP 时，通过固定公网 DoH 服务核实真实公网地址再连接，不放行该保留网段。WebSearch 有 `BRAVE_SEARCH_API_KEY` 时使用 Brave，未配置时使用免费 Bing RSS；结果只是线索，需核验原文，不能把模型记忆当作实时搜索结果。WebFetch 同时提供 HTML/文本/JSON 的 read_url 与文字型 PDF 的 read_pdf（依赖 Poppler；物理页码）。扫描件 OCR、音视频未接入。Calculate 映射确定性运算，输入口径仍须研究者核对。
 
 模型档位通过可选的 MODEL_STRONG_NAME / MODEL_FAST_NAME 配置，未填写沿用 MODEL_NAME。所有角色使用同一兼容接口，能力和额度以该接口实际支持为准。
 
 ## 作者验收
 
 使用 [team-packager Skill](../skills/team-packager/SKILL.md) 保留原规则映射、声明导出范围、校验、导出并重新导入。验收报告分开记录结构检查、替身编排、真实 SDK、真实飞书；任何一层都不替代其他层。安装成功不能声称机器人已扫码、多人权限已在真人账号上验证或研究结论已核实。
+
+
+## 来源、确认与版本审计
+
+平台将成功的 `read_url` 与 `search` 结果写入当前项目的 `context/source-ledger.jsonl`，保存 `sourceId`、角色、类型、URL 或查询、抓取时间、正文摘要及缓存路径；缓存文本在 `context/sources/`。抓取时间不等于资料发布日期，搜索摘要不等于阅读全文。角色可读缓存并引用 sourceId，不能写这个目录。
+
+关口操作记入 `context/approvals.json`，含阶段、动作、时间、actor、source、修改意见。`local` 代表本机入口，`admin` 代表管理员代办；两者均不证明真人已阅读。自动回测应明确标记 `automated-test`，不冒充人工验收。工作台详情的“来源与确认记录”读取 `/api/packages/evidence?projectId=...`，不从模型自述推断审阅状态。
+
+新项目目录默认显示各包最高语义版本；同版本不同摘要保留为不同选项，不能静默挑选。CLI list 保留历史版本，已建项目始终使用原锁定内容。角色绑定与新需求入口也按最新版本处理，已经建好的群不迁移。
+
+内置观澜 2.1 使用 TradingAgents 固定提交的五角色十六技能；原始文件、许可、差异及作者映射均在包内。导出和导入仍使用统一协议，不添加安装钩子。上游专用数据、超出本地有限计算范围的分析及长期记忆等尚未映射的能力必须在清单描述和提示词中说明，不得只保留工具名然后假装可用。
+
+## 可选研究能力（运行时扩展）
+
+角色和 Skill 的 tools 可声明 `Calculate`。它映射到宿主 `mcp__research__calculate`，不开放 Bash、JavaScript eval 或 Python 任意执行。`WebFetch` 另外提供 `read_pdf`（需宿主已安装 Poppler 的 pdftotext）；`WebSearch` 未配置商业密钥时使用免费 Bing RSS。所有成功结果由宿主写入本项目来源账本；PDF 保留物理页码，计算保留输入、公式与来源。声明工具不等于实际调用，验收须检查真实账本。免费搜索有相关性和限流限制，不能把摘要当原文或保证市场数据覆盖。
