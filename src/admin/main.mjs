@@ -53,13 +53,16 @@ if (config) {
     const { createAssistant } = await import('./assistant.mjs');
     const { createChanges } = await import('./changes.mjs');
     const { createDeploy } = await import('./deploy.mjs');
+    const { createAdminJournal } = await import('./journal.mjs');
     const port = Number(process.env.PREVIEW_PORT || 4870);
     const workbench = { state: () => workbenchState(port), message: message => workbenchMessage(port, message, baseEnv.ADMIN_WORKBENCH_TOKEN), action: action => workbenchAction(port, action, baseEnv.ADMIN_WORKBENCH_TOKEN) };
     let ready = null;
+    const journal = createAdminJournal({root,secrets:Object.entries(process.env).filter(([k])=>/KEY|SECRET|TOKEN/.test(k)).map(([,v])=>v)});
     bot = createAdminBot({ ...config, logger, importDirectory:path.join(root,'data/admin/team-imports'), onIdentity: async (identity, name) => {
       // 只把已经由管理员机器人验证的本人身份送给团队进程，不能由工作台请求伪造。
       try { await fetch(`http://127.0.0.1:${port}/api/team/admin-identity`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1', 'X-Admin-Token': baseEnv.ADMIN_WORKBENCH_TOKEN }, body: JSON.stringify({ via: 'admin', identity, name }), signal: AbortSignal.timeout(1000) }); } catch {}
-    }, onMessage: event => ready.onMessage(event), onAction: event => ready.onAction(event) });
+    }, onMessage: event => journal.receive(event,()=>ready.onMessage(event)), onAction: event => journal.run({turnId:randomBytes(16).toString('hex')},()=>{journal.record('instruction',{source:event.source||'internal',kind:'card',text:`点击：${event.value.action}`,messageId:event.messageId,chatId:event.chatId,senderOpenId:event.senderOpenId});return ready.onAction(event);}) });
+    bot = journal.wrapBot(bot);
     const changes = createChanges({ root });
     const deploy = createDeploy({ changes, supervisor, workbench, bot, logger, handBack: text => ready.runSteward(text, '测试没过，我接着改'), serviceDown: (exit, error) => ready.serviceDown(exit, error) });
     // 模型配好了才有管家；没配时只做固定的事
@@ -70,10 +73,13 @@ if (config) {
       const { runAgent } = await import('../agents/run.mjs');
       const { createTeamLab } = await import('./team-lab.mjs');
       const { trialCard } = await import('./team-lab-page.mjs');
-      teamLab=createTeamLab({root,notify:r=>bot.sendCard(trialCard(r,process.env.PUBLIC_WORKBENCH_BASE||`http://127.0.0.1:${port}`))});
-      steward = createSteward({ root, tools: buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords: () => ready?.adminWords() ?? [], teamLab, sendFile:file=>bot.sendFile(file) }) });
+      teamLab=createTeamLab({root,notify:r=>{
+        const turnId=journal.events().filter(e=>e.type==='operation'&&e.ok&&e.runId===r.id&&['team_trial_start','team_trial_retry'].includes(e.name)).at(-1)?.turnId;
+        return journal.run({turnId},()=>bot.sendCard(trialCard(r,process.env.PUBLIC_WORKBENCH_BASE||`http://127.0.0.1:${port}`)));
+      }});
+      steward = createSteward({ root, tools: buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords: () => ready?.adminWords() ?? [], teamLab, journal, auditContext:()=>ready?.auditContext(), sendFile:file=>bot.sendFile(file) }) });
     }
-    ready = createAssistant({ root, bot, supervisor, workbench, steward, deploy, changes, teamLab, logger });
+    ready = createAssistant({ root, bot, supervisor, workbench, steward, deploy, changes, teamLab, journal, logger });
     await bot.start();
     assistant = ready;
     logger.log('AI 管理员助手已连上飞书');

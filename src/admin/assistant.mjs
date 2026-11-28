@@ -12,7 +12,7 @@ export const NO_MODEL = '模型没配好，我现在只能做这几件：发“�
 const toast = (content, type = 'info') => ({ toast: { type, content } });
 const name = p => `#${p.number} ${p.name}`;
 
-export function createAssistant({ root, bot, supervisor, workbench, steward = null, deploy = null, changes = null, teamLab = null, logger = console, now = () => Date.now() }) {
+export function createAssistant({ root, bot, supervisor, workbench, steward = null, deploy = null, changes = null, teamLab = null, journal = null, logger = console, now = () => Date.now() }) {
   // 发过的提醒记在 data/admin/alerts.json：同一个问题只报一次，管理服务重启后也不重报
   const file = path.join(root, 'data/admin/alerts.json');
   let alerts = {};
@@ -49,17 +49,17 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
   // 管家一次只做一件事；它在做时，管理员的话插进当前这一步，插不进去的排队
   let current = null;
   const waiting = [];
-  const runSteward = async (prompt, task, { words = [], readOnly = false, alertKey = null } = {}) => {
+  const runSteward = async (prompt, task, { words = [], readOnly = false, alertKey = null, auditContext = journal?.context() } = {}) => {
     if (!steward) {
       if (alertKey && alerts[alertKey]) { alerts[alertKey].diagnosing = false; save(); }
       await bot.sendText(NO_MODEL); return;
     }
-    if (current) { waiting.push({ prompt, task, options: { words, readOnly, alertKey } }); await bot.sendText('这句话先记下了，这次做完我接着处理。'); return; }
+    if (current) { waiting.push({ prompt, task, options: { words, readOnly, alertKey, auditContext } }); journal?.record('dispatch',{mode:'queued',parentTurnId:current.auditContext?.turnId},auditContext); await bot.sendText('这句话先记下了，这次做完我接着处理。'); return; }
     const control = {};
     const cardId = randomUUID();
     const view = { task, activity: '💭 在想', steps: 0, guides: [], started: now() };
     const render = (extra = {}) => stewardCard({ ...view, elapsedMs: now() - view.started, cardId, ...extra });
-    current = { control, cardId, view, words: [...words], refresh: () => {} };
+    current = { control, cardId, view, words: [...words], auditContext, refresh: () => {} };
     let messageId = null;
     let timer = null;
     let clock = null;
@@ -95,7 +95,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
       current = null;
       if (alertKey && alerts[alertKey]) { alerts[alertKey].diagnosing = false; save(); }
       const next = waiting.shift();
-      if (next) void runSteward(next.prompt, next.task, next.options).catch(error => logger.error(`管家出错：${error.message}`));
+      if (next) void (journal ? journal.run(next.options.auditContext,()=>runSteward(next.prompt,next.task,next.options)) : runSteward(next.prompt,next.task,next.options)).catch(error => logger.error(`管家出错：${error.message}`));
     }
   };
   const diagnosePrompt = p => [
@@ -133,6 +133,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
     runSteward,
     busy: () => Boolean(current),
     adminWords: () => current?.words ?? [],
+    auditContext: () => current?.auditContext,
 
     async onMessage({ text }) {
       const t = text.trim();
@@ -162,7 +163,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
         await restart(messageId);
         return;
       }
-      if (current?.control.steer?.(t)) { current.words.push(t); current.view.guides.push(t); current.refresh(); return; }
+      if (current?.control.steer?.(t)) { journal?.record('dispatch',{mode:'steered',parentTurnId:current.auditContext?.turnId}); current.words.push(t); current.view.guides.push(t); current.refresh(); return; }
       if (steward) { await runSteward(`管理员说：${t}`, t, { words: [t] }); return; }
       await bot.sendText(NO_MODEL);
     },
@@ -174,13 +175,13 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
         if(!teamLab)return toast('团队调试服务未启用','error');
         void (async()=>{
           if(value.action==='team_lab_apply'){
-            const r=await teamLab.apply(value);
+            const r=await (journal ? journal.operation('team_draft_apply',value,()=>teamLab.apply(value)) : teamLab.apply(value));
             await patch(messageId,closedCard('团队版本已应用',`已应用 ${r.package.id} v${r.package.version}。新项目可选择这个版本，旧项目保持原样。`));
           }else if(value.action==='team_lab_retry'){
-            await teamLab.retry(value.runId);await patch(messageId,closedCard('继续团队试跑','正在从上次失败的节点继续，完成后会发来结果。'));
+            await (journal ? journal.operation('team_trial_retry',value,()=>teamLab.retry(value.runId)) : teamLab.retry(value.runId));await patch(messageId,closedCard('继续团队试跑','正在从上次失败的节点继续，完成后会发来结果。'));
           }else{
             const d=await teamLab.read(value.draftId);if(d.hash!==value.expectedHash)throw Error('草稿已更新，请使用最新试跑卡');
-            const r=await teamLab.export(value.draftId);await bot.sendFile(r.file);await bot.sendText('团队包已导出，重新导入检查通过。文件不包含项目讨论和账号配置。');
+            const r=await (journal ? journal.operation('team_draft_export',value,()=>teamLab.export(value.draftId)) : teamLab.export(value.draftId));await bot.sendFile(r.file);await bot.sendText('团队包已导出，重新导入检查通过。文件不包含项目讨论和账号配置。');
           }
         })().catch(async e=>{await bot.sendText(`这次没有完成：${e.message}`).catch(()=>{});});
         return toast(value.action==='team_lab_apply'?'正在应用已试跑的版本':value.action==='team_lab_retry'?'正在继续试跑':'正在导出团队包');

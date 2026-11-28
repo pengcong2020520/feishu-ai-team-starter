@@ -162,7 +162,7 @@ test('管理员机器人只听管理员、只在私聊：别人私聊回“我�
   await bot.handlers['im.message.receive_v1'](msg('m2', 'ou_other'));
   await bot.handlers['im.message.receive_v1'](msg('m3', 'ou_admin', 'group'));
   await flush();
-  assert.deepEqual(got, [{ text: '状态' }]);
+  assert.deepEqual(got, [{ text: '状态', source:'feishu-private', messageId:'m1', chatId:'oc_p2p', senderOpenId:'ou_admin', platformTime:null, kind:undefined }]);
   assert.equal(created.length, 1);
   assert.deepEqual(created[0].params, { receive_id_type: 'chat_id' });
   assert.match(created[0].data.content, /我只听管理员的/);

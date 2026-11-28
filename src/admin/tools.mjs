@@ -53,7 +53,7 @@ export function statusText({ service, snapshot, changes }) {
   return lines.join('\n');
 }
 
-export function buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords = () => [], teamLab, sendFile }) {
+export function buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords = () => [], teamLab, sendFile, journal, auditContext }) {
   const usedConsents = new WeakMap(); // 每次管家运行有独立的原话数组；一条消息只授权一次代点。
   const findProject = async number => {
     const snapshot = await workbench.state();
@@ -65,7 +65,7 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
   const guard = fn => async args => { try { return await fn(args); } catch (error) { return fail(error.message); } };
 
   return [
-    ...teamLabTools(teamLab, { sendFile, adminWords }),
+    ...teamLabTools(teamLab, { sendFile, adminWords, journal, auditContext }),
     tool('team_status', '看团队现状：团队服务是否在运行、各项目在哪个阶段、谁在干活、哪里停下了、最近的改动。', {}, guard(async () =>
       reply(statusText({ service: supervisor.status(), snapshot: supervisor.status().running ? await workbench.state() : null, changes })))),
 

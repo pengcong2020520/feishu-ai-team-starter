@@ -11,6 +11,7 @@
 - 第三方通过清单、角色提示词、Skill、协作 Skill、workflow.json、Workspace 和交付契约定义团队，不改平台源码。作者打包应用 [skills/team-packager/SKILL.md](skills/team-packager/SKILL.md)，实际校验、导出、干净安装后分层记录验收；打包不等于公开发布。
 - `src/packages/` 是标准、不可变包存储、通用编排、工具与 HTTP；原 `src/flow/` 继续服务旧项目。新包统一使用共享 SDK/并发名额，按项目真实路径与角色隔离；锁定内容不能被源包更新静默替换。
 - 管理员私聊团队包定制走 `src/admin/team-lab*.mjs`：复制/导入 → 原子编辑草稿 → 独立真实试跑 → 明确要求后应用不可变版本 → 导出文件。草稿与试跑位于 `data/admin/team-lab/`，不能直接改 `data/packages`。试跑使用原 package engine、全局并发和按路径隔离的 SDK；测试驱动的关口记为 `automated-test`。应用必须匹配当前摘要的真实通过记录，已有项目锁与机器人绑定不变。试跑启动后管理员应结束本轮释放执行名额，由后台结果卡通知。文件私聊仅管理员 `.team.json` 可导入草稿，不能自动应用。
+- 管理员对话记录在 `data/admin/journal.jsonl`，工作台“管理员调试”展示真实入站消息凭据、可见回复、不可变版本差异和关联试跑。排队与插话保留归属，不记录模型推理。内部调用与历史缺失记录必须如实标识；测试真实私聊须通过飞书真人消息入口，不能调用处理器伪造入站，也不能把试跑的模拟关口称为真人批准。
 - 团队包飞书文档见 [文档同步与反馈](docs/飞书文档同步与反馈.md)：协调机器人创建，群成员可编辑；只同步声明的 Markdown，内容不变不追加正文，内容或配图变化创建独立文档版本，保留旧版、人工编辑和评论，并在旧版提供新版入口。评论进入本项目 context/document-feedback.md，不得当作批准；正式任务与问答先读。保留 data/project-documents 映射，创建回执不确定时禁止重复创建。
 - 项目档案由 `src/packages/archive.mjs` 整理，旧网页项目通过 `src/workbench/archives.mjs` 只读接入；AI 摘要与标签须来自真实材料，节点保留原记录引用，成品优先展示。缓存过期或整理失败明确显示，不能改写阶段来填充档案。
 - 团队包最终 Markdown 由 `src/packages/delivery-quality.mjs` 检查结构与实际内容，独立只读审核不算流程批准；有实质问题最多交原角色修正两轮，仍失败停下。专业 Skill 契约与旧网页 workflow 不变。
