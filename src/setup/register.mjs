@@ -49,7 +49,7 @@ export function openFile(file) {
 }
 
 export function registrationView(entries, teamName) {
-  return { teamName, phase: entries.every(e => e.done || e.error) ? entries.some(e => e.error) ? 'error' : 'created' : 'scanning', roles: entries.map(e => ({ key: e.role.key, name: e.role.name, desc: e.role.desc, capabilities: e.role.capabilities || [], updating: Boolean(e.role.existingAppId), state: e.done ? 'created' : e.error ? 'error' : 'waiting', url: e.url, version: e.version })) };
+  return { teamName, phase: entries.every(e => e.done || e.error) ? entries.some(e => e.error) ? 'error' : 'created' : 'scanning', roles: entries.map(e => ({ id: e.role.id || e.role.key, key: e.role.key, name: e.role.name, desc: e.role.desc, capabilities: e.role.capabilities || [], updating: Boolean(e.role.existingAppId), state: e.done ? 'created' : e.error ? 'error' : 'waiting', url: e.url, version: e.version })) };
 }
 
 export async function writeQrPage({ qrDir, qrcode, entries, teamName }) {

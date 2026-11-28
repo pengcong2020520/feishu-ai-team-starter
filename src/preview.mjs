@@ -103,7 +103,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       try { return send(res, 200, await readFile(path.join(root, 'workspace', p.id, 'docs/questions.json'), 'utf8'), false, 'application/json; charset=utf-8'); }
       catch { return send(res, 404, '问题尚未生成', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs', '/teams.js', '/teams.css', '/team-board.mjs', '/team-ui.mjs'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs', '/teams.js', '/teams.css', '/team-board.mjs', '/team-ui.mjs', '/role-portraits.mjs', '/team-entry.mjs', '/cyber.css'].includes(url.pathname)) {
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web', url.pathname.slice(1)), 'utf8'), false, url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8'); }
       catch { return send(res, 404, '资源不存在', false, 'text/plain; charset=utf-8'); }
     }

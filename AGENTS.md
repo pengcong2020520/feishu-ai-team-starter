@@ -46,6 +46,8 @@
 
 扫码页统一由 `src/setup/qr-page.mjs` 渲染数字生命身份舱：角色名称、职责、能力由角色资料与 workflow 的 Agent 任务派生，不把人工确认当作 Agent 能力。`status.js` 原位刷新真实回执，分别显示等待扫码、身份创建、团队连接；保留选中角色和键盘焦点。部分失败仍允许其他角色继续扫码。已连接团队可点“查看数字同事”复用原身份查看，不创建新机器人。
 
+团队包身份舱与工作台共用 `web/role-portraits.mjs`；`web/cyber.css` 统一赛博主题。只有团队连接 `ready` 且全部角色创建或复用成功，才允许进入转场。扫码过程变为 ready 后自动进入；打开已有身份页时由用户点击进入。`web/chamber-handoff.mjs` 控制身份舱离场，`web/team-entry.mjs` 控制斜向镜头与头像落位；arrival 标记一次消费，日常刷新不重播。跳过、Esc、减少动态效果均应立即可用；动画不写项目数据、不触发任何工作流动作。
+
 
 日常：`npm start` 后台启动团队服务（实际起的是管理服务 `src/admin/main.mjs`，由它带起团队服务 `src/main.mjs`；日志 `data/service.log`），`npm stop` 停止，`npm run status` 查看；`node setup.mjs status` 看搭到哪了；`npm test` 跑离线测试。工作台端口是 `.env` 的 `PREVIEW_PORT`（默认 4870，被占用时 setup 会自动换）。同一组机器人只能有一处在连飞书，启动前先 `npm run status`。用户说飞书没反应、点卡片提示"目标回调服务不在线"、电脑重启或合过盖、工作台打不开时，运行 `node setup.mjs`：它会把服务拉起来，并列出停下来没做完的项目；照它的"下一步"问用户要不要接着做，要就运行它给的 `node setup.mjs resume <编号>`。以前搭好、还没有 AI 管理员助手的，`node setup.mjs` 会在服务拉起来之后提示补扫这一张码。
 

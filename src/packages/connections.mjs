@@ -44,7 +44,7 @@ export function createPackageConnections({ root, feishu, projects, register = re
           if (hasCredentials && !bindings.roles[role.id]) await bindRole(root, id, role.id, key, env);
           const capabilities = [...new Set(pack.workflow.nodes.flatMap(n => n.type === 'plan' ? [n, ...n.tasks] : n.type === 'task' ? [n] : []).filter(t => t.role === role.id).map(t => t.name))].slice(0, 4);
           job.roles.push({ id: role.id, name: role.name, key, desc: role.description, capabilities, state: hasCredentials ? 'reused' : 'waiting' });
-          if (!hasCredentials) missing.push({ key, name: role.name, desc: role.description, capabilities, mode: 'projects', documents: role.id === pack.coordinator });
+          if (!hasCredentials) missing.push({ id: role.id, key, name: role.name, desc: role.description, capabilities, mode: 'projects', documents: role.id === pack.coordinator });
         }
         const qrDir = path.join(root, 'qr/team-pack', id);
         await rm(qrDir, { recursive: true, force: true }); // 不展示上一轮已过期的二维码。
