@@ -330,7 +330,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
           if(!offer||v.projectId!==p.id||v.stage!==p.stage||v.cardId!==offer.cardId||offer.stamp!==contextStamp(p))throw Error('这张补充卡已过期，请重新提出修改，或使用当前关口卡');
           p.contextProposal=null;await save();
           if(v.action==='package_context_dismiss'){await closeContext(p,pack,offer,'已保留讨论，未把这条消息作为执行指令。');return {ok:true};}
-          if(!p.busy && (p.pendingReview || n.type==='gate'&&n.reject)) { await closeContext(p,pack,offer,'已确认修改意见，将按当前关口打回重做。'); return {forward:{...event,value:value(p,'reject'),feedback:`${offer.actor}提出，${event.actor||'负责人'}确认：${offer.text}`}}; }
+          if(!p.busy && (p.pendingReview || n.type==='gate'&&n.reject)) { return {contextNotice:{projectId:p.id,offer},forward:{...event,value:value(p,'reject'),feedback:`${offer.actor}提出，${event.actor||'负责人'}确认：${offer.text}`}}; }
           const input={id:offer.cardId,role:offer.role,text:offer.text,actor:offer.actor,messageId:offer.messageId,confirmedBy:event.actor||'负责人',source:event.source||'unspecified',at:new Date().toISOString()};
           (p.confirmedInputs ||= []).push(input);await save();await record(p,{kind:'action_result',accepted:true,action:'context_apply',actor:input.confirmedBy,text:`确认交给 ${p.roles.find(r=>r.id===offer.role).name}：${offer.text}`});
           const control=controls.get(p.id)?.get(p.activities?.[offer.role]?.task);
@@ -392,7 +392,8 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
         if (oldCard) { try { await send(p, teamCard({ title: projectCardTitle(p.name, pack.manifest.roles.find(r => r.id === n.role).name, '确认已处理'), text: `${event.actor || '确认人'}已${action === 'reject' ? '提交修改意见' : '确认'}。` }), n.role, true); } catch {} }
         launch(p); return { ok: true };
       });
-      return response?.forward ? api.action(response.forward) : response;
+      if(response?.forward){const p=find(response.contextNotice.projectId),pack=await packFor(p);try{const result=await api.action(response.forward);await closeContext(p,pack,response.contextNotice.offer,'修改意见已通过关口校验，按原流程开始重做。');return result;}catch(error){await closeContext(p,pack,response.contextNotice.offer,'修改未执行，请查看当前关口并重新提交。');throw error;}}
+      return response;
     },
     async message(event) {
       await ready;
@@ -476,8 +477,8 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
         const explicit = p.roles.find(r => r.id === event.role)?.id || Object.keys(p.botBindings).find(r => p.botBindings[r] === event.role);
         const intakeId = `${event.messageId}:${explicit || 'coordinator'}`;
         if (p.groupMessages?.[intakeId] && p.groupMessages[intakeId].status !== 'failed') return {ignored:true,duplicate:true};
-        if (explicit) { if(p.mutedConversations) delete p.mutedConversations[person.id]; }
-        else if (closesConversation(event.text)) { (p.mutedConversations ||= {})[person.id] = true; if(p.conversationFocus)delete p.conversationFocus[person.id]; await save(); return { conversationClosed:true }; }
+        if (closesConversation(event.text)) { (p.mutedConversations ||= {})[person.id] = true; if(p.conversationFocus)delete p.conversationFocus[person.id]; await save(); return { conversationClosed:true }; }
+        else if (explicit) { if(p.mutedConversations) delete p.mutedConversations[person.id]; }
         else if (p.mutedConversations?.[person.id] || isAcknowledgement(event.text)) return { ignored:true };
         (p.groupMessages ||= {})[intakeId] = {status:'queued',at:new Date().toISOString()};
         // 保留最近一千条分派回执；消息正文完整保存在 recorder 中。
@@ -494,9 +495,11 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
           const focus=p.conversationFocus?.[person.id];
           const preferred=explicit||reference?.role||(focus&&Date.now()-focus.at<600000?focus.role:null);
           const recent=rows.filter(r=>r.kind==='user'||r.kind==='text').slice(-12).map(r=>`${r.actor||r.role||'成员'}：${String(r.text||'').slice(0,1000)}`).join('\n');
+          const assessedStamp=contextStamp(p);
           const definition=await roleDefinition(pack,coordinator,root);definition.write=[];definition.tools=['Read','Glob'];
           let result;try { result=await agent({role:coordinator,projectDir:dir(p),runtimeRoot:root,definition,mode:'route',isolateSession:true,outputSchema:routingSchema,timeoutMs:60000,prompt:routingPrompt({project:p,coordinator,roles:p.roles,preferred,reference,recent,event})}); }catch{result={ok:false};}
-          const decision=validRouting(result,p.roles,coordinator,explicit&&explicit!==coordinator?explicit:null);
+          let decision=validRouting(result,p.roles,coordinator,explicit&&explicit!==coordinator?explicit:null);
+          if(assessedStamp!==contextStamp(p))decision={role:coordinator,kind:'clarify',reason:'工作进度已变化，请按当前阶段核对这条消息的意思。'};
           const handoff={messageId:event.messageId,actor:event.actor,role:decision.role,kind:decision.kind,reason:decision.reason,replyToMessageId:event.replyToMessageId||null,at:new Date().toISOString()};
           p.groupMessages[intakeId]={...handoff,status:'routed'};await save();
           await record(p,{kind:'routing',...handoff,text:`协调者将消息交给 ${p.roles.find(r=>r.id===decision.role).name}：${decision.reason}`});
@@ -553,7 +556,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
         const pack = await packFor(p), n = nodeFor(pack, p), artifacts = [];
         for (const a of pack.manifest.artifacts) { try { await readArtifact(pack, dir(p), a.id); artifacts.push({ id: a.id, name: a.name, format: a.format }); } catch (e) { if (e.code !== 'ENOENT') throw e; } }
         const taskNames = Object.fromEntries((pack.workflow.nodes.find(node => node.id === p.plan?.node)?.tasks || []).map(t => [t.id, t.name]));
-        return { ...copy(p), documents: await documents.view(p), definition: packageView(pack), taskNames, stageName: p.ended ? '已结束' : p.pendingReview ? p.pendingReview.label + ' · 待审核' : n.name, stageType: p.pendingReview ? 'gate' : n.type, stuckCardId: p.error ? p.cardId : null, source: p.chatId.startsWith('web:') ? '本机项目' : '飞书项目群', waitingFor: p.error ? '重试' : p.pendingReview ? '阶段审核' : n.type === 'gate' ? n.name : null, activeRole: p.running?.[0] || null, retryRole: n.role, approval: n.approval, artifacts, currentActions: p.error ? ['retry', 'end', ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? ['reject'] : [])] : p.busy ? ['stop'] : p.pendingReview ? ['confirm', 'reject'] : n.type === 'gate' ? n.questions ? ['answer'] : ['confirm', ...(n.reject ? ['reject'] : [])] : [], questions: n.questions === true ? JSON.parse(await readFile(path.join(dir(p), 'docs/questions.json'), 'utf8')) : null };
+        return { ...copy(p), contextProposal: p.contextProposal?.stamp === contextStamp(p) ? copy(p.contextProposal) : null, documents: await documents.view(p), definition: packageView(pack), taskNames, stageName: p.ended ? '已结束' : p.pendingReview ? p.pendingReview.label + ' · 待审核' : n.name, stageType: p.pendingReview ? 'gate' : n.type, stuckCardId: p.error ? p.cardId : null, source: p.chatId.startsWith('web:') ? '本机项目' : '飞书项目群', waitingFor: p.error ? '重试' : p.pendingReview ? '阶段审核' : n.type === 'gate' ? n.name : null, activeRole: p.running?.[0] || null, retryRole: n.role, approval: n.approval, artifacts, currentActions: p.error ? ['retry', 'end', ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? ['reject'] : [])] : p.busy ? ['stop'] : p.pendingReview ? ['confirm', 'reject'] : n.type === 'gate' ? n.questions ? ['answer'] : ['confirm', ...(n.reject ? ['reject'] : [])] : [], questions: n.questions === true ? JSON.parse(await readFile(path.join(dir(p), 'docs/questions.json'), 'utf8')) : null };
       }));
     },
     async roleSource(projectId, role) { await ready; const p = find(projectId); if (!p) throw Error('项目不存在'); return roleSource(await packFor(p), role); },
