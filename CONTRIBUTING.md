@@ -29,6 +29,8 @@ node scripts/team-pack.mjs export team-packages/my-team /tmp/my-team.team.json
 
 完整格式见[团队包标准](docs/AI团队包规范.md)。需要 Coding Agent 协助打包时，使用 [team-packager Skill](skills/team-packager/SKILL.md)。
 
+把最终正文或报告声明为最终交付任务的产物，并将该任务接到 `approval: "accept"` 的关口；不要把归档说明当作成品。平台据此展示档案成果，并检查最终 Markdown 的完整性。实际体验步骤见[工作台与成品复现](docs/工作台与成品复现.md)。
+
 ## 改进角色与 Skill
 
 团队包的角色和技能在包目录中维护。修改后更新版本号、重新安装，再创建项目使用新版；已有项目继续使用创建时的版本。
