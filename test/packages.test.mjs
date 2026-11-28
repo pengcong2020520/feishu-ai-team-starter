@@ -287,10 +287,19 @@ test('计划并行失败后保留成功任务，重启后重试只补失败项',
   const selected=['company-snapshot','macro-outlook','risk-assessment','synthesis'];
   const tasks=node.tasks.filter(t=>selected.includes(t.id)).map(t=>({id:t.id,after:t.after.filter(id=>selected.includes(id))}));
   const calls=[];let fails=true,active=0,peak=0;
+  const peers=Promise.withResolvers(),started=new Set();
   const agent=async args=>{
     calls.push(args.role+(args.outputSchema?':plan':''));for(const s of args.definition.skills)args.onProgress?.({tool:'Skill',file:s,status:'succeeded'});
     if(args.outputSchema)return{ok:true,text:JSON.stringify({rationale:'公司与宏观并行，风险综合评审。每类须保留来源。',tasks}),structured:{rationale:'公司与宏观并行，风险综合评审',tasks},stats};
-    active++;peak=Math.max(active,peak);await new Promise(r=>setTimeout(r,10));active--;
+    active++;peak=Math.max(active,peak);
+    try {
+      if(fails&&['equity','macro'].includes(args.role)) {
+        started.add(args.role);if(started.size===2)peers.resolve();
+        let timer;
+        try {await Promise.race([peers.promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('两个并行任务未同时启动')),5000);})]);}
+        finally {clearTimeout(timer);}
+      }
+    } finally {active--;}
     if(args.role==='macro'&&fails)return{ok:false,text:'',error:'模拟评审失败',stats};
     const id=args.role==='chief'?(args.prompt.includes('汇总所有')?'report':'brief'):({'equity':'company-snapshot','macro':'macro-outlook','risk':'risk-assessment'})[args.role];
     await put(args.projectDir,pack.manifest.artifacts.find(a=>a.id===id).path,'# 模拟交付\n'+ '基于证据说明风险与缺口。'.repeat(20));return{ok:true,text:'完成',sessionId:args.role,stats};
