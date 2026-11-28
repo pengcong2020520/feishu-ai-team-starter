@@ -97,6 +97,25 @@ test('冗长模型交付保留完整工作区交接，群聊与确认卡只显�
   const cards=(await recorder.list(p.chatId)).filter(r=>r.card);assert.match(cards.at(-1).card.text.join(' '),/待核实/);assert.doesNotMatch(cards.at(-1).card.text.join(' '),/SDK|drafts\//);
 }));
 
+test('进入后续任务后，进度卡不复用上一任务等待验收的回复', () => fixture(async root => {
+  const lock = await installPackage('examples/team-package', root), recorder = createRecorder(root);
+  let started, release;
+  const running = new Promise(resolve => { started = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  const engine = createPackageEngine({ root, recorder, agent: async args => {
+    if (args.role === 'reviewer') { started(); await held; }
+    return { ...await fake(args), text: '上一任务成果已提交，现在等待你验收。' };
+  } });
+  let p = await engine.create({ package: lock, text: '检查进度状态' }); p = await engine.waitForIdle(p.id);
+  await press(engine, p, 'confirm'); await running;
+  try {
+    const card = (await recorder.list(p.chatId)).filter(row => row.card).at(-1).card;
+    assert.match(card.text.join('\n'), /正在进行/);
+    assert.doesNotMatch(card.text.join('\n'), /上一任务|等待你验收/);
+    assert.ok(card.buttons.some(button => button.label === '停下'));
+  } finally { release(); await engine.waitForIdle(p.id); }
+}));
+
 test('Skill 只有尝试没有成功结果，即使交付文件有效也停下，重试成功后放行', () => fixture(async root => {
   const lock = await installPackage('examples/team-package', root);
   let calls = 0;

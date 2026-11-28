@@ -239,3 +239,12 @@ test('引用消息和附件保留在原群入站事件中，多应用重复推�
  await receive(event,'chief');await receive(event,'chief');assert.equal(seen.length,1);assert.equal(seen[0].replyToMessageId,'parent-a');assert.equal(seen[0].threadRootMessageId,'thread-a');assert.equal(seen[0].attachments[0].name,'来源.pdf');
  const rows=await recorder.list('group-a');assert.equal(rows.length,1);assert.equal(rows[0].replyToMessageId,'parent-a');assert.match(rows[0].text,/文件/);
 }));
+
+test('同名新群编号区分，创建重试固定原名称且不重复建群',()=>fixture(async root=>{
+ const directory=createDirectory(root),owner=await person(directory,'负责人','on_owner');await directory.settings({ownerId:owner.id});const calls=[];
+ const manager=createProjectManager({root,directory,feishu:{createProjectGroup:async r=>{calls.push(r);return 'oc_'+r.projectId;}}});
+ const make=id=>manager.prepare({projectId:id,requestId:id,text:'请帮我写一篇关于产品即分发的文章，面向创业者',options:{groupLabel:'文枢 · 内容团队'}});
+ const a=await make('a'),b=await make('b'),again=await make('a');
+ assert.equal(a.groupName,'文枢 · 产品即分发');assert.equal(b.groupName,'文枢 · 产品即分发（2）');assert.equal(again.groupName,a.groupName);assert.equal(calls.length,2);
+ const more=await Promise.all([make('c'),make('d')]);assert.equal(new Set(more.map(p=>p.groupName)).size,2);assert.ok(more.every(p=>p.groupName!==b.groupName));
+}));

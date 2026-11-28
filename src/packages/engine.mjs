@@ -1,3 +1,4 @@
+import { artifactLabel, taskLabel } from './presentation.mjs';
 import { routingSchema, routingPrompt, validRouting, replyReference, isAcknowledgement, closesConversation } from './group-routing.mjs';
 import { readEnv } from '../setup/env-file.mjs';
 import { projectLabel, projectCardTitle, linkLabel } from '../project-labels.mjs';
@@ -19,7 +20,7 @@ const automaticReviewPolicy = '本项目创建者已选择平台自动审核模�
 const copy = value => structuredClone(value);
 const plain = text => plainText(text).slice(0, 2400);
 const isFinalDocument = (pack, d) => !!pack.manifest.artifacts.find(a => a.id === d.artifactId)?.path.startsWith('report/');
-const documentLabel = (pack, d) => isFinalDocument(pack, d) ? '最终交付' : d.name;
+const documentLabel = artifactLabel;
 export function teamCard({ title, text, color = 'blue', buttons = [], links = [] }) {
   const actions = buttons.map(b => ({ tag: 'button', text: { tag: 'plain_text', content: b.label }, type: b.primary ? 'primary' : /结束|打回/.test(b.label) ? 'danger' : 'default', value: b.value }));
   const navigation = links.map(l => ({ tag: 'button', text: { tag: 'plain_text', content: linkLabel(l.label) }, type: 'default', url: l.url }));
@@ -141,8 +142,11 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
     } else {
       const buttons = p.error ? [{ label: '重试', value: value(p, 'retry'), primary: true }, { label: '结束项目', value: value(p, 'end') }, ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? [{ label: '打回修改', value: value(p, 'reject') }] : [])]
         : p.busy ? [{ label: '停下', value: value(p, 'stop') }] : p.pendingReview ? [{ label: '审核通过，继续', value: value(p, 'confirm'), primary: true }, { label: '打回修改', value: value(p, 'reject') }] : n.type === 'gate' ? [{ label: '确认', value: value(p, 'confirm'), primary: true }, ...(n.reject ? [{ label: '打回修改', value: value(p, 'reject') }] : [])] : p.busy ? [{ label: '停下', value: value(p, 'stop') }] : [];
-      const next = p.pendingReview ? `${p.busy ? '正在自动审核' : '待审核'}：${p.pendingReview.label}。请核对成果，审核通过后才会继续后续任务。` : n.type === 'gate' ? `请查看飞书文档或工作台中的交付内容，确认后点“确认”，需要调整就点“打回修改”。` : n.type === 'done' ? '本项目流程已完成，可从下方入口查看交付内容。' : `正在进行${n.name}，完成后会继续下一步。`;
-      card = teamCard({ title: projectCardTitle(p.name, r.name, p.ended ? '项目已结束' : p.error ? '需要处理' : p.pendingReview ? p.busy ? '正在自动审核' : '阶段成果待审核' : n.name), text: [p.ended ? '项目已结束，已生成的文件都会保留。' : p.error ? p.pendingReview ? publicReply(p.error, { fallback: '审核未完成，请重试或打回修改。' }) : publicError(p.error) : `${publicReply(p.lastReply || '', { fallback: '' })}\n${next}`.trim(), p.invitationWarning ? '部分成员尚未入群，请在工作台查看邀请情况。' : '', notice, documentNotice, p.waitingFeedback ? '请在群中 @ 对应同事说明要修改什么，或在工作台填写意见。' : ''].filter(Boolean).join('\n'), color: r.color, buttons, links: [...documentLinks, { label: '打开项目工作台', url: `${workbenchBase}/teams#${p.id}` }] });
+      const displayTask = taskLabel(pack, p);
+      const next = p.pendingReview ? `${p.busy ? '正在自动审核' : '待审核'}：${p.pendingReview.label}。请核对成果，审核通过后才会继续后续任务。` : n.type === 'gate' ? `请查看飞书文档或工作台中的交付内容，确认后点“确认”，需要调整就点“打回修改”。` : n.type === 'done' ? '本项目流程已完成，可从下方入口查看交付内容。' : `正在进行${displayTask}，完成后会继续下一步。`;
+      // 运行中的卡片只说明当前任务，不能把上一任务的“等待验收”当作当前状态。
+      const summary = p.busy ? '' : publicReply(p.lastReply || '', { fallback: '' });
+      card = teamCard({ title: projectCardTitle(p.name, r.name, p.ended ? '项目已结束' : p.error ? '需要处理' : p.pendingReview ? p.busy ? '正在自动审核' : '阶段成果待审核' : displayTask), text: [p.ended ? '项目已结束，已生成的文件都会保留。' : p.error ? p.pendingReview ? publicReply(p.error, { fallback: '审核未完成，请重试或打回修改。' }) : publicError(p.error) : `${summary}\n${next}`.trim(), p.invitationWarning ? '部分成员尚未入群，请在工作台查看邀请情况。' : '', notice, documentNotice, p.waitingFeedback ? '请在群中 @ 对应同事说明要修改什么，或在工作台填写意见。' : ''].filter(Boolean).join('\n'), color: r.color, buttons, links: [...documentLinks, { label: '打开项目工作台', url: `${workbenchBase}/teams#${p.id}` }] });
     }
     p.messageId = await send(p, card, role, update); p.cardRole = role; p.cardSent = true; await save();
     // 卡片纯文本展示姓名，原生文本消息保留飞书 @ 语法，避免把身份标签当文字显示。
@@ -431,7 +435,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
       const reply = (label, text) => {
         const job = replyWrites.then(async () => {
         const links = label === '回复' ? (await documents.view(p)).items.filter(d => d.url && d.shared).sort((a,b) => Number(isFinalDocument(pack, b)) - Number(isFinalDocument(pack, a))).slice(0,3).map(d => ({label: `飞书 · ${documentLabel(pack, d)}`, url:d.url})) : [];
-        const card = teamCard({ title: projectCardTitle(p.name, roleName, label === '回复' ? n.name + ' · 讨论' : label), text, color: roleSpec.color || 'blue', links });
+        const card = teamCard({ title: projectCardTitle(p.name, roleName, label === '回复' ? taskLabel(pack, p) + ' · 讨论' : label), text, color: roleSpec.color || 'blue', links });
         if (!p.chatId.startsWith('web:')) {
           if (remoteReplyId) await feishu.patchCard(remoteReplyId, card, botFor(p, role), p.chatId);
           else remoteReplyId = await feishu.sendCard(p.chatId, card, botFor(p, role));
@@ -444,8 +448,8 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
       const task = (conversations.get(p.id) || Promise.resolve()).catch(() => {}).then(async () => {
         // 评论由后台同步；群聊不等待逐份联网拉文档，也不强迫模型先读整份历史。
         const recent = (await recorder?.list(p.chatId, { limit: 80 }) || []).filter(r => r.kind === 'user' || r.kind === 'text' || (r.card?.title.endsWith('· 回复') || r.card?.title.includes('· 讨论｜'))).slice(-12).map(r => `${r.actor || r.role || '同事'}：${String(r.text || r.card?.text.join('\n') || '').slice(0, 1200)}`).join('\n');
-        const current = nodeFor(pack, p), mayStart = current.type === 'done' && role === pack.workflow.coordinator && !!api.newProject;
-        const status = p.busy ? `项目已开工，正在执行“${current.name}”中的正式任务；此次回复不会改动任务` : p.error ? '正式任务已暂停' : p.ended ? '项目已结束；未完成的步骤不视为验收通过' : current.type === 'done' ? '旧项目已完成，没有正在执行的新项目；无需再次验收或确认旧项目，禁止再让用户点旧确认按钮' : current.type === 'gate' ? `本项目已创建，${p.history.length ? '已有正式任务完成，不得说尚未开工或等待启动；' : ''}等负责人处理“${current.name}”卡片` : '等待下一步';
+        const current = nodeFor(pack, p), currentTask = taskLabel(pack, p), mayStart = current.type === 'done' && role === pack.workflow.coordinator && !!api.newProject;
+        const status = p.busy ? `项目已开工，正在执行“${currentTask}”中的正式任务；此次回复不会改动任务` : p.error ? '正式任务已暂停' : p.ended ? '项目已结束；未完成的步骤不视为验收通过' : current.type === 'done' ? '旧项目已完成，没有正在执行的新项目；无需再次验收或确认旧项目，禁止再让用户点旧确认按钮' : current.type === 'gate' ? `本项目已创建，${p.history.length ? '已有正式任务完成，不得说尚未开工或等待启动；' : ''}等负责人处理“${current.name}”卡片` : '等待下一步';
         const documentLinks = (await documents.view(p)).items.filter(d => d.url && d.shared).sort((a,b) => Number(isFinalDocument(pack, b)) - Number(isFinalDocument(pack, a))).slice(0,3).map(d => `${documentLabel(pack, d)}${isFinalDocument(pack, d) ? '（文章或报告正文，查成品优先使用此入口）' : ''}：${d.url}`).join('\n');
         let result;
         try { result = await agent({ role, projectDir: dir(p), runtimeRoot: root, definition: await roleDefinition(pack, role, root), isolateSession: true, mode: 'chat', timeoutMs: 60000, queueTimeoutMs: 300000,

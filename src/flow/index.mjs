@@ -69,7 +69,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   const titled = (chatId, card) => {
     const p = state.groups[chatId] || state.archived.find(p => p.chatId === chatId);
     if (!p?.name || !card.header?.title?.content || card.header.title.content.startsWith('测试 ·')) return card;
-    const title = card.header.title.content, prefix = projectLabel(p.name) + '｜';
+    const title = card.header.title.content, prefix = projectLabel('', p.name) + '｜';
     if (title.startsWith(prefix)) return card;
     const result = structuredClone(card); result.header.title.content = prefix + title; return result;
   };
