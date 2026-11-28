@@ -6,7 +6,11 @@
 
 项目提供可运行的服务、网页工作台和 AI 团队包协议。你可以直接使用内置团队，也可以定义自己的 Agent、Skill、Workflow 和 Workspace，让别人安装后在自己的飞书组织里使用。
 
-[快速开始](#快速开始) · [开放生态](#开放生态) · [开发与共建](#开发与共建) · [文档](#文档) · [提交问题](https://github.com/pengcong2020520/feishu-ai-team-starter/issues)
+[实际界面](#实际界面) · [快速开始](#快速开始) · [开放生态](#开放生态) · [开发与共建](#开发与共建) · [文档](#文档) · [提交问题](https://github.com/pengcong2020520/feishu-ai-team-starter/issues)
+
+![AI 团队工作台：左侧切换三支团队，右侧展示文枢的八位角色及各自的 Skill](docs/screenshots/workbench-teams.jpg)
+
+在工作台切换团队，直接查看这支团队有哪些同事、各自能做什么。
 
 ## 你能用它做什么
 
@@ -41,6 +45,27 @@ flowchart LR
 例如，在网页团队群里说“做一个读书会报名页”，产品经理先整理需求，设计给出页面方案，程序员完成网页；你在飞书卡片中确认或提出修改，在工作台查看全过程。
 
 观澜基于 [TradingAgents](https://github.com/TauricResearch/TradingAgents) 的研究方法适配，文枢基于 [Newtype](https://github.com/newtype-01/newtype-codex) 的内容协作方法适配。你也可以按同一协议制作行业团队。
+
+## 实际界面
+
+以下为本地运行的文枢 1.0.1 示例项目与飞书客户端截图，拍摄于 2026-11-28。
+
+**在飞书群里和整支团队协作。** 右侧是八位数字同事；左侧卡片汇报进展，需要你决定时提供操作按钮，带 ↗ 的入口用于打开资料或工作台。
+
+![飞书项目群：八位内容团队机器人、协作进度卡、审核按钮和工作台入口](docs/screenshots/feishu-team.jpg)
+
+<details>
+<summary>查看项目工作流与飞书图文成果</summary>
+
+**在工作台看任务如何衔接。** 展开步骤，可查看负责角色、使用的 Skill、前置任务和完成状态。
+
+![项目工作流：编辑稿件、交付前核查、主编汇总的角色分工、技能与依赖关系](docs/screenshots/workbench-workflow.jpg)
+
+**在飞书文档里阅读成果。** 正文、章节目录和原生图片一起呈现，成员可在文档中评论，意见同步回项目。
+
+![飞书图文示例：章节目录、正文与“确定问题—组织证据—阅读与确认”流程图](docs/screenshots/feishu-document.jpg)
+
+</details>
 
 ## 快速开始
 
