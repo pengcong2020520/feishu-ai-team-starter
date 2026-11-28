@@ -1,5 +1,7 @@
 # 领航版 · 多项目协作
 
+> 安装前先按 docs/部署与常驻.md 确定部署位置，已明确选择不重复问。本地执行 `node setup.mjs deploy local` 后走标准 setup，验收系统自启和异常重启；服务器先收集 SSH 主机、用户名、端口、登录方式和目录，记录 `deploy server --host … --user …`，在远端执行 `deploy server --here` 和 setup。不要先在本机创建、运行机器人再决定部署。服务器首次扫码使用标准扫码页加 SSH 转发。说明 macOS 登录后自启、Linux 需要 linger，以及休眠/断网的边界；服务恢复只接续已在执行的步骤，不批准人工关口。
+
 适合多个项目同时做。复用同一组三位 AI 同事，每项目一个群、一份工作区及每角色的 SDK 会话；管理员和工作台统一看进度，原 workflow 不变。
 
 ## 新安装提示词
@@ -7,7 +9,8 @@
 ```text
 我要搭建飞书 AI 团队「领航版 · 多项目协作」。选择已经明确，不必再问版本。
 使用 https://github.com/pengcong2020520/feishu-ai-team-starter 的 main 完整代码。
-先读 AGENTS.md、docs/版本导航.md、本文与 docs/复现指南.md。
+先读 AGENTS.md、docs/版本导航.md、本文、docs/复现指南.md 和 docs/部署与常驻.md。
+先确定服务器还是本地部署；已选择的不重复问。本地安装系统常驻，服务器收集 SSH 信息并在远端执行标准 setup；说明自启范围及休眠限制。
 检查 Node.js >=24、Git、模型接口和网络，在新目录运行 node setup.mjs mode projects，再运行 node setup.mjs，按“下一步”继续。
 新安装缺少的4个机器人由 node setup.mjs scan 创建；扫码由我在手机确认，密钥只保存在 .env。
 先核对机器人和工作台连接。由可信扫码记录或真实私聊识别发起人，不要求设置人员名册，不虚构飞书用户ID。

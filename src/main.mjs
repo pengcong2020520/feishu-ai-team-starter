@@ -2,6 +2,7 @@ import { startPreview } from './preview.mjs';
 import { createTeam } from './team.mjs';
 import { teamModeNames } from './team-mode.mjs';
 import { extraCredentials } from './packages/bindings.mjs';
+import { readDeployment } from './setup/deployment.mjs';
 
 process.loadEnvFile();
 const credentials = {};
@@ -24,6 +25,11 @@ try {
   console.log(`${Object.keys(allCredentials).length} 个机器人已连上飞书`);
   console.log(`当前版本：${teamModeNames[mode]}`);
   console.log(`预览地址：${previewBase}；走查与工作台地址：${workbenchBase}`);
+  if (readDeployment(process.cwd())?.recovery === 'resume-interrupted') {
+    for (const engine of [flow, flow.packages]) {
+      try { await engine.resumeInterrupted(); } catch (e) { console.error(`中断步骤未自动恢复，请在工作台重试：${e.message}`); }
+    }
+  }
 } catch (error) {
   await preview.close();
   feishu.close();

@@ -6,13 +6,16 @@ import { readProgress, saveProgress } from './progress.mjs';
 import { missingModel, missingBots, missingAdmin, nextStage } from './state.mjs';
 import { anthropicEnv, checkModel } from './model.mjs';
 import { depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail } from './install.mjs';
-import { serviceStatus, startService, stopService, pickPort, portsFree, workbenchState, workbenchMessage } from './service.mjs';
+import { serviceStatus, startService, stopService, pickPort, portsFree, workbenchState, workbenchMessage, workbenchPackageRetry } from './service.mjs';
 import { installRetry, registerMissing } from './register.mjs';
 import { createTeamGroup, greetAdmin } from './group.mjs';
 import { introCard as adminIntroCard } from '../admin/cards.mjs';
 import { stageNames } from '../flow/stages.mjs';
 import { createFeishuLogger } from '../feishu-logger.mjs';
 import { resolveTeamMode, teamModeNames } from '../team-mode.mjs';
+import { readDeployment, selectDeployment, deploymentLines, installBackground } from './deployment.mjs';
+import { managedService, uninstallManaged, lingerStatus } from './managed-service.mjs';
+import { startQrServer } from './qr-server.mjs';
 
 const portOf = env => Number(env.PREVIEW_PORT || 4870);
 const workbenchOf = env => `http://127.0.0.1:${portOf(env)}`;
@@ -20,7 +23,7 @@ const LABEL = { MODEL_BASE_URL: '接口地址', MODEL_API_KEY: '密钥', MODEL_N
 const MODEL_CMD = '用文件写入工具把密钥原样存成 data/model-key.txt（不要用 shell 命令写），再运行 node setup.mjs model --base-url <地址> --model <模型名> --key-file data/model-key.txt（读完会删掉这个文件）';
 
 const realDeps = {
-  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, stopService, pickPort, portsFree, workbenchState, workbenchMessage,
+  depsReady, installStatus, pickRegistry, startInstall, waitForInstall, installLogTail, checkModel, serviceStatus, startService, stopService, pickPort, portsFree, workbenchState, workbenchMessage, workbenchPackageRetry, installBackground, managedService, uninstallManaged, lingerStatus,
   // 飞书 SDK 和 qrcode 要等依赖装好才能加载
   async loadFeishu() {
     const lark = await import('@larksuiteoapi/node-sdk');
@@ -61,6 +64,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     const mark = ok => (ok ? '✓' : '…');
     log(['', '== 当前进度 ==',
       `版本：${teamModeNames[resolveTeamMode({ root, env: fileEnv })]}`,
+      `部署：${({ local: '本地电脑', server: '服务器' })[readDeployment(root)?.target] || '尚未选择'}；自启动：${d.managedService(root)?.scope || '未安装'}`,
       `团队包审核：${({ human: '人工确认', auto: '独立自动审核' })[fileEnv.TEAM_REVIEW_MODE] || '尚未选择（沿用原工作流关口）'}`,
       `${mark(progress.modelOk && !missingModel(fileEnv).length)} 模型`,
       `${mark(depsOk())} 依赖`,
@@ -72,7 +76,28 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     return code;
   };
 
-  if (command === 'review') {
+  const register = async (feishu, options) => {
+    const qr = readDeployment(root)?.target === 'server' ? await startQrServer(options.qrDir) : null;
+    if (qr) log(`服务器二维码页面：${qr.url}；在你的电脑建立 SSH 转发 -L ${qr.port}:127.0.0.1:${qr.port}，再打开该地址扫码。扫码完成后此临时入口自动关闭。`);
+    try { return await feishu.registerMissing({ ...options, ...(qr ? { open: () => {} } : {}) }); }
+    finally { await qr?.close(); }
+  };
+
+  if (readDeployment(root)?.location === 'remote' && !['deploy', 'service', 'mode', 'review', 'status'].includes(command)) return finish(0, deploymentLines(readDeployment(root)));
+
+  if (command === 'deploy') {
+    try {
+      if (rest[0] === 'server' && !rest.includes('--here') && (serviceRunning() || d.managedService(root))) return finish(1, ['本机服务或自启动仍在使用这组机器人。请等当前任务结束，运行 npm stop 和 node setup.mjs service uninstall，再选择服务器；原项目与配置保留。']);
+      const selected = selectDeployment(root, rest[0], { host: flag('--host'), user: flag('--user'), port: flag('--port'), directory: flag('--path'), identityFile: flag('--identity-file'), here: rest.includes('--here') });
+      return finish(0, selected.location === 'remote' ? deploymentLines(selected) : ['部署位置已记录。运行 node setup.mjs 继续；模型与机器人就绪后安装系统常驻服务。macOS 在用户登录后启动；Linux 开机运行还需启用 linger。']);
+    } catch (error) { return finish(1, [error.message]); }
+  } else if (command === 'service') {
+    if (rest[0] === 'uninstall') {
+      try { d.uninstallManaged(root); return finish(0, ['已移除系统自启动；配置、项目和文档保留。需要重新启用时运行 node setup.mjs。']); }
+      catch (e) { return finish(1, [`卸载自启动失败：${e.message}`]); }
+    }
+    return finish(rest[0] === 'status' ? 0 : 1, ['查看运行状态：npm run status；卸载自启：node setup.mjs service uninstall。']);
+  } else if (command === 'review') {
     if (!['human', 'auto'].includes(rest[0])) return finish(1, ['请选择 node setup.mjs review human（人工确认）或 auto（独立自动审核）；仅影响新建团队包项目。']);
     updateEnv(envFile, { TEAM_REVIEW_MODE: rest[0] });
     return finish(0, [`新团队包项目默认采用${rest[0] === 'human' ? '人工确认' : '独立自动审核'}；已有项目保持原方式。运行 node setup.mjs 继续。`]);
@@ -91,7 +116,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     const f = await d.loadFeishu();
     f.installRetry(f.lark.defaultHttpInstance, { log });
     log('给现有 AI 产品经理增补：记录全部群讨论、读取私聊、项目群成员管理。不创建新机器人。请扫码查看权限差异并确认。');
-    const result = await f.registerMissing({ lark: f.lark, qrcode: f.qrcode, roles: [{ ...team[0], existingAppId: current.FEISHU_PRODUCT_APP_ID }], qrDir: path.join(root, 'qr'), log,
+    const result = await register(f, { lark: f.lark, qrcode: f.qrcode, roles: [{ ...team[0], existingAppId: current.FEISHU_PRODUCT_APP_ID }], qrDir: path.join(root, 'qr'), log,
       save: async (_role, r) => { updateEnv(envFile, { FEISHU_PRODUCT_APP_SECRET: r.appSecret }); saveProgress(root, { projectScopesRequested: true, ...(r.openId ? { ownerOpenId: r.openId } : {}) }); },
     });
     if (result.every(r => r.ok)) updateEnv(envFile, { TEAM_MODE: 'projects' });
@@ -127,14 +152,17 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
     if (!p) return finish(1, [`没有 #${rest[0] ?? ''} 这个项目。运行 node setup.mjs 看哪些项目没做完`]);
     if (p.waitingFor !== '重试') return finish(1, [`#${p.number} ${p.name} 没有停下，不用接着做（现在：${stageNames[p.stage] ?? p.stage}${p.waitingFor ? `，等用户${p.waitingFor}` : ''}）`]);
     const name = team.find(r => r.key === p.retryRole)?.name ?? '负责的同事';
-    try { await d.workbenchMessage(portOf(fileEnv), { chatId: p.chatId, role: p.retryRole, text: '重试' }); }
+    try { if (p.package) await d.workbenchPackageRetry(portOf(fileEnv), p); else await d.workbenchMessage(portOf(fileEnv), { chatId: p.chatId, role: p.retryRole, text: '重试' }); }
     catch (error) { return finish(1, [`没能接着做：${error.message}`]); }
     return finish(0, [`告诉用户：已让${name}接着做 #${p.number} ${p.name}「${stageNames[p.stage] ?? p.stage}」，去飞书群或工作台 ${workbenchOf(fileEnv)} 看进度卡`]);
   } else if (command && !['scan', 'status'].includes(command)) {
     return finish(1, [`不认识的参数：${command}。可用：node setup.mjs、node setup.mjs mode basic|projects、node setup.mjs upgrade-projects、node setup.mjs scan、node setup.mjs status、node setup.mjs resume <编号>、node setup.mjs model …、node setup.mjs --use-anthropic-env`]);
   }
 
-  // 依赖不在、也没在装，就先在后台装：用户回答问题的同时装好
+  const deployment = readDeployment(root);
+  if (!deployment || deployment.location === 'remote') return finish(0, deploymentLines(deployment));
+
+  // 先选择代码实际运行位置；服务器模式不能在本机悄悄安装、扫码或启动。
   if (!depsOk() && d.installStatus(root).status !== 'running') {
     const registry = await d.pickRegistry();
     d.startInstall(root, { registry });
@@ -157,7 +185,7 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
   const scan = async roles => {
     feishu ??= await d.loadFeishu();
     feishu.installRetry(feishu.lark.defaultHttpInstance, { log });
-    const results = await feishu.registerMissing({
+    const results = await register(feishu, {
       lark: feishu.lark, qrcode: feishu.qrcode, roles: roles.map(role => ({ ...role, mode: resolveTeamMode({ root, env: readEnv(envFile) }) })), qrDir: path.join(root, 'qr'), log,
       save: async (role, r) => {
         if (role.key === 'admin') {
@@ -183,6 +211,16 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       const stuck = await stuckLines(fileEnv);
       const extra = stage === 'admin' ? ['还没建 AI 管理员助手：运行 node setup.mjs 补扫一张码'] : [];
       return finish(0, stuck.length || extra.length ? [...stuck, ...extra] : ['都好了，不用再做什么']);
+    }
+
+    if (['service', 'admin', 'done'].includes(stage) && !d.managedService(root)) {
+      try {
+        const installed = await d.installBackground(root);
+        serviceStarted = false;
+        log(`✓ 已安装系统常驻服务：${installed.scope}；异常退出将自动拉起。`);
+        if (installed.platform === 'linux' && !installed.linger) log('尚未启用开机用户服务：在运行账号下执行 loginctl enable-linger，再检查 loginctl show-user "$USER" -p Linger；失败时由系统管理员授权。');
+      } catch (error) { return finish(1, [`常驻服务尚未装好：${error.message}`, '保留现有配置，处理后重新运行 node setup.mjs；不要把临时后台运行说成已启用自启动。']); }
+      continue;
     }
 
     if (stage === 'model') {
@@ -266,6 +304,10 @@ export async function runSetup({ root, argv = [], env = process.env, readStdin =
       log('✓ 已重启团队服务，可以私聊 AI 管理员助手了');
       continue;
     }
+    if (d.managedService(root)?.platform === 'linux' && !d.lingerStatus()) return finish(0, [
+      '团队服务已启动，但开机自启动尚未完成：在服务运行账号下执行 loginctl enable-linger，再运行 node setup.mjs。',
+      '如果系统拒绝此操作，请系统管理员为该账号启用 linger。不要把“登录后能跑”当作“开机后无人登录也能跑”。',
+    ]);
     return finish(0, [
       ...await stuckLines(fileEnv),
       '都好了。告诉用户：',

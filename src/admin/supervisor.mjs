@@ -6,9 +6,11 @@ import path from 'node:path';
 export const READY_TEXT = '个机器人已连上飞书';
 const tail = text => text.trim().split('\n').slice(-5).join('\n');
 
-export function createSupervisor({ root, entry = 'src/main.mjs', env = process.env, readyText = READY_TEXT, readyMs = 60000, stopMs = 4000, logFile = null, echo = true, onExit = () => {} } = {}) {
+export function createSupervisor({ root, entry = 'src/main.mjs', env = process.env, readyText = READY_TEXT, readyMs = 60000, stopMs = 4000, logFile = null, echo = true, onExit = () => {}, autoRestart = false, restartMs = 5000 } = {}) {
   let child = null;
   let stopping = false;
+  let retryTimer = null, failures = 0;
+  const cancelRetry = () => { clearTimeout(retryTimer); retryTimer = null; };
   let state = { running: false, healthy: false, pid: null, startedAt: null, lastExit: null };
   // 本机由 npm start 把管理服务的输出重定向到 data/service.log；容器里另设 logFile，让 docker logs 和文件里都有
   const log = logFile ? (mkdirSync(path.dirname(logFile), { recursive: true }), createWriteStream(logFile, { flags: 'a' })) : null;
@@ -39,7 +41,14 @@ export function createSupervisor({ root, entry = 'src/main.mjs', env = process.e
       state = { ...state, running: false, healthy: false, pid: null, lastExit: { code, signal, at: new Date().toISOString(), expected } };
       finish({ ok: false, error: tail(seen) || `团队服务退出了（${signal ?? `退出码 ${code}`}）` });
       // 通知里带上最后几行输出（不存进 status，免得到处传）
-      if (!expected) onExit({ ...state.lastExit, output: tail(seen) });
+      if (!expected) {
+        onExit({ ...state.lastExit, output: tail(seen) });
+        if (autoRestart) {
+          if (Date.now() - Date.parse(state.startedAt) > 300000) failures = 0;
+          const delay = Math.min(60000, restartMs * 2 ** Math.min(failures++, 6));
+          retryTimer = setTimeout(() => { retryTimer = null; void start(); }, delay);
+        }
+      }
     });
   });
 
@@ -66,7 +75,7 @@ export function createSupervisor({ root, entry = 'src/main.mjs', env = process.e
     void task.then(() => { if (starting === task) starting = null; }, () => { if (starting === task) starting = null; });
     return task;
   };
-  const stop = () => serial(stopNow);
-  const restart = () => serial(async () => { await stopNow(); return startNow(); });
+  const stop = () => { cancelRetry(); stopping = true; return serial(stopNow); };
+  const restart = () => { cancelRetry(); return serial(async () => { await stopNow(); return startNow(); }); };
   return { start, stop, restart, status: () => ({ ...state }), close: () => log?.end() };
 }

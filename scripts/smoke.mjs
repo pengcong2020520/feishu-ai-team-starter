@@ -32,15 +32,15 @@ try {
   child.kill();
 }
 
-// 启动命令首跑：在临时目录里跑，确认建好 .env（600）并请用户提供模型信息
+// 启动命令首跑：先选择部署位置，不能默默在本机启动机器人。
 const dir = mkdtempSync(path.join(os.tmpdir(), 'setup-smoke-'));
 try {
   for (const item of ['setup.mjs', 'src', '.env.example', 'package.json']) cpSync(item, path.join(dir, item), { recursive: true });
   symlinkSync(path.resolve('node_modules'), path.join(dir, 'node_modules'), 'dir');
   const out = execFileSync(process.execPath, ['setup.mjs'], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] });
-  if (!out.includes('== 下一步 ==') || !out.includes('接口地址、密钥、模型名')) throw new Error(`启动命令首跑输出不对：\n${out}`);
+  if (!out.includes('== 下一步 ==') || !out.includes('选择部署在服务器还是本地电脑')) throw new Error(`启动命令首跑输出不对：\n${out}`);
   if ((statSync(path.join(dir, '.env')).mode & 0o777) !== 0o600) throw new Error('.env 权限不是 600');
-  console.log('✓ 启动命令首跑：建好 .env 并请用户提供模型信息');
+  console.log('✓ 启动命令首跑：建好 .env 并先选择部署位置');
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

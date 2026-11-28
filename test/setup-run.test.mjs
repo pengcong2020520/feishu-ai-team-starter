@@ -5,23 +5,28 @@ import os from 'node:os';
 import path from 'node:path';
 import { runSetup } from '../src/setup/run.mjs';
 import { readProgress, saveProgress } from '../src/setup/progress.mjs';
+import { selectDeployment } from '../src/setup/deployment.mjs';
 
 const MODEL = 'MODEL_BASE_URL=https://m.test/api\nMODEL_API_KEY=sk-secret-123\nMODEL_NAME=m1\n';
 const TEAM = ['PRODUCT', 'DESIGNER', 'DEVELOPER'].map(k => `FEISHU_${k}_APP_ID=cli_${k.toLowerCase()}\nFEISHU_${k}_APP_SECRET=s_${k}\n`).join('');
 const ADMIN = 'FEISHU_ADMIN_APP_ID=cli_admin\nFEISHU_ADMIN_APP_SECRET=s_ADMIN\nFEISHU_ADMIN_OPEN_ID=ou_admin\n';
 const BOTS = TEAM + ADMIN;
 
-function setupRoot(envText) {
+function setupRoot(envText, chosen = true) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'setup-run-'));
   writeFileSync(path.join(root, '.env.example'), '# 模板\nMODEL_BASE_URL=https://example.com/api/compatible\nMODEL_API_KEY=xxx\nMODEL_NAME=xxx\n');
   if (envText !== undefined) writeFileSync(path.join(root, '.env'), envText, { mode: 0o600 });
+  if (chosen) selectDeployment(root, 'local');
   return root;
 }
 
 function fakes(over = {}) {
   const calls = { install: 0, scan: [], group: [], service: 0, stop: 0, greet: [], messages: [] };
   let running = false;
+  let managed = null;
   const deps = {
+    managedService: () => managed,
+    installBackground: async () => { managed = { scope: '测试系统服务', platform: 'darwin' }; return managed; },
     depsReady: () => true,
     installStatus: () => ({ status: 'ok' }),
     pickRegistry: async () => 'https://registry.npmjs.org/',
@@ -57,15 +62,52 @@ async function run(root, argv, { deps, env = {}, stdin = '' }) {
   return { code, text: out.join('\n') };
 }
 
-test('首跑：按模板建 .env（600），在后台装依赖，问用户要模型三项', async () => {
-  const root = setupRoot();
+test('首跑：先选部署位置，不在用户选服务器之前安装或扫码', async () => {
+  const root = setupRoot(undefined, false);
   const { deps, calls } = fakes({ depsReady: () => false, installStatus: () => ({ status: 'none' }) });
   const { code, text } = await run(root, [], { deps });
   assert.equal(code, 0);
   assert.equal(statSync(path.join(root, '.env')).mode & 0o777, 0o600);
-  assert.equal(calls.install, 1);
+  assert.equal(calls.install, 0);
   assert.match(text, /== 下一步 ==/);
-  assert.match(text, /接口地址、密钥、模型名/);
+  assert.match(text, /选择部署在服务器还是本地电脑/);
+});
+
+test('选服务器后保留远端信息，不在本机安装依赖或启动机器人', async () => {
+  const root = setupRoot(undefined, false), { deps, calls } = fakes();
+  const saved = await run(root, ['deploy','server','--host','server.example.org','--user','ubuntu','--path','/opt/my team'], { deps });
+  assert.equal(saved.code, 0); const result = await run(root, [], { deps });
+  assert.match(result.text, /远端安装/); assert.equal(calls.service, 0); assert.equal(calls.install, 0); assert.deepEqual(calls.scan, []);
+});
+
+test('本地选择后继续模型与后台依赖安装', async () => {
+  const root = setupRoot(), {deps,calls} = fakes({depsReady:()=>false,installStatus:()=>({status:'none'})});
+  const result=await run(root,[],{deps});assert.match(result.text,/接口地址、密钥、模型名/);assert.equal(calls.install,1);
+});
+
+test('转服务器前必须停用本地实例；选远端后 resume 和增补扫码不能启动本机', async () => {
+  const root = setupRoot(MODEL+BOTS);
+  const { deps } = fakes({ managedService: () => ({ platform: 'darwin', scope: '登录后自启' }) });
+  const denied = await run(root, ['deploy','server','--host','server.example.org','--user','ubuntu'], { deps });
+  assert.equal(denied.code, 1); assert.match(denied.text, /service uninstall/);
+  selectDeployment(root, 'server', { host: 'server.example.org', user: 'ubuntu' });
+  const isolated = fakes();
+  for (const args of [['resume','1'], ['upgrade-projects'], ['scan']]) {
+    const result = await run(root, args, isolated); assert.match(result.text, /远端安装/);
+  }
+  assert.equal(isolated.calls.service, 0); assert.deepEqual(isolated.calls.scan, []);
+});
+
+test('配置完成后先安装系统守护再启动；Linux 未开 linger 不报告全部完成',async()=>{
+ const root=setupRoot(MODEL+BOTS);saveProgress(root,{modelOk:true,groupReady:true});const order=[];let managed=null;
+ const {deps}=fakes({managedService:()=>managed,installBackground:async()=>{order.push('install');managed={scope:'用户服务',platform:'linux',linger:false};return managed;},lingerStatus:()=>false,startService:async()=>{order.push('start');return {ok:true,pid:1};}});
+ const result=await run(root,[],{deps});assert.deepEqual(order,['install','start']);assert.match(result.text,/开机自启动尚未完成/);assert.doesNotMatch(result.text,/都好了/);
+});
+
+test('团队包手工接续使用当前项目的重试卡，不误发给原网页引擎',async()=>{
+ const root=setupRoot(MODEL+BOTS),p={id:'package-id',package:{id:'team'},number:7,chatId:'group',stage:'planning',cardId:'latest',waitingFor:'重试'};const calls=[];
+ const {deps}=fakes({serviceStatus:()=>({running:true}),workbenchState:async()=>({projects:[p]}),workbenchPackageRetry:async(port,project)=>calls.push(project),workbenchMessage:async()=>{throw Error('不应进入旧引擎');}});
+ assert.equal((await run(root,['resume','7'],{deps})).code,0);assert.deepEqual(calls,[p]);
 });
 
 test('model 子命令：密钥从标准输入写入，输出里没有密钥', async () => {
