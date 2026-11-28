@@ -1,5 +1,6 @@
 // 文档只通过当前团队协调机器人的 SDK 调用；凭据不进入 Agent。
 import { createHash } from 'node:crypto';
+import { readDocumentImage } from './document-visuals.mjs';
 
 export function documentBatches(blocks, roots) {
   const map = new Map(blocks.map(b => [b.block_id, structuredClone(b)])), seen = new Set(), batches = [];
@@ -27,7 +28,12 @@ function batchToken(token, index) {
   const b = createHash('sha256').update(`${token}:${index}`).digest().subarray(0, 16); b[6] = b[6] & 15 | 64; b[8] = b[8] & 63 | 128;
   const h = b.toString('hex'); return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 }
-export function documentTransport(client, call) {
+export function documentTransport(client, call, { uploadMs = 60000 } = {}) {
+  const upload = async promise => {
+    let timer;
+    try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(Error('文档图片上传超时，请重试同步')), uploadMs); })]); }
+    finally { clearTimeout(timer); }
+  };
   return {
     async create(title) {
       const r = await call(() => client.docx.v1.document.create({ data: { title } }));
@@ -37,15 +43,43 @@ export function documentTransport(client, call) {
     async share(id, chatId) {
       await call(() => client.drive.v1.permissionMember.batchCreate({ path: { token: id }, params: { type: 'docx', need_notification: false }, data: { members: [{ member_type: 'openchat', member_id: chatId, type: 'chat', perm: 'edit' }] } }));
     },
-    async append(id, markdown, token, { state = {}, save = async () => {} } = {}) {
+    async append(id, markdown, token, { assets = {}, state = {}, save = async () => {} } = {}) {
       if (!state.batches) {
         const converted = await call(() => client.docx.v1.document.convert({ data: { content_type: 'markdown', content: markdown } }));
         const { blocks, first_level_block_ids: roots } = converted.data || {};
         if (!blocks?.length || !roots?.length) throw Error('文档转换没有返回内容');
+        const images = converted.data.block_id_to_image_urls || [];
+        for (const image of images) if (!assets[image.image_url]) throw Error('文档包含未准备的图片，已停止写入，请使用本项目图片或受支持的配图定义');
+        const imageIds = new Set(blocks.filter(b => b.block_type === 27).map(b => b.block_id));
+        if (imageIds.size !== images.length || new Set(images.map(i => i.block_id)).size !== images.length || images.some(i => !imageIds.has(i.block_id))) throw Error('图片块与素材映射不完整，已停止写入');
+        state.images = images.map(i => ({ temporary: i.block_id, url: i.image_url }));
         state.batches = documentBatches(blocks, roots); state.next = 0; await save();
       }
       for (let i = state.next; i < state.batches.length; i++) {
-        await call(() => client.docx.v1.documentBlockDescendant.create({ path: { document_id: id, block_id: id }, params: { document_revision_id: -1, client_token: batchToken(token, i) }, data: state.batches[i] }));
+        state.inserted ||= {};
+        if (!state.inserted[i]) {
+          const inserted = await call(() => client.docx.v1.documentBlockDescendant.create({ path: { document_id: id, block_id: id }, params: { document_revision_id: -1, client_token: batchToken(token, i) }, data: state.batches[i] }));
+          const ids = new Set(state.batches[i].descendants.map(b => b.block_id));
+          for (const image of (state.images || []).filter(image => ids.has(image.temporary))) {
+            image.blockId = inserted.data?.block_id_relations?.find(r => r.temporary_block_id === image.temporary)?.block_id;
+            if (!image.blockId) throw Error('图片插入回执缺少原生块编号，请保留同步状态后重试');
+          }
+          state.inserted[i] = true; await save();
+        }
+        for (const image of (state.images || []).filter(image => image.blockId && !image.done)) {
+          const asset = assets[image.url]; if (!asset) throw Error('待同步版本缺少图片缓存');
+          if (!image.fileToken) {
+            const file = await readDocumentImage(asset);
+            const uploaded = await upload(call(() => client.drive.v1.media.uploadAll({ data: { file_name: asset.name, parent_type: 'docx_image', parent_node: image.blockId, size: file.length, file } })));
+            image.fileToken = uploaded?.file_token || uploaded?.data?.file_token;
+            if (!image.fileToken) throw Error('图片上传没有返回素材编号');
+            await save();
+          }
+          await call(() => client.docx.v1.documentBlock.patch({ path: { document_id: id, block_id: image.blockId }, params: { document_revision_id: -1 }, data: { replace_image: { token: image.fileToken } } }));
+          const verified = await call(() => client.docx.v1.documentBlock.get({ path: { document_id: id, block_id: image.blockId } }));
+          if (verified.data?.block?.image?.token !== image.fileToken) throw Error('图片已上传但飞书回读未确认绑定，请重试同步');
+          image.done = true; await save();
+        }
         state.next = i + 1; await save();
       }
     },

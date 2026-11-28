@@ -8,6 +8,16 @@ import { ADDONS, installRetry, registerMissing, registerRole } from '../src/setu
 
 const qrcode = { async toFile(file) { writeFileSync(file, 'png'); } };
 
+test('文档与素材上传权限只附加到需要发布文档的协调角色', async () => {
+  const requested=[];
+  const lark={registerApp:async input=>{requested.push(input.addons.scopes.tenant);return{client_id:'cli_test',client_secret:'test-only'};}};
+  await registerRole({lark,role:{key:'chief',name:'协调者',mode:'projects',documents:true}});
+  await registerRole({lark,role:{key:'writer',name:'作者',mode:'projects'}});
+  for(const scope of ['docx:document','docs:permission.member:create','docs:document.media:upload']){
+    assert.ok(requested[0].includes(scope));assert.ok(!requested[1].includes(scope));
+  }
+});
+
 test('基础版产品经理接收全部群消息；私聊和成员管理仅多项目版申请', async () => {
   const requested = [];
   const lark = { registerApp: async options => { requested.push(options.addons.scopes.tenant); return { client_id: 'cli_new', client_secret: 'test-only' }; } };

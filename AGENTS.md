@@ -1,5 +1,7 @@
 # 项目说明书：飞书 AI 团队
 
+图文补充（2026-11-28）：文档写作和飞书发布遵守 `docs/文档与飞书呈现规范.md` 与 `skills/illustrated-documents/SKILL.md`，专业 Skill 契约优先。团队包 Markdown 可用 `team-figure` 有界定义或本项目相对 PNG/JPEG/WebP 配图，由平台生成/上传原生图片；旧网页引擎和本机项目不冒称已同步。协调机器人需要文档、协作者、素材上传权限；真实 API 失败需显示错误，重试复用正文与图片进度。不要读其他项目的图片或开启文档公开编辑。安装说明优先引导读 `docs/图文安装与权限指南.md`，它不代替标准 setup。
+
 ## 开放团队包（安装其他团队或分享自己的团队时）
 
 先读 [团队包标准](docs/AI团队包规范.md)，搭建提示词在 [docs/prompts/ecosystem.md](docs/prompts/ecosystem.md)。原启航版、领航版及下文默认网页流程继续保留。

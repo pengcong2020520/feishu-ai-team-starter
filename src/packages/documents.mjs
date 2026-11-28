@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { atomicJson } from './store.mjs';
 import { readArtifact } from './runtime.mjs';
+import { prepareDocumentVisuals } from '../document-visuals.mjs';
 
 const hash = text => createHash('sha256').update(text).digest('hex');
 const url = id => `https://feishu.cn/docx/${id}`;
@@ -64,7 +65,18 @@ export function createDocumentSync({ root, feishu, onFeedback = async () => {} }
           if (!artifact.text.trim()) continue;
           const item = s.artifacts[a.id] ||= { name: a.name };
           try {
+            const finishPending = async () => {
+              await remote.append(item.id, item.pending.markdown, item.pending.token, { assets: item.pending.assets || {}, state: item.pending.delivery ||= {}, save: () => atomicJson(file(p), s) });
+              item.hash = item.pending.hash; item.status = item.pending.status; item.updatedAt = new Date().toISOString(); delete item.pending;
+              await atomicJson(file(p), s);
+            };
+            // 旧版本已插入的图片优先续传；当前草稿正在改图或尚未写完时，不让旧图一直空白。
+            if (item.id && item.pending) {
+              if (!item.shared) { await remote.share(item.id, p.chatId); item.shared = true; await atomicJson(file(p), s); }
+              await finishPending();
+            }
             if (Buffer.byteLength(artifact.text) > 200000) throw Error('文档超过 200 KB，请拆分产物后同步');
+            const visual = await prepareDocumentVisuals({ markdown: artifact.text, projectDir: path.join(root, 'workspace', p.id), artifactPath: a.path, cacheDir: path.join(root, 'data/document-assets', p.id) });
             if (!item.id) {
               if (item.creating) throw Error('上次创建文档回执不确定，已停止重复创建；请核查飞书文档并恢复文档编号');
               item.creating = true; await atomicJson(file(p), s);
@@ -73,13 +85,12 @@ export function createDocumentSync({ root, feishu, onFeedback = async () => {} }
               await atomicJson(file(p), s);
             }
             if (!item.shared) { await remote.share(item.id, p.chatId); item.shared = true; await atomicJson(file(p), s); }
-            const digest = hash(artifact.text + '\n' + status);
+            const digest = hash(artifact.text + '\n' + status + (Object.keys(visual.assets).length ? '\n' + visual.digest : ''));
             // 先续传旧版本，再在本次同步中追上最新文件和状态；否则归档时可能停留在旧草稿。
             while (item.hash !== digest || item.pending) {
-              item.pending ||= { token: randomUUID(), hash: digest, status, markdown: formatDocument(artifact.text, { fallback: a.name, status, updatedAt: new Date().toISOString() }).markdown };
+              item.pending ||= { token: randomUUID(), hash: digest, status, assets: visual.assets, markdown: formatDocument(visual.markdown, { fallback: a.name, status, updatedAt: new Date().toISOString() }).markdown };
               await atomicJson(file(p), s);
-              await remote.append(item.id, item.pending.markdown, item.pending.token, { state: item.pending.delivery ||= {}, save: () => atomicJson(file(p), s) });
-              item.hash = item.pending.hash; item.status = item.pending.status; item.updatedAt = new Date().toISOString(); delete item.pending;
+              await finishPending();
             }
             delete item.error;
           } catch (e) { item.error = e.message; /* 保留批次进度与幂等号，后续失败不能让已写入部分重复追加。 */ }

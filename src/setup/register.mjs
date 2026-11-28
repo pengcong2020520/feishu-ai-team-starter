@@ -37,7 +37,7 @@ export function installRetry(http, { retries = 5, delayMs = 1000, log = () => {}
 export async function registerRole({ lark, role, signal, onQr }) {
   let addons = role.p2p ? ADMIN_ADDONS : role.mode === 'projects' || role.existingAppId ? PROJECT_ADDONS : ADDONS;
   if (!role.p2p && role.key === 'product' && !addons.scopes.tenant.includes('im:message.group_msg')) addons = { ...addons, scopes: {tenant:[...addons.scopes.tenant, 'im:message.group_msg']} };
-  if (role.documents) addons = { ...addons, scopes: { tenant: [...new Set([...addons.scopes.tenant, 'docx:document', 'docs:permission.member:create'])] } };
+  if (role.documents) addons = { ...addons, scopes: { tenant: [...new Set([...addons.scopes.tenant, 'docx:document', 'docs:permission.member:create', 'docs:document.media:upload'])] } };
   const result = await lark.registerApp({ ...(role.existingAppId ? { appId: role.existingAppId } : { createOnly: true }), signal, appPreset: { name: role.name, desc: role.desc }, addons, onQRCodeReady: onQr });
   if (role.existingAppId && result.client_id !== role.existingAppId) throw Error('返回的应用与现有机器人不一致，已停止，不替换机器人');
   return { appId: result.client_id, appSecret: result.client_secret, openId: result.user_info?.open_id ?? null };
