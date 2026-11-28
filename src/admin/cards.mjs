@@ -1,7 +1,7 @@
 // AI 管理员助手的私聊卡片（卡片 1.0，橙色，和三个角色区分开）
 import { roles } from '../agents/roles.mjs';
 import { stageNames } from '../flow/stages.mjs';
-import { plainText } from '../presentation.mjs';
+import { plainText, replyElements } from '../presentation.mjs';
 
 export const ADMIN_NAME = 'AI 管理员助手';
 const grey = text => ({ tag: 'div', text: { tag: 'lark_md', content: `<font color='grey'>${text}</font>` } });
@@ -116,9 +116,9 @@ export function stewardCard({ task, activity, steps, elapsedMs, guides = [], car
     grey(`已用 ${seconds(elapsedMs)} · 第 ${steps} 步`),
     { tag: 'action', actions: [button('停下', { action: 'stop_steward', cardId })] },
   ]);
-  const body = cleanReply(reply);
+  const body = String(reply || "").slice(0,10000);
   return card(outcome === 'ok' ? '完成' : '停下了', [
-    line(body || (outcome === 'stopped' ? '⏹ 已停下' : '⚠️ 没做完')),
+    ...replyElements(body || (outcome === 'stopped' ? '⏹ 已停下' : '⚠️ 没做完')),
     { tag: 'hr' },
     grey(`你说的：${plain(task, 80)}`),
     ...(stats ? [grey(`用时 ${seconds(stats.durationMs)} · ${steps} 步；读入 ${tokens(stats.inputTokens)} / 写出 ${tokens(stats.outputTokens)} token`)] : []),

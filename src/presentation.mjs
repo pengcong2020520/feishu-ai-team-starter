@@ -57,3 +57,30 @@ export const taskReplySchema = {
   type: 'object', additionalProperties: false, required: ['reply'],
   properties: { reply: { type: 'string', maxLength: 240, description: '发给飞书用户的2至3句简洁中文，建议60至160字。说清做出了什么、最重要的结论与限制。不列文件路径、技能调用、工具日志、修改清单或代码，不用Markdown。必须保留未核实和未通过的事实。完整细节写入工作区文件。' } },
 };
+
+
+export const conversationStyle = `所有角色面向飞书用户交流时遵循以下表达规范；不改变专业文档、结构化计划、审核字段或 workflow。
+先给结论，再给依据。若用户问两个问题，首段必须用 1、2 分别回应，不能用一整段概括代替，关键判断局部加粗。不寒暄、不奉承、不说教，像共同解决问题的同行；肯定方案必须有具体依据，也直接指出限制。
+抽象技术概念先用一个贴切的生活比喻解释，再说明真实对应关系和比喻不适用之处；不强塞比喻。二元问题按用户体验、底层实现或适用阶段拆开，给出有条件的选择，不虚假平衡、不凭空编造优势；避免无依据的“唯一”“彻底”“成本翻倍”等绝对判断。
+复杂解释采用总—分—收：开头给结论；主体按“一、怎么理解”“二、怎么选与演进”“三、下一步注意什么”组织，每节只解决一个问题；最后用一个具体排查方向或可执行下一步收住，不写“综上所述”。标题可用 ###，平台转换成飞书支持的样式。
+并列概念用局部加粗引导的列表；确有选型时用简短对比表（方案、优势、代价、适用阶段，最多四列）；风险用编号清单，只列有依据的相关风险，通常不超过四项，不为凑数编造。每段一至三句、尽量两至四行，移动端行数随宽度变化；不要整段加粗或形成文字墙。
+简单问题直接答，进度与完成通知只需结论、关键限制和下一步，不硬套三节或表格。复杂讨论通常 400—900 字，必要时更短。用户询问 SDK、Runtime 等技术时可以准确解释这些术语，不把真实问题当内部日志删掉。未知、假设、事实必须区分；不得把自动检查说成人工验收。`;
+
+// Card 1.0 supports bold and columns, but not Markdown heading/table syntax.
+export function replyMarkdown(value) {
+  const bold=[];
+  const source=String(value??'').replace(/\*\*([^*\n]+)\*\*/g,(_,text)=>{bold.push(plainText(text).replace(/[<>]/g,''));return `REPLYBOLDTOKEN${bold.length-1}END`;});
+  return plainText(source).replace(/[<>]/g,'').replace(/REPLYBOLDTOKEN(\d+)END/g,(_,i)=>bold[i]===undefined?'':`**${bold[i]}**`);
+}
+export function replyElements(value) {
+  const lines=String(value??'').slice(0,10000).split('\n'),out=[],buffer=[];
+  const flush=()=>{if(buffer.length){out.push({tag:'div',text:{tag:'lark_md',content:replyMarkdown(buffer.join('\n'))||' '}});buffer.length=0;}};
+  const cells=line=>line.trim().replace(/^\||\|$/g,'').split('|').map(x=>x.trim());
+  for(let i=0;i<lines.length;i++) {
+    if(lines[i].includes('|') && /^\s*\|?\s*:?-{3,}/.test(lines[i+1]||'') && cells(lines[i]).length<=4){
+      flush();const headers=cells(lines[i]);i++;
+      const row=(values,heading)=>({tag:'column_set',flex_mode:'none',columns:headers.map((_,j)=>({tag:'column',width:'weighted',weight:1,elements:[{tag:'div',text:{tag:'lark_md',content:heading?`**${plainText(values[j]||'')}**`:replyMarkdown(values[j]||'—')}}]}))});
+      out.push(row(headers,true));while(i+1<lines.length&&lines[i+1].includes('|'))out.push(row(cells(lines[++i]),false));
+    }else buffer.push(lines[i].replace(/^\s*#{1,6}\s+(.+)$/,'**$1**'));
+  }flush();return out;
+}

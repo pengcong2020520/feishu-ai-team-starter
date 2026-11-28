@@ -11,7 +11,7 @@ export function cardView(card) {
       if (item.tag === 'button') (item.url ? view.links : view.buttons).push({ label: item.text?.content ?? '', ...(item.url ? { url: item.url } : { value: item.value ?? item.behaviors?.find(b => b.type === 'callback')?.value }) });
       if (item.tag === 'select_static') view.questions.push({ id: item.name, options: item.options?.map(o => o.text?.content) ?? [], recommended: (item.initial_index ?? 1) - 1 });
       if (item.tag === 'input') view.extra = item.name;
-      visit(item.actions); visit(item.elements);
+      visit(item.actions); visit(item.elements); visit(item.columns);
     }
   };
   visit(card.elements); visit(card.body?.elements);

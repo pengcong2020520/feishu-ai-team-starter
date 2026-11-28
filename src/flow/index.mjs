@@ -1,3 +1,4 @@
+import { plainText } from '../presentation.mjs';
 import { projectLabel } from '../project-labels.mjs';
 import { mkdir, readFile, writeFile, rename, unlink, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -439,14 +440,14 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
       return;
     }
     const proposal = checkProposal(result.structured.proposal, allowedActions(now, role));
-    if (!proposal) { await sendText(chatId, reply, role); return; }
+    if (!proposal) { if (/\*\*|^#{1,6}\s|\|.*\|/m.test(reply) || reply.length > 300) await delivery.sendCard(chatId, closedCard(`${roles[role].name} · 回复`, reply, role), role); else await sendText(chatId, plainText(reply), role); return; }
     const old = state.proposals[chatId];
     const history = proposal.action === 'start' && projects ? await recorder?.list(chatId, { limit: Number.MAX_SAFE_INTEGER }) || [] : [];
     const boundary = history.findLastIndex(row => row.kind === 'action_result' && row.action === 'start' && row.accepted);
     const intake = history.slice(boundary + 1).filter(row => ['user', 'text', 'card'].includes(row.kind) && (!now || row.at >= (now.endedAt || now.stageAt)));
     const offer = { cardId: id(), role, ...proposal, originalText: text, projectId: now?.id ?? 'none', stage: now?.stage ?? 'none', identity, source, ...(proposal.action === 'start' && projects ? { intake } : {}) };
     try { offer.messageId = await delivery.sendCard(chatId, proposalCard({ role, reply, ...offer }), role); }
-    catch (error) { console.error(`提议卡片没发出去：${errorText(error)}`); await sendText(chatId, reply, role); return; }
+    catch (error) { console.error(`提议卡片没发出去：${errorText(error)}`); await sendText(chatId, plainText(reply), role); return; }
     state.proposals[chatId] = offer;
     await save();
     // 一次只留最新的一条提议
