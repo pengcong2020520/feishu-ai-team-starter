@@ -30,11 +30,11 @@ test('研究任务提供 PDF 与确定性计算和交付预算，聊天仍只读
     for (const tool of ['mcp__research__read_pdf','mcp__research__calculate']) assert.equal((await o.canUseTool(tool,{})).behavior,'allow');
     assert.equal((await o.canUseTool('Bash',{})).behavior,'deny');
     await run({ role:'quant', projectDir:project, prompt:'问答', definition, mode:'chat' });
-    assert.equal(captured[1].maxTurns,6); assert.equal(captured[1].mcpServers,undefined);
+    assert.equal(captured[1].maxTurns,6); assert.deepEqual(Object.keys(captured[1].mcpServers),['knowledge']);assert.equal((await captured[1].canUseTool('mcp__knowledge__remember',{})).behavior,'deny');
     assert.doesNotMatch(captured[1].systemPrompt.prompt,/team-figure/);
     assert.equal((await captured[1].canUseTool('mcp__research__calculate',{})).behavior,'deny');
     await run({ role:'quant', projectDir:project, prompt:'制定计划', definition, mode:'plan', outputSchema:{type:'object',properties:{tasks:{type:'array'}}} });
-    const plan=captured[2];assert.deepEqual(plan.tools,['Read','Glob','Skill']);assert.equal(plan.mcpServers,undefined);
+    const plan=captured[2];assert.deepEqual(plan.tools,['Read','Glob','Skill']);assert.deepEqual(Object.keys(plan.mcpServers),['knowledge']);assert.equal((await plan.canUseTool('mcp__knowledge__remember',{})).behavior,'deny');
     assert.equal((await plan.canUseTool('Write',{file_path:path.join(project,'report/early.md')})).behavior,'deny');
     assert.equal((await plan.canUseTool('mcp__research__calculate',{})).behavior,'deny');
     assert.equal((await plan.canUseTool('StructuredOutput',{tasks:[]})).behavior,'allow');
@@ -101,9 +101,10 @@ test('query 选项、进度与返回值', async () => {
     assert.equal(result.ok, true);
     assert.equal(result.text, '需要澄清');
     assert.equal(result.sessionId, 's1');
-    assert.deepEqual(result.stats, { turns: 2, durationMs: 1234, inputTokens: 15, outputTokens: 7 });
+    assert.deepEqual(result.stats, { turns: 2, durationMs: 1234, inputTokens: 10, outputTokens: 7, cacheReadInputTokens:3, cacheCreationInputTokens:2, usageScope:'request' });
     assert.deepEqual(progress, [{ tool: 'Skill', file: 'team:clarify' }, { tool: 'Write', file: 'docs/questions.json' }]);
     assert.equal(captured.prompt, '做一个读书会报名页');
+    assert.equal(captured.options.systemPrompt.snapshot,false);
     const o = captured.options;
     assert.deepEqual(o.tools, ['Read', 'Write', 'Edit', 'Glob', 'Skill']);
     assert.deepEqual(o.plugins, [{ type: 'local', path: path.join(root, 'team-skills') }]);
@@ -240,6 +241,6 @@ test('自动审核使用独立只读会话，不复用作者 resume，不提供 
  const definition={name:'审核',tools:['Read','Write','Glob','Skill','WebSearch'],write:[],read:['context','report'],skills:[],sharedPrompt:'',promptText:'',pluginPath:path.join(root,'team-skills'),model:'default'};
  try{for(let i=0;i<2;i++)await run({role:'chief',projectDir:project,prompt:'审核',definition,mode:'review',isolateSession:true,resume:'author-session',outputSchema:{type:'object',properties:{passed:{type:'boolean'}}}});
   assert.notEqual(options[0].env.CLAUDE_CONFIG_DIR,options[1].env.CLAUDE_CONFIG_DIR);
-  for(const o of options){assert.deepEqual(o.tools,['Read','Glob']);assert.equal(o.resume,undefined);assert.equal(o.plugins,undefined);assert.equal(o.mcpServers,undefined);assert.equal((await o.canUseTool('Write',{file_path:'report/a.md'})).behavior,'deny');assert.equal((await o.canUseTool('Skill',{skill:'team:test'})).behavior,'deny');assert.equal((await o.canUseTool('StructuredOutput',{passed:true})).behavior,'allow');}
+  for(const o of options){assert.deepEqual(o.tools,['Read','Glob']);assert.equal(o.resume,undefined);assert.equal(o.plugins,undefined);assert.deepEqual(Object.keys(o.mcpServers),['knowledge']);assert.equal((await o.canUseTool('mcp__knowledge__remember',{})).behavior,'deny');assert.equal((await o.canUseTool('Write',{file_path:'report/a.md'})).behavior,'deny');assert.equal((await o.canUseTool('Skill',{skill:'team:test'})).behavior,'deny');assert.equal((await o.canUseTool('StructuredOutput',{passed:true})).behavior,'allow');}
  }finally{await rm(project,{recursive:true,force:true});}
 });

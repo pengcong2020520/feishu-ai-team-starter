@@ -72,7 +72,7 @@ function fakeQuery(script) {
 }
 const ok = (session, text) => ({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: session, num_turns: 2, duration_ms: 1000, usage: { input_tokens: 100, output_tokens: 20 } });
 
-test('管家只有一个会话：第一次记下会话号，之后接着用；工具调用报进度；环境里没有飞书密钥', async () => {
+test('管家连续 SDK 会话：第二轮接续，环境里没有飞书密钥', async () => {
   const dir = root();
   Object.assign(process.env, MODEL, { FEISHU_PRODUCT_APP_SECRET: 'feishu-secret' });
   const { impl, calls } = fakeQuery(async function* () {
@@ -92,6 +92,7 @@ test('管家只有一个会话：第一次记下会话号，之后接着用；�
   assert.deepEqual(o.settingSources, []);
   assert.equal(o.cwd, dir);
   assert.match(o.systemPrompt.prompt, /管家/);
+  assert.equal(o.systemPrompt.snapshot,false);
   assert.equal(servers[0].alwaysLoad, true);
   assert.deepEqual(Object.keys(o.env).sort(), ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'CLAUDE_CONFIG_DIR', 'HOME', 'PATH']);
   assert.equal(o.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');
@@ -149,7 +150,7 @@ const out = r => r.content[0].text;
 
 test('管家的工具：看现状、问同事（只读）、代你说话、只在关口代点按钮、交改动、重启和回退', async () => {
   const { tools, calls } = toolRig();
-  assert.deepEqual(Object.keys(tools), ['team_status', 'ask_colleague', 'tell_colleague', 'press_button', 'submit_change', 'restart_team', 'revert_change']);
+  assert.deepEqual(Object.keys(tools), ['wiki_lookup', 'wiki_update', 'conversation_history', 'team_status', 'ask_colleague', 'tell_colleague', 'press_button', 'submit_change', 'restart_team', 'revert_change']);
   const status = out(await tools.team_status.handler({}));
   assert.match(status, /#3「番茄钟」 阶段「确认设计」，等管理员确认设计；工作区 workspace\/p3\//);
   assert.match(status, /#4「读书笔记」 阶段「开发网页」，AI 程序员在干活：✍️ 在写网页/);
@@ -286,7 +287,7 @@ test('私聊其他话交给管家：发进度卡，做完改成结果；签字�
   assert.equal(r.prompts[0], '管理员说：#3 为什么停了？');
   assert.match(JSON.stringify(r.sent[0]), /AI 管理员助手 · 在处理[\s\S]*#3 为什么停了？[\s\S]*停下/);
   const final = JSON.stringify(r.patched.at(-1).card);
-  assert.match(final, /AI 管理员助手 · 完成[\s\S]*查好了[\s\S]*读入 1\.2 万 \/ 写出 800 token/);
+  assert.match(final, /AI 管理员助手 · 完成[\s\S]*查好了[\s\S]*本次输入 1\.2 万 \/ 输出 800 token/);
   assert.equal((await r.assistant.onAction({ value: { action: 'golive', cardId: 'k', sha: 'abc' }, messageId: 'om_9' })).toast.content, '正在跑测试');
   assert.deepEqual(r.signs[0], { action: 'golive', cardId: 'k', sha: 'abc', messageId: 'om_9' });
   assert.equal((await r.assistant.onAction({ value: { action: 'revert', cardId: 'k2', sha: 'abc' }, messageId: 'om_8' })).toast.content, '正在撤销');
@@ -403,4 +404,20 @@ test('角色说明写明签字后测试、打回后发意见和中文回复', ()
   assert.match(prompt, /代码类先发签字卡，管理员点“上线”之后才跑测试/);
   assert.match(prompt, /打回”只是退回修改[^\n]*`tell_colleague`/);
   assert.match(prompt, /不要出现提交编号、英文标识/);
+});
+
+test('长会话先原生整理再接续；整理用量计入本次，失败也不清空历史',async()=>{
+ for(const fails of [false,true]){
+  const dir=root();Object.assign(process.env,MODEL);const file=path.join(dir,'data/admin/session.json');mkdirSync(path.dirname(file),{recursive:true});
+  writeFileSync(file,JSON.stringify({sessionId:'kept',complete:true,contextTokens:50000,modelUsage:{m:{inputTokens:1000,outputTokens:100}}}));
+  const calls=[];const impl=async function*({prompt,options}){calls.push({prompt,options});
+    if(typeof prompt==='string'){assert.match(prompt,/^\/compact/);assert.equal(options.resume,'kept');if(fails)throw Error('compact failed');yield {type:'system',subtype:'compact_boundary',session_id:'kept',compact_metadata:{pre_tokens:50000,post_tokens:6000,trigger:'manual'}};yield {...ok('kept',''),modelUsage:{m:{inputTokens:1500,outputTokens:130}}};return;}
+    assert.equal(options.resume,'kept');yield {type:'assistant',session_id:'kept',message:{usage:{input_tokens:100,cache_read_input_tokens:6000},content:[]}};
+    yield {...ok('kept','继续记得先前的约定'),modelUsage:{m:{inputTokens:1600,outputTokens:150}}};
+  };
+  const r=await createSteward({root:dir,queryImpl:impl,createServer:()=>({})}).run({prompt:'按之前约定继续'});
+  assert.equal(r.ok,true);assert.equal(calls.length,2);assert.equal(r.stats.memoryMaintenance.ran,!fails);
+  if(!fails){assert.equal(r.stats.inputTokens,600);assert.equal(r.stats.outputTokens,50);}
+  const saved=JSON.parse(readFileSync(file));assert.equal(saved.sessionId,'kept');assert.equal(saved.contextTokens,6100);
+ }
 });

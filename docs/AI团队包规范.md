@@ -1,6 +1,6 @@
 # AI 团队包标准 v1
 
-一份包是作者设计好的整支团队：角色提示词、Skill、协作关系、可执行流程、工作区和交付标准。安装后由飞书群或本机工作台承接项目目标，平台调度 Agent。包本身不启动独立服务，也不能执行安装脚本。
+一份包是作者设计好的整支团队：角色提示词、Skill、协作关系、可执行流程、工作区、Wiki 知识和交付标准。安装后由飞书群或本机工作台承接项目目标，平台调度 Agent。包本身不启动独立服务，也不能执行安装脚本。
 
 平台版本与团队能力分开。启航版、领航版继续保留；需要新建飞书项目群和人员分工的团队使用领航版。启航版可在本机体验团队包，原来的单群网页流程保持兼容。旧项目不会自动迁移。
 
@@ -22,6 +22,7 @@ agents/<角色>.md
 skills/<技能>/SKILL.md
 collaboration/SKILL.md
 collaboration/workflow.json
+knowledge/<主题>.md         # 可选团队公共知识，逐页声明
 workspace/                 # 可选模板，只复制清单明确列出的文件
 examples/                  # 可选原规则映射、样例资料
 LICENSE
@@ -40,6 +41,7 @@ THIRD_PARTY_NOTICES.md      # 使用第三方内容时保留
 | skills | id/version/path/description/inputs/outputs/tools/resources；入口必须为 skills/id/SKILL.md，含 name、description frontmatter |
 | collaboration / workflow | 协作 Skill 和结构化工作流文件路径 |
 | workspace | directories 与 templates（source → target）；不能占用平台 context、.team、.claude 目录 |
+| knowledge | 可选 `{format:"wiki/1",pages:[...]}`，页面标题、摘要、来源、状态、标签、链接及 Markdown 路径；见 [Wiki 知识层](Wiki知识层.md) |
 | artifacts | id/name/path/format、可选 requiredKeys/minBytes；format 为 markdown/text/json/html |
 | examples | 至少一个 name/demand/expectedArtifacts；用于复现验收 |
 | sources | 第三方 url/revision/license/notice；revision 应固定不可变来源 |

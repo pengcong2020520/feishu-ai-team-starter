@@ -32,6 +32,10 @@ export async function loadPackage(dir) {
   }
   if (!files.has(manifest.workflow)) throw Error('未声明工作流文件');
   const definition = validateDefinition(manifest, JSON.parse(files.get(manifest.workflow)));
+  for (const page of definition.manifest.knowledge?.pages || []) {
+    const body = files.get(page.path).toString();
+    if (!body.trim() || body.length > 32000) throw Error('知识页须为非空 Markdown，且不超过 32000 字符');
+  }
   for (const s of definition.manifest.skills) {
     const body = files.get(s.path).toString();
     if (!body.startsWith('---\n') || !new RegExp(`^name: ${s.id}$`, 'm').test(body) || !/^description: .+/m.test(body)) throw Error(`技能 ${s.id} 缺少正确的 frontmatter`);
@@ -124,7 +128,8 @@ export function packageView(p) {
   const { id, version, name, description, roles, skills, artifacts, examples, license } = p.manifest;
   return { id, version, hash: p.hash, name, description, coordinator: p.workflow.coordinator,
     roles: roles.map(({ id, name, description, color, skills, read, write }) => ({ id, name, description, color, skills, read, write })),
-    skills: skills.map(({ id, name, description }) => ({ id, name, description })), artifacts, examples, license, workflow: p.workflow };
+    skills: skills.map(({ id, name, description }) => ({ id, name, description })), artifacts, examples, license, workflow: p.workflow,
+    knowledge: p.manifest.knowledge || { format: 'wiki/1', pages: [] } };
 }
 export function roleSource(p, role) {
   const r = p.manifest.roles.find(r => r.id === role); if (!r) throw Error('角色不存在');

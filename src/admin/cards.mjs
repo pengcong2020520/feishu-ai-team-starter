@@ -121,6 +121,6 @@ export function stewardCard({ task, activity, steps, elapsedMs, guides = [], car
     ...replyElements(body || (outcome === 'stopped' ? '⏹ 已停下' : '⚠️ 没做完')),
     { tag: 'hr' },
     grey(`你说的：${plain(task, 80)}`),
-    ...(stats ? [grey(`用时 ${seconds(stats.durationMs)} · ${steps} 步；读入 ${tokens(stats.inputTokens)} / 写出 ${tokens(stats.outputTokens)} token`)] : []),
+    ...(stats ? [grey(`用时 ${seconds(stats.durationMs)} · ${steps} 步；${stats.usageReported === false ? '用量未完整返回' : `本次输入 ${tokens(stats.inputTokens)} / 输出 ${tokens(stats.outputTokens)} token${stats.cacheReadInputTokens ? `；缓存读取 ${tokens(stats.cacheReadInputTokens)}` : ''}${stats.cacheCreationInputTokens ? `；缓存写入 ${tokens(stats.cacheCreationInputTokens)}` : ''}${stats.usageScope === 'main-loop' ? '（主调用统计）' : ''}${stats.memoryMaintenance?.ran ? '；含上下文整理' : ''}${stats.maintenanceUsageUnavailable ? '（整理用量未完整返回）' : ''}`}`)] : []),
   ]);
 }
