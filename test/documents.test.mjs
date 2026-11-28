@@ -129,3 +129,19 @@ test('失败草稿续传后，同一次同步追上更新后的终稿与完成�
   assert.match(tokens[2].md,/已修订终稿/);assert.equal(result.items[0].status,'项目已完成');assert.equal(result.items[0].error,undefined);
   await sync.sync(p,pack,{status:'项目已完成'});assert.equal(tokens.length,3);
 }));
+
+test('图片版本与正文一起冻结，续传旧图后发布新图；源文档和工作流不改',()=>fixture(async root=>{
+ const p=await setup(root,'images'),remote=transport(),original=JSON.stringify(p),writes=[];
+ const md='# 图片报告\n\n![图](figure.png)\n\n图注：测试图片。来源：测试夹具。';
+ const filename=path.join(root,'workspace/images/report/figure.png'),source=path.join(root,'workspace/images/report/main.md');
+ const first=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8X8AAAAASUVORK5CYII=','base64');
+ const second=Buffer.concat([first,Buffer.from('version-two')]);
+ await writeFile(source,md);await writeFile(filename,first);let fail=true;
+ const base=remote.documents;remote.documents=bot=>({...base(bot),append:async(id,body,token,{assets})=>{const asset=Object.values(assets)[0];writes.push({token,bytes:await readFile(asset.file)});if(fail)throw Error('缺少素材上传权限');}});
+ let sync=createDocumentSync({root,feishu:remote});let result=await sync.sync(p,pack);assert.match(result.items[0].error,/素材/);
+ await writeFile(filename,second);await writeFile(source,'# 图片报告\n![未完成的新图](not-yet-written.png)');fail=false;
+ sync=createDocumentSync({root,feishu:remote});result=await sync.sync(p,pack);assert.ok(result.items[0].error);assert.equal(writes.length,2);assert.deepEqual(writes[1].bytes,first);
+ await writeFile(source,md);result=await sync.sync(p,pack);
+ assert.equal(writes.length,3);assert.equal(writes[0].token,writes[1].token);assert.deepEqual(writes[1].bytes,first);assert.deepEqual(writes[2].bytes,second);
+ await sync.sync(p,pack);assert.equal(writes.length,3);assert.equal(result.items[0].error,undefined);assert.equal(await readFile(source,'utf8'),md);assert.equal(JSON.stringify(p),original);
+}));

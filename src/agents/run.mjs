@@ -1,4 +1,4 @@
-import { documentInstructions } from '../document-format.mjs';
+import { documentInstructions, documentVisualInstructions } from '../document-format.mjs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { readFile, mkdir, realpath, lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -184,7 +184,7 @@ export function createRunAgent(queryImpl = query) {
       const research = definition && !chat && !planning && !readOnly ? researchServer(spec.tools, process.env, (kind, result) => saveResearchEvidence(projectDir, role, kind, result)) : null;
       const researchDiscipline = research ? '\n\n## 研究执行预算\n先读 context/source-ledger.jsonl 和有关的 context/sources/ 缓存，复用已核实原文与计算，不重复下载同一页或重算相同公式。尽早 Write 任务指定的交付文件并增量完善；缺口明确标待核，不能靠不断搜索拖到没有交付。相同缺口连续三次搜索无关或读取失败就记录限制；本步优先控制在十二次新增检索/网页/PDF读取内，已有证据充分即转入分析与写作。预算不构成编造或省略重大反证的理由；未证实的结论留作未知。' : '';
       const options = {
-        systemPrompt: { type: 'custom', prompt: `${shared}\n\n${rolePrompt}\n\n## 本次调用\n${modePrompt}${researchDiscipline}${!chat && !planning ? documentInstructions : ''}\n\n## 面向用户的表达\n${replyInstructions}` },
+        systemPrompt: { type: 'custom', prompt: `${shared}\n\n${rolePrompt}\n\n## 本次调用\n${modePrompt}${researchDiscipline}${!chat && !planning && !readOnly ? documentInstructions + (definition ? documentVisualInstructions : '') : ''}\n\n## 面向用户的表达\n${replyInstructions}` },
         tools: [...allowed].filter(t => !definition || !['WebFetch', 'WebSearch', 'Calculate'].includes(t)),
         ...(research ? { mcpServers: { research } } : {}),
         outputFormat: { type: 'json_schema', schema: resultSchema },

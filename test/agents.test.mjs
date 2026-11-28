@@ -26,10 +26,12 @@ test('研究任务提供 PDF 与确定性计算和交付预算，聊天仍只读
     await run({ role:'quant', projectDir:project, prompt:'研究', definition });
     const o = captured[0]; assert.equal(o.maxTurns,60); assert.ok(o.mcpServers.research);
     assert.ok(!o.tools.includes('Calculate')); assert.match(o.systemPrompt.prompt,/尽早 Write/);
+    assert.match(o.systemPrompt.prompt,/team-figure/);
     for (const tool of ['mcp__research__read_pdf','mcp__research__calculate']) assert.equal((await o.canUseTool(tool,{})).behavior,'allow');
     assert.equal((await o.canUseTool('Bash',{})).behavior,'deny');
     await run({ role:'quant', projectDir:project, prompt:'问答', definition, mode:'chat' });
     assert.equal(captured[1].maxTurns,6); assert.equal(captured[1].mcpServers,undefined);
+    assert.doesNotMatch(captured[1].systemPrompt.prompt,/team-figure/);
     assert.equal((await captured[1].canUseTool('mcp__research__calculate',{})).behavior,'deny');
     await run({ role:'quant', projectDir:project, prompt:'制定计划', definition, mode:'plan', outputSchema:{type:'object',properties:{tasks:{type:'array'}}} });
     const plan=captured[2];assert.deepEqual(plan.tools,['Read','Glob','Skill']);assert.equal(plan.mcpServers,undefined);
@@ -37,6 +39,9 @@ test('研究任务提供 PDF 与确定性计算和交付预算，聊天仍只读
     assert.equal((await plan.canUseTool('mcp__research__calculate',{})).behavior,'deny');
     assert.equal((await plan.canUseTool('StructuredOutput',{tasks:[]})).behavior,'allow');
     assert.doesNotMatch(plan.systemPrompt.prompt,/尽早 Write/);
+    assert.doesNotMatch(plan.systemPrompt.prompt,/team-figure/);
+    await run({role:'quant',projectDir:project,prompt:'只读审查',definition,mode:'review'});
+    assert.doesNotMatch(captured[3].systemPrompt.prompt,/team-figure|## 文档补充规范/);
   } finally { await rm(project,{recursive:true,force:true}); }
 });
 // 不依赖本机 .env：给一组假的模型配置，fakeQuery 不会真的发请求
@@ -52,6 +57,7 @@ test('任务摘要与完整结果分开，结构化计划保持原契约，不�
     const run=createRunAgent(fakeQuery),result=await run({role:'product',projectDir:project,prompt:'正式任务'});
     assert.equal(result.text,'已更新研究结论，关键年份仍需核实。');assert.equal(result.rawText,'内部工具与文件交接记录');
     assert.equal(captured[0].outputFormat.schema.properties.reply.maxLength,240);
+    assert.doesNotMatch(captured[0].systemPrompt.prompt,/team-figure/);
     assert.equal((await captured[0].canUseTool('StructuredOutput',{reply:result.text})).behavior,'allow');
     assert.equal((await captured[0].canUseTool('Write',{file_path:'context/task-history.json'})).behavior,'deny');
     const schema={type:'object',properties:{tasks:{type:'array'}},required:['tasks']};
