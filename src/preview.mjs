@@ -6,6 +6,7 @@ import { walkthroughPage } from './walkthrough-page.mjs';
 import { roles } from './agents/roles.mjs';
 import { listPackages } from './packages/store.mjs';
 import { packageHttp } from './packages/http.mjs';
+import { messagePage } from './workbench/history.mjs';
 
 const headers = model => ({ 'Content-Security-Policy': model ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; form-action 'none'; connect-src 'none'" : "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' http://127.0.0.1:*; img-src 'self' data: blob:", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
 const send = (res, status, body, model = false, type = 'text/html; charset=utf-8') => { res.writeHead(status, { ...headers(model), 'Content-Type': type }); res.end(body); };
@@ -59,6 +60,13 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
         const projects = (await flow.getState()).projects.filter(p => p.chatId === chatId && p.createdAt > project.createdAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
         before = projects[0]?.createdAt ?? null;
       }
+      if (url.searchParams.get('paginated') === '1') {
+        if (!projectId || !flow?.getProjectById) return send(res, 400, '请选择项目');
+        try {
+          const messages = await recorder.list(chatId, { limit: Number.MAX_SAFE_INTEGER });
+          return send(res, 200, JSON.stringify(messagePage(messages, { projectId, after, before, cursor: url.searchParams.get('beforeIndex'), loadedFrom: url.searchParams.get('loadedFrom'), limit: 50 })), false, 'application/json; charset=utf-8');
+        } catch { return send(res, 400, '读取消息失败'); }
+      }
       const messages = await recorder.list(chatId, { role, limit: role && projectId ? Number.MAX_SAFE_INTEGER : 300 });
       return send(res, 200, JSON.stringify(messages.filter(row => (!after || row.at >= after) && (!before || row.at < before))), false, 'application/json; charset=utf-8');
     }
@@ -95,7 +103,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
       try { return send(res, 200, await readFile(path.join(root, 'workspace', p.id, 'docs/questions.json'), 'utf8'), false, 'application/json; charset=utf-8'); }
       catch { return send(res, 404, '问题尚未生成', false, 'text/plain; charset=utf-8'); }
     }
-    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs', '/teams.js', '/teams.css', '/team-board.mjs'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/app.css', '/app.js', '/presentation.mjs', '/teams.js', '/teams.css', '/team-board.mjs', '/team-ui.mjs'].includes(url.pathname)) {
       try { return send(res, 200, await readFile(path.join(assetsRoot, 'web', url.pathname.slice(1)), 'utf8'), false, url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8'); }
       catch { return send(res, 404, '资源不存在', false, 'text/plain; charset=utf-8'); }
     }

@@ -211,12 +211,16 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
       // 计划结果是供编排校验的结构化数据，不能从 JSON 中抽句子作为群聊摘要。
       const summary = outputSchema ? '协作方案已提交，核对后将按步骤继续。' : publicReply(result.text, { fallback: `「${task.name}」已提交，完整内容可在项目工作台查看。` });
       p.lastReply = summary;
-      p.history.push({ node: p.stage, task: key, role: task.role, startedAt, at: new Date().toISOString(), skills: [...used], stats: result.stats, result: result.rawText || result.text, summary });
+      p.history.push({ node: p.stage, task: key, name: task.name, role: task.role, status: 'done', outputs: task.outputs || [], startedAt, at: new Date().toISOString(), skills: [...used], stats: result.stats, result: result.rawText || result.text, summary });
       // 留下完整交接，不把工具/路径清单广播到群。context 只由宿主写入。
       await saveHistory(p);
       p.activities[task.role].status = 'done';
       await record(p, { kind: 'text', role: task.role, text: `${definition.name}：${summary}` }); await save();
       return result;
+    } catch (error) {
+      // Keep failed attempts separate: p.history is also used by workflow completion checks.
+      (p.attempts ??= []).push({ node: p.stage, task: key, name: task.name, role: task.role, status: p.stopRequested ? 'stopped' : 'failed', startedAt, at: new Date().toISOString(), skills: [...used], summary: publicError(error.message) });
+      await save(); throw error;
     } finally { clearInterval(draftTimer); if (p.activities[task.role].status !== 'done') p.activities[task.role].status = 'stopped'; live.delete(key); p.running = (p.running || []).filter(r => r !== task.role); }
   }
   async function executePlan(p, pack, node) {
@@ -590,7 +594,14 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
       await ready;
       return Promise.all(state.projects.map(async p => {
         const pack = await packFor(p), n = nodeFor(pack, p), artifacts = [];
-        for (const a of pack.manifest.artifacts) { try { await readArtifact(pack, dir(p), a.id); artifacts.push({ id: a.id, name: a.name, format: a.format }); } catch (e) { if (e.code !== 'ENOENT') throw e; } }
+        for (const a of pack.manifest.artifacts) { try {
+          const file = await readArtifact(pack, dir(p), a.id);
+          const tasks = pack.workflow.nodes.flatMap(n => [n, ...(n.tasks || [])]);
+          const declared = tasks.filter(t => t.outputs?.includes(a.id));
+          const history = [...p.history].reverse().find(h => h.outputs?.includes(a.id) || declared.some(t => t.id === h.task && t.role === h.role));
+          const writer = history?.role || (declared.length === 1 ? declared[0].role : null);
+          artifacts.push({ id: a.id, name: artifactLabel(pack, { artifactId: a.id, name: a.name }), title: /^#\s+(.+)$/m.exec(file.text)?.[1]?.slice(0,160), format: a.format, updatedAt: file.updatedAt, role: writer, task: history?.task });
+        } catch (e) { if (e.code !== 'ENOENT') throw e; } }
         const taskNames = Object.fromEntries((pack.workflow.nodes.find(node => node.id === p.plan?.node)?.tasks || []).map(t => [t.id, t.name]));
         return { ...copy(p), liveActivities: [...liveActivities.values()].filter(a => a.projectId === p.id).map(copy), contextProposal: p.contextProposal?.stamp === contextStamp(p) ? copy(p.contextProposal) : null, documents: await documents.view(p), definition: packageView(pack), taskNames, stageName: p.ended ? '已结束' : p.pendingReview ? p.pendingReview.label + ' · 待审核' : n.name, stageType: p.pendingReview ? 'gate' : n.type, stuckCardId: p.error ? p.cardId : null, source: p.chatId.startsWith('web:') ? '本机项目' : '飞书项目群', waitingFor: p.error ? '重试' : p.pendingReview ? '阶段审核' : n.type === 'gate' ? n.name : null, activeRole: p.running?.[0] || null, retryRole: n.role, approval: n.approval, artifacts, currentActions: p.error ? ['retry', 'end', ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? ['reject'] : [])] : p.busy ? ['stop'] : p.pendingReview ? ['confirm', 'reject'] : n.type === 'gate' ? n.questions ? ['answer'] : ['confirm', ...(n.reject ? ['reject'] : [])] : [], questions: n.questions === true ? JSON.parse(await readFile(path.join(dir(p), 'docs/questions.json'), 'utf8')) : null };
       }));

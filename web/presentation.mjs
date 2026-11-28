@@ -69,7 +69,7 @@ export function messageView(event) {
   if ((event.kind === 'card' || event.kind === 'card_update') && event.title) return { type: 'card', card: { title: event.title }, user: false };
   if (event.kind === 'action') {
     const who = speakerName(event);
-    const verb = { confirm: '点了确认', reject: '点了打回', answer: '提交了回答', retry: '点了重试', end: '点了结束项目', keep: '选择继续做', start: '点了开始做', revise: '点了按这个改', dismiss: '选择先不做', steer: '点了现在引导', stop: '点了停下' }[event.action] ?? '点了卡片按钮';
+    const verb = { confirm: '点了确认', reject: '点了打回', answer: '提交了回答', retry: '点了重试', end: '点了结束项目', keep: '选择继续做', start: '点了开始做', revise: '点了按这个改', dismiss: '选择先不做', steer: '点了现在引导', stop: '点了停下' }[String(event.action||'').replace(/^package_/,'')] ?? '点了卡片按钮';
     return { type: 'text', text: `${who}${verb}`, user: true };
   }
   if (event.kind === 'action_result') return null;

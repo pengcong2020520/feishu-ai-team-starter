@@ -7,7 +7,7 @@
 先读 [团队包标准](docs/AI团队包规范.md)，搭建提示词在 [docs/prompts/ecosystem.md](docs/prompts/ecosystem.md)。原启航版、领航版及下文默认网页流程继续保留。
 
 - `node scripts/team-pack.mjs init` 安装筑页、观澜和文枢三包；观澜 2.1 是 TradingAgents 固定提交的 Apache-2.0 适配，五角色十六技能，未接入 Tauric 专用数据与计算服务；Newtype 按固定提交下载到本机并保留 SUL 来源声明，不复制进 MIT 核心代码。
-- `/` 是团队工作台，`/teams` 是同一入口，`/legacy` 保留旧网页项目。团队页聚焦单个当前团队，以角色实时状态和四列项目看板为首页；三、五、八角色按网格全部展示。团队生态入口切换成熟团队包，旧项目仍锁定原包。角色详情查看 Skill，项目详情保留 workflow 与原动作；本机项目不要求机器人。点“扫码连接飞书”或运行 `bots` 调用标准注册流程，各新团队创建自己的专属角色，当前团队已创建的才复用，不自行写扫码脚本。同一团队一角色一机器人，同一应用只有一条长连接。
+- `/` 是团队工作台，`/teams` 是同一入口，`/legacy` 保留旧网页项目。团队页聚焦单个当前团队，以首屏四列项目看板和底部角色状态为首页；三、五、八角色收成底部单排可横滑头像，悬停/聚焦显示任务浮窗。团队生态入口切换成熟团队包，旧项目仍锁定原包。角色详情查看任务历史、Skill 与可编辑提示词；提示词保存生成新包版本，不改旧项目锁定。项目详情以完整对话和交付物时间线呈现，保留 workflow 与原动作；本机项目不要求机器人。点“扫码连接飞书”或运行 `bots` 调用标准注册流程，各新团队创建自己的专属角色，当前团队已创建的才复用，不自行写扫码脚本。同一团队一角色一机器人，同一应用只有一条长连接。
 - 第三方通过清单、角色提示词、Skill、协作 Skill、workflow.json、Workspace 和交付契约定义团队，不改平台源码。作者打包应用 [skills/team-packager/SKILL.md](skills/team-packager/SKILL.md)，实际校验、导出、干净安装后分层记录验收；打包不等于公开发布。
 - `src/packages/` 是标准、不可变包存储、通用编排、工具与 HTTP；原 `src/flow/` 继续服务旧项目。新包统一使用共享 SDK/并发名额，按项目真实路径与角色隔离；锁定内容不能被源包更新静默替换。
 - 团队包飞书文档见 [文档同步与反馈](docs/飞书文档同步与反馈.md)：协调机器人创建，群成员可编辑；只同步声明的 Markdown，草稿与交付按版本追加，保留人工编辑和评论。评论进入本项目 context/document-feedback.md，不得当作批准；正式任务与问答先读。保留 data/project-documents 映射，创建回执不确定时禁止重复创建。
@@ -324,7 +324,7 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 
 ### 8.2 旧版工作台长相（仅 /legacy）
 
-新版 `/` 与 `/teams` 按用户确认的 [单团队工作台原型](docs/design/single-team-workbench-v1/README.md) 实现：浅色、单当前团队、角色状态置顶，项目分为进行中／等你确认／需处理／已完成。`web/team-board.mjs` 只派生展示状态，不推进 workflow；执行、排队、聊天、独立审核与空闲分别显示。切换团队不关闭已有机器人或迁移项目。
+新版 `/` 与 `/teams` 按用户确认的 [单团队工作台 V2 原型](docs/design/single-team-workbench-v2/README.md) 实现：浅色、单当前团队、首屏看板与底部横滑头像，项目分为进行中／等你确认／需处理／已完成。`web/team-board.mjs` 只派生展示状态，不推进 workflow；执行、排队、聊天、独立审核与空闲分别显示。切换团队不关闭已有机器人或迁移项目。
 
 工作台给人一屏看清全局，整页不滚动，长内容只在各自区域里滚动。统一按下面做：
 
@@ -367,3 +367,5 @@ runAgent({ role, prompt, projectDir, resume, onProgress, onQueued, timeoutMs, mo
 ## 群聊协调入口
 
 遵循 [群聊协调与上下文交接](docs/群聊协调与上下文交接.md)。普通消息路由不改变 workflow；生产补充必须经负责人确认，模型的路由判断不是执行授权。引用只查本群记录。不要在真实项目中伪造真人消息或身份来验收。
+
+工作台 V2：`web/team-ui.mjs` 提供稳定头像、任务记录映射和只读文稿渲染；`src/workbench/history.mjs` 为完整对话分页及卡片更新合并提供稳定文件游标。`POST /api/packages/prompt` 经同源检查、并发锁和旧版本核验创建新的不可变团队包，已有项目保持原锁定。提示词编辑不写原始 `prompts/` 或已安装目录。失败任务留在 `attempts`，不混入编排用于判断完成的 `history`。旧网页项目保留 `/legacy` 入口，缺失的逐次执行记录不补造。

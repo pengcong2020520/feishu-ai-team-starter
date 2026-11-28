@@ -1,5 +1,6 @@
 import { listPackages, latestPackages, lockedPackage, roleSource } from './store.mjs';
 import { readBindings } from './bindings.mjs';
+import { saveRolePrompt } from './prompt-editor.mjs';
 
 // 与原工作台相同的本机身份和同源写入边界；绝不接受请求体提供的身份。
 export async function packageHttp({ req, res, url, root, flow, feishu, recorder, send }) {
@@ -29,6 +30,9 @@ export async function packageHttp({ req, res, url, root, flow, feishu, recorder,
     const data = JSON.parse(body);
     const admin = data.via === 'admin';
     if (admin && (!process.env.ADMIN_WORKBENCH_TOKEN || req.headers['x-admin-token'] !== process.env.ADMIN_WORKBENCH_TOKEN)) { reply(403, { error: '管理员身份不匹配' }); return true; }
+    if (url.pathname === '/api/packages/prompt') {
+      reply(200, await saveRolePrompt(root, data)); return true;
+    }
     const manager = flow.packageProjects || flow.projects;
     if (url.pathname === '/api/packages/connect') {
       if (!flow.connections) throw Error('扫码服务未启用');
