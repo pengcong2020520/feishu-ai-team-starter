@@ -32,7 +32,7 @@ const deny = message => ({ behavior: 'deny', message });
 
 export async function stewardPermission(root, tool, input = {}, readOnly = false) {
   if (tool === 'StructuredOutput' || tool.startsWith('mcp__admin__')) {
-    if (readOnly && !['mcp__admin__team_status', 'mcp__admin__ask_colleague', 'StructuredOutput'].includes(tool)) return deny('这次只查不改');
+    if (readOnly && !['mcp__admin__team_status', 'mcp__admin__ask_colleague', 'mcp__admin__team_catalog', 'mcp__admin__team_draft_read', 'mcp__admin__team_draft_validate', 'mcp__admin__team_trial_result', 'StructuredOutput'].includes(tool)) return deny('这次只查不改');
     return { behavior: 'allow' };
   }
   if (![...READ_TOOLS, ...WRITE_TOOLS].includes(tool)) return deny('这个工具不能用');
@@ -73,6 +73,17 @@ export function stewardActivity({ tool, input = {} }, root) {
     case 'mcp__admin__submit_change': return '🧪 在检查、测试改动';
     case 'mcp__admin__restart_team': return '🔄 在重启团队服务';
     case 'mcp__admin__revert_change': return '↩️ 在撤销改动';
+    case 'mcp__admin__team_catalog': return '📋 在看可用团队和草稿';
+    case 'mcp__admin__team_draft_open': return '🧬 在准备个人团队草稿';
+    case 'mcp__admin__team_draft_read': return '📖 在看团队角色和技能';
+    case 'mcp__admin__team_draft_edit': return '✏️ 在调整团队草稿';
+    case 'mcp__admin__team_draft_validate': return '🔍 在检查团队协作关系';
+    case 'mcp__admin__team_trial_start': return '🧪 在启动独立试跑';
+    case 'mcp__admin__team_trial_result': return '📋 在看试跑过程和成果';
+    case 'mcp__admin__team_trial_stop': return '⏹ 在停下调试任务';
+    case 'mcp__admin__team_trial_retry': return '🧪 在继续失败的调试步骤';
+    case 'mcp__admin__team_draft_apply': return '✓ 在应用已试跑的新版本';
+    case 'mcp__admin__team_draft_export': return '📦 在导出并验证团队包';
     default: return '💭 在思考';
   }
 }
@@ -102,8 +113,9 @@ function inputChannel(prompt) {
   };
 }
 
-export function createSteward({ root, tools = [], queryImpl = query, createServer = createSdkMcpServer }) {
-  const sessionFile = path.join(root, 'data/admin/session.json');
+export function createSteward({ root, tools = [], queryImpl = query, createServer = createSdkMcpServer, sessionScope = '' }) {
+  if(sessionScope && !/^[a-z0-9-]{1,80}$/.test(sessionScope))throw Error('管理员会话范围无效');
+  const sessionFile = path.join(root, sessionScope ? `data/admin/sessions/${sessionScope}.json` : 'data/admin/session.json');
   const readSession = () => { try { return JSON.parse(readFileSync(sessionFile, 'utf8')).sessionId ?? null; } catch { return null; } };
   const writeSession = sessionId => {
     mkdirSync(path.dirname(sessionFile), { recursive: true });
@@ -136,7 +148,7 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
         if (queryImpl === query) release = await acquireCapacity({ root, role: 'admin', signal: abortController.signal, onQueued: waiting => { if (waiting) onProgress?.({ tool: '等待执行名额', input: {} }); } });
         abortController.signal.throwIfAborted();
         timer = setTimeout(() => { timedOut = true; abortController.abort(); }, timeoutMs);
-        const configDir = path.join(root, '.claude-agent-config');
+        const configDir = path.join(root, '.claude-agent-config', ...(sessionScope?['admin-scopes',sessionScope]:[]));
         mkdirSync(configDir, { recursive: true });
         const check = (tool, input) => stewardPermission(root, tool, input, readOnly);
         const options = {
@@ -159,6 +171,7 @@ export function createSteward({ root, tools = [], queryImpl = query, createServe
             ANTHROPIC_BASE_URL: process.env.MODEL_BASE_URL,
             ANTHROPIC_AUTH_TOKEN: process.env.MODEL_API_KEY,
             CLAUDE_CONFIG_DIR: configDir,
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
             ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.MODEL_NAME,
           },
           ...(resume ? { resume } : {}),

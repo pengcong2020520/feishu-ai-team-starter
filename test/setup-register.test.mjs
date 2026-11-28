@@ -13,6 +13,8 @@ test('文档与素材上传权限只附加到需要发布文档的协调角色',
   const lark={registerApp:async input=>{requested.push(input.addons.scopes.tenant);return{client_id:'cli_test',client_secret:'test-only'};}};
   await registerRole({lark,role:{key:'chief',name:'协调者',mode:'projects',documents:true}});
   await registerRole({lark,role:{key:'writer',name:'作者',mode:'projects'}});
+  await registerRole({lark,role:{key:'admin',name:'管理员助手',p2p:true}});
+  assert.ok(requested[2].includes('im:resource'));
   for(const scope of ['docx:document','docs:permission.member:create','docs:document.media:upload']){
     assert.ok(requested[0].includes(scope));assert.ok(!requested[1].includes(scope));
   }

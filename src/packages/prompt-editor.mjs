@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { lockedPackage, listPackages, latestPackages, installPackage } from './store.mjs';
+import { withPackageEditLock } from './edit-lock.mjs';
 
 // A prompt edit creates a new immutable package. Project locks and workflows stay intact.
 export async function saveRolePrompt(root, { package: lock, role, prompt }) {
@@ -10,9 +11,7 @@ export async function saveRolePrompt(root, { package: lock, role, prompt }) {
   const pack = await lockedPackage(root, lock);
   const index = pack.manifest.roles.findIndex(r => r.id === role);
   if (index < 0) throw Error('角色不存在');
-  const guard = path.join(root, 'data', 'package-edit-locks', pack.manifest.id);
-  await mkdir(path.dirname(guard), { recursive: true });
-  try { await mkdir(guard); } catch (e) { if (e.code === 'EEXIST') throw Error('该团队正在保存，请稍后重试'); throw e; }
+  return withPackageEditLock(root,pack.manifest.id,async()=>{
   let temp;
   try {
     const latest = latestPackages((await listPackages(root)).filter(p => p.id === lock.id));
@@ -37,6 +36,6 @@ export async function saveRolePrompt(root, { package: lock, role, prompt }) {
     return await installPackage(temp, root);
   } finally {
     if (temp) await rm(temp, { recursive: true, force: true });
-    await rm(guard, { recursive: true, force: true });
   }
+  });
 }

@@ -1,4 +1,5 @@
 import { legacyArchiveService, legacyArchiveHttp } from './workbench/archives.mjs';
+import { teamLabHttp } from './admin/team-lab-page.mjs';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -26,6 +27,7 @@ export async function startPreview({ root = process.cwd(), assetsRoot = root, ho
     const url = new URL(req.url, 'http://localhost');
     const hostValue = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost):\d+$/.test(hostValue)) return send(res, 403, 'Host 不允许', false, 'text/plain; charset=utf-8');
+    if (await teamLabHttp({req,res,url,root,send})) return;
     if (legacyArchives && await legacyArchiveHttp({ req, res, url, service: legacyArchives, send })) return;
     if (await packageHttp({ req, res, url, root, flow, feishu, recorder, send })) return;
     const qr = /^\/connect\/([a-z][a-z0-9-]{0,63})\/(index\.html|status\.js|[a-z][a-z0-9-]{0,63}\.png)$/.exec(url.pathname);

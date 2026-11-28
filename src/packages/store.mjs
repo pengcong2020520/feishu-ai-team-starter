@@ -17,7 +17,7 @@ export async function safeFile(root, relative) {
 function exportable(name, content) {
   if (/(^|\/)(?:\.env[^/]*|data|\.git|\.claude[^/]*|sessions?|qr|node_modules|team-bindings\.json)(\/|$)/i.test(name)) throw Error(`不导出运行数据或密钥文件：${name}`);
   const text = content.toString('utf8');
-  if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-ant-[\w-]{20,}|sk-[\w-]{24,}|gh[pousr]_[\w]{20,})|\b(?:APP_SECRET|API_KEY|AUTH_TOKEN)\s*["']?\s*[:=]\s*["']?[a-zA-Z0-9_\-]{16,}|\b(?:ou|oc|on)_[a-f0-9]{20,}/i.test(text)) throw Error(`发现疑似凭据或飞书身份：${name}；请先脱敏`);
+  if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:oc_sk_[\w-]{16,}|sk-ant-[\w-]{20,}|sk-[\w-]{24,}|gh[pousr]_[\w]{20,})|\b(?:APP_SECRET|API_KEY|AUTH_TOKEN)\s*["']?\s*[:=]\s*["']?[a-zA-Z0-9_\-]{16,}|\b(?:ou|oc|on)_[a-f0-9]{20,}/i.test(text)) throw Error(`发现疑似凭据或飞书身份：${name}；请先脱敏`);
 }
 export async function loadPackage(dir) {
   const raw = await readFile(await safeFile(dir, 'manifest.json')); if (raw.length > MAX_FILE) throw Error('清单过大');

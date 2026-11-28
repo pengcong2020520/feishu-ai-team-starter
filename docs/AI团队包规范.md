@@ -73,6 +73,8 @@ plan 的任务目录也是 task 定义，增加 id/name/after。目录中的 aft
 
 ## 安装、分享与更新
 
+也可以通过[管理员私聊](管理员助手.md)完成复制或导入 → 修改草稿 → 真实试跑 → 应用版本 → 导出分享。支持全部角色、Skill、workflow 与 workspace 模板；试跑目录独立，模拟关口明确标记为 `automated-test`。应用核对当前草稿摘要和真实试跑结果，新项目使用新版本，已有项目不迁移。导出的仍是下述标准 `.team.json`，没有另一套私有格式。
+
 ```bash
 node scripts/team-pack.mjs init
 node scripts/team-pack.mjs validate examples/team-package
