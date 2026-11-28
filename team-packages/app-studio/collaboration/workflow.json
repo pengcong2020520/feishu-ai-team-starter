@@ -1,0 +1,236 @@
+{
+  "entry": "specify",
+  "coordinator": "product",
+  "relations": [
+    {
+      "from": "product",
+      "to": "product",
+      "kind": "dispatch"
+    },
+    {
+      "from": "product",
+      "to": "designer",
+      "kind": "dispatch"
+    },
+    {
+      "from": "product",
+      "to": "architect",
+      "kind": "dispatch"
+    },
+    {
+      "from": "product",
+      "to": "developer",
+      "kind": "dispatch"
+    },
+    {
+      "from": "product",
+      "to": "qa",
+      "kind": "dispatch"
+    },
+    {
+      "from": "developer",
+      "to": "architect",
+      "kind": "review"
+    },
+    {
+      "from": "qa",
+      "to": "developer",
+      "kind": "handoff"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "specify",
+      "name": "澄清与规格",
+      "type": "task",
+      "role": "product",
+      "skills": [
+        "specify"
+      ],
+      "prompt": "按 Spec Kit specify 的方法，写明用户故事、约束、可验证成功标准与待确认问题。",
+      "outputs": [
+        "spec"
+      ],
+      "next": "confirm-spec"
+    },
+    {
+      "id": "confirm-spec",
+      "name": "确认需求",
+      "type": "gate",
+      "role": "product",
+      "approval": "confirm_spec",
+      "next": "interaction",
+      "reject": "specify"
+    },
+    {
+      "id": "interaction",
+      "name": "交互设计",
+      "type": "task",
+      "role": "designer",
+      "skills": [
+        "interaction"
+      ],
+      "prompt": "依据已确认规格设计页面、状态与关键用户路径。",
+      "outputs": [
+        "design"
+      ],
+      "next": "architecture"
+    },
+    {
+      "id": "architecture",
+      "name": "架构设计",
+      "type": "task",
+      "role": "architect",
+      "skills": [
+        "architecture"
+      ],
+      "prompt": "根据需求与设计写前后端边界、API 契约、SQLite 数据模型、迁移和部署拓扑。",
+      "outputs": [
+        "architecture"
+      ],
+      "next": "confirm-plan"
+    },
+    {
+      "id": "confirm-plan",
+      "name": "确认技术方案",
+      "type": "gate",
+      "role": "architect",
+      "approval": "confirm_plan",
+      "next": "tasks",
+      "reject": "architecture"
+    },
+    {
+      "id": "tasks",
+      "name": "拆解任务",
+      "type": "task",
+      "role": "architect",
+      "skills": [
+        "task-breakdown"
+      ],
+      "prompt": "按 Spec Kit tasks 方法把规格与架构拆成有依赖的实现任务和测试场景。",
+      "outputs": [
+        "tasks"
+      ],
+      "next": "implement"
+    },
+    {
+      "id": "implement",
+      "name": "全栈实现",
+      "type": "task",
+      "role": "developer",
+      "skills": [
+        "implementation"
+      ],
+      "prompt": "实现应用、数据库迁移和自动测试。交付代码须能在项目独立环境启动。",
+      "outputs": [
+        "server",
+        "database",
+        "frontend",
+        "tests"
+      ],
+      "next": "review"
+    },
+    {
+      "id": "review",
+      "name": "架构复核",
+      "type": "task",
+      "role": "architect",
+      "skills": [
+        "architecture-review"
+      ],
+      "prompt": "只读检查实际实现、API、迁移和规格；review.json 的 status 只能为 pass 或 revise。",
+      "outputs": [
+        "review"
+      ],
+      "next": "verification",
+      "freshSession": true,
+      "route": {
+        "artifact": "review",
+        "field": "status",
+        "cases": {
+          "pass": "verification",
+          "revise": "repair"
+        }
+      }
+    },
+    {
+      "id": "repair",
+      "name": "修复架构问题",
+      "type": "task",
+      "role": "developer",
+      "skills": [
+        "bug-fix"
+      ],
+      "prompt": "根据架构复核记录修改代码并补回归测试。",
+      "outputs": [
+        "server",
+        "database",
+        "frontend",
+        "tests"
+      ],
+      "next": "review"
+    },
+    {
+      "id": "verification",
+      "name": "集成测试",
+      "type": "task",
+      "role": "qa",
+      "skills": [
+        "verification"
+      ],
+      "prompt": "读取平台实际迁移、自动测试、HTTP 健康检查回执；不得自行填写通过。",
+      "outputs": [
+        "verification"
+      ],
+      "next": "confirm-deploy",
+      "route": {
+        "artifact": "verification",
+        "field": "status",
+        "cases": {
+          "pass": "confirm-deploy",
+          "revise": "repair"
+        }
+      },
+      "validator": "app-verification"
+    },
+    {
+      "id": "confirm-deploy",
+      "name": "确认部署",
+      "type": "gate",
+      "role": "qa",
+      "approval": "confirm_deploy",
+      "next": "deploy",
+      "reject": "verification",
+      "release": true
+    },
+    {
+      "id": "deploy",
+      "name": "本机发布",
+      "type": "task",
+      "role": "qa",
+      "skills": [
+        "deployment"
+      ],
+      "prompt": "根据已确认目标发布，通过实际健康检查后记录版本和地址；失败回滚。",
+      "outputs": [
+        "deployment"
+      ],
+      "next": "accept",
+      "validator": "app-deployment"
+    },
+    {
+      "id": "accept",
+      "name": "最终验收",
+      "type": "gate",
+      "role": "product",
+      "approval": "accept",
+      "next": "done",
+      "reject": "repair"
+    },
+    {
+      "id": "done",
+      "name": "已完成",
+      "type": "done"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ import { readResearchEvidence } from './evidence.mjs';
 import { plainText, publicReply, publicError, replyElements } from '../presentation.mjs';
 import { newProjectRequest } from './lobby.mjs';
 import { createDocumentSync } from './documents.mjs';
+import { applicationView } from './app-runner.mjs';
 
 const automaticReviewPolicy = '本项目创建者已选择平台自动审核模式：工作流的非问答确认关口由独立自动审核执行，审核通过后由平台写入 source=auto-review 的正式关口记录。这是已获授权的执行模式，不是跳过关口。包内一般的“等待用户/真人确认”措辞在这些关口按本模式执行；专业内容要求、问答补充、文件契约及对外发布授权不变。不能仅因缺少人工点击而拒绝合格交付，也不能假称真人已阅读。只有实际内容/依据不足才拒绝。';
 const copy = value => structuredClone(value);
@@ -147,6 +148,8 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
     let card;
     const documentView = await documents.view(p);
     const documentLinks = documentView.items.filter(d => d.url && d.shared).sort((a, b) => Number(isFinalDocument(pack, b)) - Number(isFinalDocument(pack, a)) || (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 3).map(d => ({ label: `飞书 · ${documentLabel(pack, d).slice(0, 20)}`, url: d.url }));
+    const application = pack.manifest.application ? await applicationView(dir(p)) : null;
+    if (application?.status === 'running') documentLinks.unshift({ label: '打开应用', url: application.url });
     const documentNotice = documentView.items.some(d => d.error || d.feedbackError) || p.documentError ? '部分文档同步失败，请在工作台查看原因并重试。' : documentLinks.length ? '可在飞书文档中评论，意见会自动同步；流程确认仍按项目当前关口处理。' : '';
     const notice = !p.error && n.type === 'gate' && projects ? await projects.notice({ ...p, stage: n.approval }, n.approval, botFor(p, role)) : '';
     if (!p.error && !p.pendingReview && n.type === 'gate' && n.questions) {
@@ -273,7 +276,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
     try {
       while (true) {
         const node = nodeFor(pack, p); if (!node) throw Error('工作流节点不存在');
-        if (node.type === 'gate' && !node.questions && p.reviewMode === 'auto') {
+        if (node.type === 'gate' && !node.questions && !node.release && p.reviewMode === 'auto') {
           const tasks = p.lastReviewTasks || [];
           if (await checkpoint(p, pack, `${node.id}:${p.stepsTaken}:gate`, tasks, node.name)) {
             const approval = { id: randomUUID(), at: new Date().toISOString(), stage: p.stage, action: 'confirm', actor: '自动审核', source: 'auto-review', feedback: '独立审核通过；不代表真人阅读或对外发布授权。' };
@@ -635,7 +638,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
           artifacts.push({ id: a.id, name: artifactLabel(pack, { artifactId: a.id, name: a.name }), title: /^#\s+(.+)$/m.exec(file.text)?.[1]?.slice(0,160), format: a.format, updatedAt: file.updatedAt, role: writer, task: history?.task });
         } catch (e) { if (e.code !== 'ENOENT') throw e; } }
         const taskNames = Object.fromEntries((pack.workflow.nodes.find(node => node.id === p.plan?.node)?.tasks || []).map(t => [t.id, t.name]));
-        return { ...copy(p), archive: await archives.view(p, pack), finalArtifacts: finalArtifactIds(pack), liveActivities: [...liveActivities.values()].filter(a => a.projectId === p.id).map(copy), contextProposal: p.contextProposal?.stamp === contextStamp(p) ? copy(p.contextProposal) : null, documents: await documents.view(p), definition: packageView(pack), taskNames, stageName: p.ended ? '已结束' : p.pendingReview ? p.pendingReview.label + ' · 待审核' : n.name, stageType: p.pendingReview ? 'gate' : n.type, stuckCardId: p.error ? p.cardId : null, source: p.chatId.startsWith('web:') ? '本机项目' : '飞书项目群', waitingFor: p.error ? '重试' : p.pendingReview ? '阶段审核' : n.type === 'gate' ? n.name : null, activeRole: p.running?.[0] || null, retryRole: n.role, approval: n.approval, artifacts, currentActions: p.error ? ['retry', 'end', ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? ['reject'] : [])] : p.busy ? ['stop'] : p.pendingReview ? ['confirm', 'reject'] : n.type === 'gate' ? n.questions ? ['answer'] : ['confirm', ...(n.reject ? ['reject'] : [])] : [], questions: n.questions === true ? JSON.parse(await readFile(path.join(dir(p), 'docs/questions.json'), 'utf8')) : null };
+        return { ...copy(p), archive: await archives.view(p, pack), application: pack.manifest.application ? await applicationView(dir(p)) : null, finalArtifacts: finalArtifactIds(pack), liveActivities: [...liveActivities.values()].filter(a => a.projectId === p.id).map(copy), contextProposal: p.contextProposal?.stamp === contextStamp(p) ? copy(p.contextProposal) : null, documents: await documents.view(p), definition: packageView(pack), taskNames, stageName: p.ended ? '已结束' : p.pendingReview ? p.pendingReview.label + ' · 待审核' : n.name, stageType: p.pendingReview ? 'gate' : n.type, stuckCardId: p.error ? p.cardId : null, source: p.chatId.startsWith('web:') ? '本机项目' : '飞书项目群', waitingFor: p.error ? '重试' : p.pendingReview ? '阶段审核' : n.type === 'gate' ? n.name : null, activeRole: p.running?.[0] || null, retryRole: n.role, approval: n.approval, artifacts, currentActions: p.error ? ['retry', 'end', ...(p.pendingReview && (n.type !== 'gate' || n.reject) ? ['reject'] : [])] : p.busy ? ['stop'] : p.pendingReview ? ['confirm', 'reject'] : n.type === 'gate' ? n.questions ? ['answer'] : ['confirm', ...(n.reject ? ['reject'] : [])] : [], questions: n.questions === true ? JSON.parse(await readFile(path.join(dir(p), 'docs/questions.json'), 'utf8')) : null };
       }));
     },
     async roleSource(projectId, role) { await ready; const p = find(projectId); if (!p) throw Error('项目不存在'); return roleSource(await packFor(p), role); },

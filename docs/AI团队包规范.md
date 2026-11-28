@@ -4,11 +4,12 @@
 
 平台版本与团队能力分开。启航版、领航版继续保留；需要新建飞书项目群和人员分工的团队使用领航版。启航版可在本机体验团队包，原来的单群网页流程保持兼容。旧项目不会自动迁移。
 
-## 三支初始团队
+## 内置团队
 
 | 团队 | 角色 | 协作方式 |
 | --- | --- | --- |
 | 筑页 · 网页团队 | 产品经理、设计、程序员 | 澄清最多三轮 → 确认 PRD → 设计 → 确认设计 → 开发 → 新会话走查 → 验收；支持打回 |
+| 筑域 · 应用开发团队 | 产品经理、设计师、架构师、全栈程序员、测试部署工程师 | 规格 → 架构 → 任务 → 实现 → 复核 → 实测 → 本机发布 → 验收；失败回修 |
 | 观澜 · 投研团队 | 研究主理人、公司研究员、宏观策略师、量化研究员、风险分析师 | 确认研究范围 → 按任务依赖组织专家研究与反方审查 → 综合报告 → 确认交付 |
 | 文枢 · Newtype 内容团队 | 主编、副主编、研究、核查、提取、作者、编辑、归档 | 副主编提出最小够用计划，平台代表主编调度；已有稿件可直接编辑，主编汇总，验收后归档 |
 
@@ -42,6 +43,7 @@ THIRD_PARTY_NOTICES.md      # 使用第三方内容时保留
 | collaboration / workflow | 协作 Skill 和结构化工作流文件路径 |
 | workspace | directories 与 templates（source → target）；不能占用平台 context、.team、.claude 目录 |
 | knowledge | 可选 `{format:"wiki/1",pages:[...]}`，页面标题、摘要、来源、状态、标签、链接及 Markdown 路径；见 [Wiki 知识层](Wiki知识层.md) |
+| application | 可选受控应用契约；目前仅支持 `node24-sqlite`，声明 `entry/test/migration/healthPath/port`；文件须位于同一 Workspace 目录 |
 | artifacts | id/name/path/format、可选 requiredKeys/minBytes；format 为 markdown/text/json/html |
 | examples | 至少一个 name/demand/expectedArtifacts；用于复现验收 |
 | sources | 第三方 url/revision/license/notice；revision 应固定不可变来源 |
@@ -55,13 +57,13 @@ workflow 具有 entry、coordinator、relations、nodes、maxSteps（默认 80�
 | 节点 | 声明与执行 |
 | --- | --- |
 | task | role、skills（本步必须调用）、prompt、outputs、next；可选 timeoutMinutes、freshSession、validator、questions 分支及 route |
-| gate | role、approval、next、可选 reject；questions=true 使用网页澄清表单。普通讨论不等于确认 |
+| gate | role、approval、next、可选 reject；questions=true 使用网页澄清表单。`release=true` 是发布前真人关口，自动审核模式也不得跳过 |
 | plan | 规划角色 role、skills、prompt、可选任务 tasks、required、final、next；只读项目资料并加载技能，不开放写入或研究 MCP，Agent 返回 `{rationale,tasks:[{id,after,brief?}]}`；正式任务按验证后的依赖执行 |
 | done | 结束。所有节点都必须可到达结束节点 |
 
 task 可声明 `route: {artifact, field, cases: {ready: "下一节点", revise: "修改节点"}}`，从本步已声明的 JSON 产物读取枚举结果；未知值即停，不执行任意表达式。
 
-prompt 可使用 `{{demand}}`、`{{feedback}}`、`{{round}}`。task 的输出按清单检查文件、长度、JSON 字段；网页包额外复用已有网页交付校验器。内置 validator 为 files、web-clarify、web-prd、web-design、web-site、web-walkthrough。第三方可使用通用 files 与 JSON 必填字段契约，不可注入任意可执行校验代码。
+prompt 可使用 `{{demand}}`、`{{feedback}}`、`{{round}}`。task 的输出按清单检查文件、长度、JSON 字段；网页包额外复用已有网页交付校验器。内置 validator 为 files、web-clarify、web-prd、web-design、web-site、web-walkthrough、app-verification、app-deployment。应用校验器只认平台 Docker 运行 SQLite 迁移和 Node 测试的回执；部署节点需要直属的 `release=true` 关口。第三方不可注入任意可执行校验代码。
 
 plan 的任务目录也是 task 定义，增加 id/name/after。目录中的 after 表示“如果对方被选中，本任务必须等待对方”；required 指定不可省略任务；final 必须等待全部选中任务。验证未知任务、环、缺失依赖与必做任务后才执行。没有依赖的任务可并行，但不能共用角色会话或重叠写目录，整套服务仍共享 AGENT_CONCURRENCY。
 

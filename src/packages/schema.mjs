@@ -14,6 +14,7 @@ export const manifestSchema = z.object({
   roles: z.array(z.object({ id: identifier, name: text, description: text, prompt: relativePath, skills: list(identifier), tools: z.array(tools).min(1), read: z.array(relativePath).min(1), write: list(relativePath), memory: z.literal('project'), model: z.enum(['default', 'strong', 'fast']).default('default'), color: z.enum(['blue', 'purple', 'green', 'orange', 'red', 'turquoise', 'indigo']).default('blue') }).strict()).min(1).max(20),
   skills: list(z.object({ id: identifier, version, path: relativePath, description: text, inputs: list(text), outputs: list(text), tools: list(tools), resources: list(relativePath).default([]) }).strict()),
   workspace: z.object({ directories: z.array(relativePath).min(1), templates: list(z.object({ source: relativePath, target: relativePath }).strict()).default([]) }).strict(),
+  application: z.object({ runtime: z.literal('node24-sqlite'), entry: relativePath, test: relativePath, migration: relativePath, healthPath: z.string().regex(/^\/[a-z0-9/_-]{1,80}$/), port: z.number().int().min(1024).max(65535) }).strict().optional(),
   knowledge: knowledgeManifest.optional(),
   artifacts: list(artifact),
   examples: z.array(z.object({ name: text, demand: text, expectedArtifacts: list(identifier) }).strict()).min(1),
@@ -22,7 +23,7 @@ export const manifestSchema = z.object({
 const task = {
   role: identifier, skills: list(identifier), prompt: text, outputs: list(identifier),
   timeoutMinutes: z.number().int().min(1).max(30).default(10), freshSession: z.boolean().default(false),
-  validator: z.enum(['files', 'web-clarify', 'web-prd', 'web-design', 'web-site', 'web-walkthrough']).default('files'),
+  validator: z.enum(['files', 'web-clarify', 'web-prd', 'web-design', 'web-site', 'web-walkthrough', 'app-verification', 'app-deployment']).default('files'),
 };
 const catalogueTask = z.object({ id: identifier, name: text, ...task, after: list(identifier).default([]) }).strict();
 export const workflowSchema = z.object({
@@ -30,7 +31,7 @@ export const workflowSchema = z.object({
   relations: z.array(z.object({ from: identifier, to: identifier, kind: z.enum(['dispatch', 'handoff', 'review', 'synthesize']) }).strict()).min(1),
   nodes: z.array(z.discriminatedUnion('type', [
     z.object({ id: identifier, name: text, type: z.literal('task'), ...task, next: identifier, questions: identifier.optional(), route: z.object({ artifact: identifier, field: identifier, cases: z.record(identifier, identifier) }).strict().optional() }).strict(),
-    z.object({ id: identifier, name: text, type: z.literal('gate'), role: identifier, approval: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/), next: identifier, reject: identifier.optional(), questions: z.boolean().default(false) }).strict(),
+    z.object({ id: identifier, name: text, type: z.literal('gate'), role: identifier, approval: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/), next: identifier, reject: identifier.optional(), questions: z.boolean().default(false), release: z.boolean().default(false) }).strict(),
     z.object({ id: identifier, name: text, type: z.literal('plan'), role: identifier, skills: list(identifier), prompt: text, tasks: z.array(catalogueTask).min(1).max(30), required: z.array(identifier).min(1), final: identifier, next: identifier }).strict(),
     z.object({ id: identifier, name: text, type: z.literal('done') }).strict(),
   ])).min(2).max(60),
@@ -64,6 +65,14 @@ export function validateDefinition(manifest, workflow) {
   for (const s of m.skills) { declared(s.path); s.resources.forEach(declared); if (s.path !== `skills/${s.id}/SKILL.md`) throw Error('技能须放在 skills/<id>/SKILL.md'); }
   for (const t of m.workspace.templates) { declared(t.source); if (!dirs.some(x => within(x, t.target))) throw Error('模板目标超出 Workspace'); }
   for (const a of m.artifacts) if (!dirs.some(x => within(x, a.path))) throw Error(`产物 ${a.id} 超出 Workspace`);
+  if (m.application) {
+    const app = m.application;
+    for (const file of [app.entry, app.test, app.migration]) if (!m.artifacts.some(a => a.path === file)) throw Error(`应用运行文件未声明为产物：${file}`);
+    if (!app.migration.endsWith('/001.sql')) throw Error('应用首个迁移必须是 001.sql');
+    if (![...m.workspace.directories].some(d => [app.entry, app.test, app.migration].every(f => within(d, f)))) throw Error('应用运行文件必须在同一工作区目录');
+    const deployments = w.nodes.filter(n => n.validator === 'app-deployment');
+    if (!w.nodes.some(n => n.validator === 'app-verification') || !deployments.length || deployments.some(d => !w.nodes.some(g => g.type === 'gate' && g.release && g.next === d.id))) throw Error('应用团队缺少实际测试或人工发布关口');
+  }
   for (const e of m.examples) for (const a of e.expectedArtifacts) if (!artifacts.has(a)) throw Error(`示例引用未知产物 ${a}`);
   if (!roles.has(w.coordinator)) throw Error('协调角色不存在');
   for (const r of w.relations) if (!roles.has(r.from) || !roles.has(r.to)) throw Error('协作关系引用未知角色');
