@@ -12,7 +12,7 @@ export const NO_MODEL = '模型没配好，我现在只能做这几件：发“�
 const toast = (content, type = 'info') => ({ toast: { type, content } });
 const name = p => `#${p.number} ${p.name}`;
 
-export function createAssistant({ root, bot, supervisor, workbench, steward = null, deploy = null, changes = null, logger = console, now = () => Date.now() }) {
+export function createAssistant({ root, bot, supervisor, workbench, steward = null, deploy = null, changes = null, teamLab = null, logger = console, now = () => Date.now() }) {
   // 发过的提醒记在 data/admin/alerts.json：同一个问题只报一次，管理服务重启后也不重报
   const file = path.join(root, 'data/admin/alerts.json');
   let alerts = {};
@@ -170,6 +170,21 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
     // 回调要在 3 秒内返回：先回 toast，真正的活放到后台
     async onAction({ value = {}, messageId }) {
       if (value.projectId === 'test') return toast('这是测试卡片，不会推动流程，请点正式卡片');
+      if(['team_lab_apply','team_lab_export','team_lab_retry'].includes(value.action)) {
+        if(!teamLab)return toast('团队调试服务未启用','error');
+        void (async()=>{
+          if(value.action==='team_lab_apply'){
+            const r=await teamLab.apply(value);
+            await patch(messageId,closedCard('团队版本已应用',`已应用 ${r.package.id} v${r.package.version}。新项目可选择这个版本，旧项目保持原样。`));
+          }else if(value.action==='team_lab_retry'){
+            await teamLab.retry(value.runId);await patch(messageId,closedCard('继续团队试跑','正在从上次失败的节点继续，完成后会发来结果。'));
+          }else{
+            const d=await teamLab.read(value.draftId);if(d.hash!==value.expectedHash)throw Error('草稿已更新，请使用最新试跑卡');
+            const r=await teamLab.export(value.draftId);await bot.sendFile(r.file);await bot.sendText('团队包已导出，重新导入检查通过。文件不包含项目讨论和账号配置。');
+          }
+        })().catch(async e=>{await bot.sendText(`这次没有完成：${e.message}`).catch(()=>{});});
+        return toast(value.action==='team_lab_apply'?'正在应用已试跑的版本':value.action==='team_lab_retry'?'正在继续试跑':'正在导出团队包');
+      }
       if (value.action === 'restart') {
         if (restarting) return toast('正在重启，请稍等');
         if (supervisor.status().healthy) { void patch(messageId, closedCard('团队现状', '团队服务在正常运行，不用重启。发“状态”看最新情况')); return toast('团队服务在正常运行，不用重启'); }

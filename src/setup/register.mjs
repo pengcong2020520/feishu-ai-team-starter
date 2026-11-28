@@ -12,7 +12,7 @@ export const ADDONS = {
 export const PROJECT_ADDONS = { ...ADDONS, scopes: { tenant: [...ADDONS.scopes.tenant, 'im:message.group_msg', 'im:message.p2p_msg:readonly', 'im:chat.members:write_only'] } };
 
 // 管理员助手只在私聊里说话：多要一个读私聊消息的权限
-export const ADMIN_ADDONS = { ...ADDONS, scopes: { tenant: ['im:message', 'im:message:send_as_bot', 'im:message.p2p_msg:readonly'] } };
+export const ADMIN_ADDONS = { ...ADDONS, scopes: { tenant: ['im:message', 'im:message:send_as_bot', 'im:message.p2p_msg:readonly', 'im:resource'] } };
 
 const NETWORK = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|ECONNABORTED|socket hang up/i;
 

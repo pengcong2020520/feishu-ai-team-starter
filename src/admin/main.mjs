@@ -27,6 +27,7 @@ let assistant = null;
 let bot = null;
 let closing = false;
 let timer = null;
+let teamLab = null;
 const managed = process.env.TEAM_SERVICE_MANAGED === '1';
 
 const supervisor = createSupervisor({ root, env: baseEnv, logFile, autoRestart: managed, onExit: exit => {
@@ -38,6 +39,7 @@ async function shutdown(code = 0) {
   if (closing) return;
   closing = true;
   clearInterval(timer);
+  await teamLab?.close();
   bot?.close();
   await supervisor.stop();
   supervisor.close();
@@ -54,7 +56,7 @@ if (config) {
     const port = Number(process.env.PREVIEW_PORT || 4870);
     const workbench = { state: () => workbenchState(port), message: message => workbenchMessage(port, message, baseEnv.ADMIN_WORKBENCH_TOKEN), action: action => workbenchAction(port, action, baseEnv.ADMIN_WORKBENCH_TOKEN) };
     let ready = null;
-    bot = createAdminBot({ ...config, logger, onIdentity: async (identity, name) => {
+    bot = createAdminBot({ ...config, logger, importDirectory:path.join(root,'data/admin/team-imports'), onIdentity: async (identity, name) => {
       // 只把已经由管理员机器人验证的本人身份送给团队进程，不能由工作台请求伪造。
       try { await fetch(`http://127.0.0.1:${port}/api/team/admin-identity`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1', 'X-Admin-Token': baseEnv.ADMIN_WORKBENCH_TOKEN }, body: JSON.stringify({ via: 'admin', identity, name }), signal: AbortSignal.timeout(1000) }); } catch {}
     }, onMessage: event => ready.onMessage(event), onAction: event => ready.onAction(event) });
@@ -66,9 +68,12 @@ if (config) {
       const { createSteward } = await import('./steward.mjs');
       const { buildTools } = await import('./tools.mjs');
       const { runAgent } = await import('../agents/run.mjs');
-      steward = createSteward({ root, tools: buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords: () => ready?.adminWords() ?? [] }) });
+      const { createTeamLab } = await import('./team-lab.mjs');
+      const { trialCard } = await import('./team-lab-page.mjs');
+      teamLab=createTeamLab({root,notify:r=>bot.sendCard(trialCard(r,process.env.PUBLIC_WORKBENCH_BASE||`http://127.0.0.1:${port}`))});
+      steward = createSteward({ root, tools: buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords: () => ready?.adminWords() ?? [], teamLab, sendFile:file=>bot.sendFile(file) }) });
     }
-    ready = createAssistant({ root, bot, supervisor, workbench, steward, deploy, changes, logger });
+    ready = createAssistant({ root, bot, supervisor, workbench, steward, deploy, changes, teamLab, logger });
     await bot.start();
     assistant = ready;
     logger.log('AI 管理员助手已连上飞书');
@@ -86,4 +91,7 @@ else if (supervisor.status().running) logger.error(`团队服务还没连上飞�
 else if (assistant) { logger.error(`团队服务没起来：${result.error}`); void assistant.serviceDown(null, result.error); }
 else { logger.error(`团队服务没起来：${result.error}${managed ? '；守护将退避重试' : ''}`); if (!managed) void shutdown(1); }
 
-if (assistant) timer = setInterval(() => void assistant.tick().catch(error => logger.error(`巡检出错：${error.message}`)), 30000);
+if (assistant) timer = setInterval(() => {
+  void assistant.tick().catch(error => logger.error(`巡检出错：${error.message}`));
+  void teamLab?.tick().catch(error=>logger.error(`团队调试巡检出错：${error.message}`));
+}, 30000);

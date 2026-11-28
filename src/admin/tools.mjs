@@ -9,6 +9,7 @@ import { gateRole } from '../flow/guide.mjs';
 import { serviceLine } from './cards.mjs';
 import { lockedPackage } from '../packages/store.mjs';
 import { roleDefinition } from '../packages/runtime.mjs';
+import { teamLabTools } from './team-lab-tools.mjs';
 
 const ROLE = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const roleName = (p, role) => p.roles?.find(r => r.id === role)?.name || roles[role]?.name || '负责的同事';
@@ -52,7 +53,7 @@ export function statusText({ service, snapshot, changes }) {
   return lines.join('\n');
 }
 
-export function buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords = () => [] }) {
+export function buildTools({ supervisor, workbench, changes, deploy, runAgent, root, adminWords = () => [], teamLab, sendFile }) {
   const usedConsents = new WeakMap(); // 每次管家运行有独立的原话数组；一条消息只授权一次代点。
   const findProject = async number => {
     const snapshot = await workbench.state();
@@ -64,6 +65,7 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
   const guard = fn => async args => { try { return await fn(args); } catch (error) { return fail(error.message); } };
 
   return [
+    ...teamLabTools(teamLab, { sendFile, adminWords }),
     tool('team_status', '看团队现状：团队服务是否在运行、各项目在哪个阶段、谁在干活、哪里停下了、最近的改动。', {}, guard(async () =>
       reply(statusText({ service: supervisor.status(), snapshot: supervisor.status().running ? await workbench.state() : null, changes })))),
 

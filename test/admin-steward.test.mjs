@@ -93,7 +93,8 @@ test('管家只有一个会话：第一次记下会话号，之后接着用；�
   assert.equal(o.cwd, dir);
   assert.match(o.systemPrompt.prompt, /管家/);
   assert.equal(servers[0].alwaysLoad, true);
-  assert.deepEqual(Object.keys(o.env).sort(), ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CONFIG_DIR', 'HOME', 'PATH']);
+  assert.deepEqual(Object.keys(o.env).sort(), ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'CLAUDE_CONFIG_DIR', 'HOME', 'PATH']);
+  assert.equal(o.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');
   assert.doesNotMatch(JSON.stringify(o.env), /feishu-secret/);
   assert.equal(JSON.parse(readFileSync(path.join(dir, 'data/admin/session.json'), 'utf8')).sessionId, 's1');
   await steward.run({ prompt: '管理员说：再看看' });

@@ -21,11 +21,12 @@ export async function inspectDelivery({root,p,pack,task,agent,control,onQueued})
   const definition=await roleDefinition(pack,pack.workflow.coordinator,root);
   definition.read=[...new Set(['context/',...pack.manifest.workspace.directories])];definition.write=[];definition.tools=['Read','Glob'];
   const reads=new Set();
-  const result=await agent({role:pack.workflow.coordinator,projectDir:path.join(root,'workspace',p.id),runtimeRoot:root,definition,mode:'review',isolateSession:true,timeoutMs:180000,control,onQueued,
+  const result=await agent({role:pack.workflow.coordinator,projectDir:path.join(root,'workspace',p.id),runtimeRoot:root,definition,mode:'review',isolateSession:true,timeoutMs:Math.min(task.timeoutMinutes||10,10)*60000,control,onQueued,
     onProgress:e=>{if(e.tool==='Read'&&e.status==='succeeded')reads.add(path.resolve(root,'workspace',p.id,e.file||''));},
     prompt:`这是成品质量检查，不是流程批准。原始目标：${p.demand}。正式修改记录：${JSON.stringify(p.approvals||[])}；已确认补充：${JSON.stringify(p.confirmedInputs||[])}。必须实际读取 ${files.map(a=>a.path).join('、')}，并核对项目讨论和相关上游材料。按专业Skill原有文档契约判断：读者能否直接使用这份交付，是否只是过程汇总、待办、待填写模板，是否重复正文，逻辑和事实依据是否足够，有没有把已具备材料的工作推给用户重做。文章必须是可阅读的正文；研究保留真实风险和证据缺口，不能为“成熟”编造数据。用户最终确认、对外发布授权不属于内容缺陷。仅列影响使用的实质问题，不要求无关润色。不要因为有文件或作者说完成就通过。每个文件用artifacts列出id和具体检查依据。文件清单：${JSON.stringify(files.map(a=>({id:a.id,path:a.path})))}`,
     outputSchema:{type:'object',additionalProperties:false,required:['passed','summary','blockers','artifacts'],properties:{passed:{type:'boolean'},summary:{type:'string'},blockers:{type:'array',items:{type:'string'}},artifacts:{type:'array',items:{type:'object',additionalProperties:false,required:['id','reason'],properties:{id:{type:'string'},reason:{type:'string'}}}}}}});
   const v=result.structured;
+  if(!result.ok)throw Error(`成品检查未完成：${result.error||'模型未返回结果'}`);
   if(!result.ok||typeof v?.passed!=='boolean'||!v.summary?.trim()||!Array.isArray(v.blockers)||v.blockers.some(b=>typeof b!=='string')||!files.every(a=>v.artifacts?.some(e=>e.id===a.id&&typeof e.reason==='string'&&e.reason.trim())))throw Error('成品检查未返回完整依据');
   if(!files.every(a=>reads.has(path.resolve(root,'workspace',p.id,a.path))))throw Error('成品检查未实际读取全部文件');
   const latest=[];for(const a of files)latest.push([a.id,(await readArtifact(pack,path.join(root,'workspace',p.id),a.id)).text]);
