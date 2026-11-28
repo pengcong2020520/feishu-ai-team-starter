@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { roles } from './roles.mjs';
 import { acquireCapacity } from './capacity.mjs';
+import { researchServer } from '../packages/research.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const tools = ['Read', 'Write', 'Edit', 'Glob', 'Skill'];
@@ -49,23 +50,30 @@ async function resolvedTarget(target) {
 
 function denied(message) { return { behavior: 'deny', message }; }
 
-async function permissionFor(role, projectDir, tool, input, allowed = tools) {
+async function permissionFor(role, projectDir, tool, input, allowed = tools, definition, structured = false) {
   // 对话模式按固定格式回复时，SDK 让模型调用 StructuredOutput 工具交结果，要放行
-  if (tool === 'StructuredOutput' && allowed === chatTools) return { behavior: 'allow' };
+  if (tool === 'StructuredOutput' && (allowed === chatTools || structured)) return { behavior: 'allow' };
+  if (tool.startsWith('mcp__research__')) return definition && allowed.includes(({ mcp__research__read_url: 'WebFetch', mcp__research__search: 'WebSearch' })[tool]) ? { behavior: 'allow' } : denied('此角色未获授权使用检索工具');
   if (!allowed.includes(tool)) return denied('工具不在白名单中');
   if (tool === 'Skill') {
-    return roles[role].skills.includes(input.skill) ? { behavior: 'allow' } : denied('此角色不能使用该技能');
+    return (definition || roles[role]).skills.includes(input.skill) ? { behavior: 'allow' } : denied('此角色不能使用该技能');
   }
   if (tool === 'Glob') {
     const pattern = input.pattern;
-    if (typeof pattern !== 'string' || path.isAbsolute(pattern) || pattern.split(/[\\/]/).includes('..')) return denied('搜索范围越界');
+    if (typeof pattern !== 'string' || path.isAbsolute(pattern) || pattern.includes('..')) return denied('搜索范围越界');
   }
   const supplied = tool === 'Glob' ? (input.path ?? '.') : input.file_path;
   if (typeof supplied !== 'string' || !supplied) return denied('缺少文件路径');
   if (supplied.split(/[\\/]/).includes('..')) return denied('路径不能包含 ..');
   const project = await realpath(projectDir);
   const target = await resolvedTarget(path.resolve(projectDir, supplied));
+  if (definition && tool === 'Read' && definition.skillFiles?.includes(target)) return { behavior: 'allow' };
   if (!inside(project, target)) return denied('文件超出项目目录');
+  if (definition) {
+    const writing = tool === 'Write' || tool === 'Edit';
+    const dirs = writing ? definition.write : definition.read;
+    return dirs.some(dir => inside(path.join(project, dir), target)) ? { behavior: 'allow' } : denied(writing ? '不能写未授权的目录' : '不能读未授权的目录，请指定具体工作区目录');
+  }
   if ((tool === 'Write' || tool === 'Edit') && !inside(path.join(project, roles[role].writeDir), target)) {
     return denied('不能写其他角色的目录');
   }
@@ -116,7 +124,7 @@ function inputChannel(prompt) {
 }
 
 export function createRunAgent(queryImpl = query) {
-  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode = 'work', control, isolateSession = false }) {
+  return async function runAgent({ role, prompt, projectDir, resume, onProgress, timeoutMs, mode = 'work', control, isolateSession = false, definition, outputSchema, runtimeRoot = root }) {
     const started = Date.now();
     const stats = { turns: 0, durationMs: 0, inputTokens: 0, outputTokens: 0 };
     let sessionId = null;
@@ -139,38 +147,41 @@ export function createRunAgent(queryImpl = query) {
       };
     }
     try {
-      if (!roles[role]) throw new Error('未知角色');
+      const spec = definition || roles[role];
+      if (!spec) throw new Error('未知角色');
       if (typeof prompt !== 'string' || !prompt) throw new Error('任务不能为空');
       const cwd = path.resolve(projectDir);
-      if (!inside(root, cwd)) throw new Error('项目目录必须在当前仓库内');
+      if (!inside(runtimeRoot, cwd)) throw new Error('项目目录必须在当前仓库内');
       await mkdir(cwd, { recursive: true });
-      if (!inside(await realpath(root), await realpath(cwd))) throw new Error('项目目录不能经软链接越界');
+      if (!inside(await realpath(runtimeRoot), await realpath(cwd))) throw new Error('项目目录不能经软链接越界');
       const chat = mode === 'chat';
-      const allowed = chat ? chatTools : tools;
-      if (!chat) await mkdir(path.join(cwd, roles[role].writeDir), { recursive: true });
+      const allowed = chat ? definition ? chatTools.filter(tool => spec.tools.includes(tool)) : chatTools : definition ? spec.tools : tools;
+      if (!chat) for (const dir of definition ? spec.write : [spec.writeDir]) await mkdir(path.join(cwd, dir), { recursive: true });
       const configDir = isolateSession
-        ? path.join(root, '.claude-agent-config/isolated', createHash('sha256').update(await realpath(cwd)).digest('hex'), ...(chat ? [`${role}-chat`, randomUUID()] : [role]))
-        : path.join(root, '.claude-agent-config');
+        ? path.join(runtimeRoot, '.claude-agent-config/isolated', createHash('sha256').update(await realpath(cwd)).digest('hex'), ...(chat ? [`${role}-chat`, randomUUID()] : [role]))
+        : path.join(runtimeRoot, '.claude-agent-config');
       await mkdir(configDir, { recursive: true });
-      if (existsSync(path.join(root, '.env'))) process.loadEnvFile(path.join(root, '.env'));
+      if (existsSync(path.join(runtimeRoot, '.env'))) process.loadEnvFile(path.join(runtimeRoot, '.env'));
       for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY', 'MODEL_NAME']) {
         if (!process.env[name]) throw new Error(`缺少配置：${name}`);
       }
-      const shared = await readFile(path.join(root, 'prompts/shared.md'), 'utf8');
-      const rolePrompt = await readFile(path.join(root, 'prompts', roles[role].promptFile), 'utf8');
+      const shared = definition ? spec.sharedPrompt : await readFile(path.join(root, 'prompts/shared.md'), 'utf8');
+      const rolePrompt = definition ? spec.promptText : await readFile(path.join(root, 'prompts', spec.promptFile), 'utf8');
       // 调用方已经决定是聊天还是派活，不能让模型从需求措辞猜模式。
       const modePrompt = chat
         ? '本次是群聊对话：只读、不写文件，按结构化格式返回 reply 和 proposal。'
-        : '本次是已获确认的正式任务，编排已经派你开工。请按角色说明调用技能并实际写出这一步要求的文件；产品经理澄清时，信息不足就写问题文件，信息充分就交付 PRD 及配套文件。不要再次提议 start、等待开工按钮或仅口头承诺。最后只简述已交付的内容。';
+        : definition ? '本次是已获确认的正式任务。请按团队协作规范使用已授权的技能，实际交付任务要求的文件。不能自行派遣其他 Agent、跳过确认或更改流程；平台负责调度。最后简述实际结果；需要结构化计划时按要求返回。' : '本次是已获确认的正式任务，编排已经派你开工。请按角色说明调用技能并实际写出这一步要求的文件；产品经理澄清时，信息不足就写问题文件，信息充分就交付 PRD 及配套文件。不要再次提议 start、等待开工按钮或仅口头承诺。最后只简述已交付的内容。';
+      const research = definition && !chat ? researchServer(spec.tools) : null;
       const options = {
         systemPrompt: { type: 'custom', prompt: `${shared}\n\n${rolePrompt}\n\n## 本次调用\n${modePrompt}` },
-        tools: [...allowed],
-        ...(chat ? { outputFormat: { type: 'json_schema', schema: chatSchema } } : { plugins: [{ type: 'local', path: path.join(root, 'team-skills') }], skills: [...roles[role].skills] }),
-        canUseTool: (tool, input) => permissionFor(role, cwd, tool, input, allowed),
+        tools: [...allowed].filter(t => !definition || !['WebFetch', 'WebSearch'].includes(t)),
+        ...(research ? { mcpServers: { research } } : {}),
+        ...(chat ? { outputFormat: { type: 'json_schema', schema: chatSchema } } : { plugins: [{ type: 'local', path: definition ? spec.pluginPath : path.join(root, 'team-skills') }], skills: [...spec.skills], ...(outputSchema ? { outputFormat: { type: 'json_schema', schema: outputSchema } } : {}) }),
+        canUseTool: (tool, input) => permissionFor(role, cwd, tool, input, allowed, definition, Boolean(outputSchema) || chat),
         hooks: {
           PreToolUse: [{
             hooks: [async (input) => {
-              const decision = await permissionFor(role, cwd, input.tool_name, input.tool_input ?? {}, allowed);
+              const decision = await permissionFor(role, cwd, input.tool_name, input.tool_input ?? {}, allowed, definition, Boolean(outputSchema) || chat);
               if (decision.behavior === 'allow') return {};
               return { hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
@@ -184,7 +195,7 @@ export function createRunAgent(queryImpl = query) {
         settingSources: [],
         cwd,
         abortController,
-        model: process.env.MODEL_NAME,
+        model: definition && spec.model !== 'default' ? process.env[`MODEL_${spec.model.toUpperCase()}_NAME`] || process.env.MODEL_NAME : process.env.MODEL_NAME,
         maxTurns: chat ? 6 : 30,
         env: {
           PATH: process.env.PATH ?? '',
@@ -217,7 +228,7 @@ export function createRunAgent(queryImpl = query) {
       stats.durationMs = result.duration_ms ?? Date.now() - started;
       Object.assign(stats, tokenTotals(result));
       return result.subtype === 'success' && !result.is_error
-        ? { ok: true, text: result.result ?? '', ...(chat ? { structured: result.structured_output ?? null } : {}), sessionId, stats }
+        ? { ok: true, text: result.result ?? '', ...(chat || outputSchema ? { structured: result.structured_output ?? null } : {}), sessionId, stats }
         : { ok: false, text: '', sessionId, error: (result.errors ?? []).join('；') || result.subtype, stats };
     } catch (error) {
       stats.durationMs = Date.now() - started;
@@ -239,7 +250,7 @@ export async function runAgent(args) {
   let release;
   if (args.control) { args.control.stop = async () => queued.abort(); args.control.steer = () => false; }
   try {
-    release = await acquireCapacity({ root, role: args.role, project: path.basename(args.projectDir), signal: queued.signal, onQueued: args.onQueued });
+    release = await acquireCapacity({ root: args.runtimeRoot || root, role: args.role, project: path.basename(args.projectDir), signal: queued.signal, onQueued: args.onQueued });
     clearTimeout(queueTimer);
     queued.signal.throwIfAborted();
     return await execute(args);

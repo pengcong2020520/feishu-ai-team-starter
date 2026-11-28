@@ -1,0 +1,192 @@
+{
+  "entry": "brief",
+  "coordinator": "chief",
+  "relations": [
+    {
+      "from": "chief",
+      "to": "chief",
+      "kind": "dispatch"
+    },
+    {
+      "from": "chief",
+      "to": "radar",
+      "kind": "dispatch"
+    },
+    {
+      "from": "chief",
+      "to": "analyst",
+      "kind": "dispatch"
+    },
+    {
+      "from": "chief",
+      "to": "judge",
+      "kind": "dispatch"
+    },
+    {
+      "from": "chief",
+      "to": "venture",
+      "kind": "dispatch"
+    },
+    {
+      "from": "chief",
+      "to": "recommender",
+      "kind": "dispatch"
+    },
+    {
+      "from": "venture",
+      "to": "judge",
+      "kind": "review"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "brief",
+      "name": "明确研究范围",
+      "type": "task",
+      "role": "chief",
+      "skills": [
+        "chief-method"
+      ],
+      "prompt": "围绕 {{demand}} 写 brief/result.md：研究对象、用途、时间范围、已有来源、关键问题与边界。用户反馈：{{feedback}}。",
+      "outputs": [
+        "chief"
+      ],
+      "next": "confirm-scope",
+      "validator": "files"
+    },
+    {
+      "id": "confirm-scope",
+      "name": "确认研究范围",
+      "type": "gate",
+      "role": "chief",
+      "approval": "confirm_prd",
+      "next": "research",
+      "reject": "brief"
+    },
+    {
+      "id": "research",
+      "name": "研究与交叉评审",
+      "type": "plan",
+      "role": "chief",
+      "skills": [
+        "chief-method"
+      ],
+      "prompt": "按已确认研究范围组织任务，执行全部六项。分析师与创投评审在资料齐备后可以并行。不得越过依赖关系。",
+      "tasks": [
+        {
+          "id": "radar",
+          "name": "检索公开资料，记录出处和日期",
+          "role": "radar",
+          "skills": [
+            "radar-method"
+          ],
+          "prompt": "先读用户给的来源 URL；需要新来源时调用搜索。逐条保存标题、URL、日期、关键原文摘要。搜索未配置或网页无法读取时明确缺材料，绝不伪造来源。\n交付 sources/result.md。",
+          "outputs": [
+            "radar"
+          ],
+          "after": []
+        },
+        {
+          "id": "analyst",
+          "name": "分析收益驱动因素、风险和情景",
+          "role": "analyst",
+          "skills": [
+            "analyst-method"
+          ],
+          "prompt": "从有出处的数据分析单位经济、收益驱动因素、风险及敏感性。没有数据时写计算方法和待补数据，不编造金额、增速或概率。\n交付 analysis/result.md。",
+          "outputs": [
+            "analyst"
+          ],
+          "after": [
+            "radar"
+          ]
+        },
+        {
+          "id": "judge",
+          "name": "比较证据与反证，形成判断",
+          "role": "judge",
+          "skills": [
+            "judge-method"
+          ],
+          "prompt": "对照研究目标评估支持与反对证据。区分已验证事实和假设，说明哪些新证据会改变判断。\n交付 judgment/result.md。",
+          "outputs": [
+            "judge"
+          ],
+          "after": [
+            "analyst",
+            "venture"
+          ]
+        },
+        {
+          "id": "venture",
+          "name": "检查市场、团队、壁垒和执行风险",
+          "role": "venture",
+          "skills": [
+            "venture-method"
+          ],
+          "prompt": "从创投视角挑战市场规模、产品壁垒、团队执行与融资假设；列举反例、缺失证据和可检验问题，不能只是赞同。\n交付 review/result.md。",
+          "outputs": [
+            "venture"
+          ],
+          "after": [
+            "radar"
+          ]
+        },
+        {
+          "id": "recommender",
+          "name": "输出后续尽调与观察清单",
+          "role": "recommender",
+          "skills": [
+            "recommender-method"
+          ],
+          "prompt": "形成基于证据的后续尽调计划、观察指标和停止条件，不代用户下单。\n交付 recommendations/result.md。",
+          "outputs": [
+            "recommender"
+          ],
+          "after": [
+            "judge"
+          ]
+        },
+        {
+          "id": "synthesis",
+          "name": "汇总研究报告",
+          "role": "chief",
+          "skills": [
+            "chief-method"
+          ],
+          "prompt": "汇总所有已完成角色的文件，写 report/final.md，保留来源与分歧、时间戳和待补资料。",
+          "outputs": [
+            "report"
+          ],
+          "after": [
+            "recommender"
+          ]
+        }
+      ],
+      "required": [
+        "radar",
+        "analyst",
+        "judge",
+        "venture",
+        "recommender",
+        "synthesis"
+      ],
+      "final": "synthesis",
+      "next": "accept"
+    },
+    {
+      "id": "accept",
+      "name": "验收研究报告",
+      "type": "gate",
+      "role": "chief",
+      "approval": "accept",
+      "next": "done",
+      "reject": "research"
+    },
+    {
+      "id": "done",
+      "name": "已完成",
+      "type": "done"
+    }
+  ]
+}

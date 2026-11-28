@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
-export const READY_TEXT = '3 个机器人已连上飞书';
+export const READY_TEXT = '个机器人已连上飞书';
 const tail = text => text.trim().split('\n').slice(-5).join('\n');
 
 export function createSupervisor({ root, entry = 'src/main.mjs', env = process.env, readyText = READY_TEXT, readyMs = 60000, stopMs = 4000, logFile = null, echo = true, onExit = () => {} } = {}) {

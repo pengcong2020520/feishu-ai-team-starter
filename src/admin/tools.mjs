@@ -7,8 +7,11 @@ import { roles } from '../agents/roles.mjs';
 import { stageNames } from '../flow/stages.mjs';
 import { gateRole } from '../flow/guide.mjs';
 import { serviceLine } from './cards.mjs';
+import { lockedPackage } from '../packages/store.mjs';
+import { roleDefinition } from '../packages/runtime.mjs';
 
-const ROLE = z.enum(['product', 'designer', 'developer']);
+const ROLE = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+const roleName = (p, role) => p.roles?.find(r => r.id === role)?.name || roles[role]?.name || '负责的同事';
 const reply = text => ({ content: [{ type: 'text', text }] });
 const fail = text => ({ content: [{ type: 'text', text }], isError: true });
 const label = p => `#${p.number}「${p.name}」`;
@@ -37,7 +40,7 @@ export function statusText({ service, snapshot, changes }) {
     lines.push(active.length ? '进行中的项目：' : '没有进行中的项目');
     for (const p of active) {
       const state = p.error ? `停下了：${p.errorBrief ?? p.error}（负责重试的是${roles[p.retryRole]?.name}）` : p.busy ? `${roles[p.activeRole]?.name}在干活：${p.activity ?? ''}` : p.waitingFor ? `等管理员${p.waitingFor}` : '';
-      lines.push(`- ${label(p)} 阶段「${stageNames[p.stage] ?? p.stage}」${state ? `，${state}` : ''}；工作区 workspace/${p.id}/；${p.source}`);
+      lines.push(`- ${label(p)} 阶段「${p.stageName ?? stageNames[p.stage] ?? p.stage}」${state ? `，${state}` : ''}；工作区 workspace/${p.id}/；${p.source}`);
     }
     const done = snapshot.projects.filter(p => p.stage === 'done');
     if (done.length) lines.push(`已完成或结束的项目：${done.map(p => `${label(p)}${p.ended ? '（中途结束）' : ''}`).join('、')}`);
@@ -70,14 +73,16 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       question: z.string().min(1).max(1000),
     }, guard(async ({ role, project, question }) => {
       const p = await findProject(project);
+      if (!(p.package ? p.roles.some(r => r.id === role) : roles[role])) return fail('这个项目没有该角色');
+      const definition = p.package ? await roleDefinition(await lockedPackage(root, p.package), role, root) : undefined;
       if ((await workbench.state())?.scheduler?.limit === 1) return fail('当前全团队只有一个执行名额，管理员正在使用。请直接读取该项目文件，或结束本轮后再让同事处理。');
-      const r = await runAgent({ role, mode: 'chat', isolateSession: Boolean(p.dedicated), projectDir: path.join(root, 'workspace', p.id), timeoutMs: 120000, prompt: [
+      const r = await runAgent({ role, definition, mode: 'chat', isolateSession: Boolean(p.dedicated || p.package), projectDir: path.join(root, 'workspace', p.id), timeoutMs: 120000, prompt: [
         'AI 管理员助手代管理员问你（这不是群聊，你的回答只给管理员助手看）。只读文件，把答案写在 reply 里（可以超过 120 字，但要具体），proposal 用 none。',
-        `项目：${label(p)}，现在在「${stageNames[p.stage] ?? p.stage}」。`,
+        `项目：${label(p)}，现在在「${p.stageName ?? stageNames[p.stage] ?? p.stage}」。`,
         `问题：${question}`,
       ].join('\n') });
-      if (!r.ok) return fail(`${roles[role].name}没答上来：${r.error}`);
-      return reply(`${roles[role].name}说：${r.structured?.reply ?? r.text}`);
+      if (!r.ok) return fail(`${roleName(p, role)}没答上来：${r.error}`);
+      return reply(`${roleName(p, role)}说：${r.structured?.reply ?? r.text}`);
     })),
 
     tool('tell_colleague', '代管理员在项目群里对某个 AI 同事说一句话，效果和管理员在群里 @ 它一样（比如“重试”、修改意见、问一句）。群里会显示“AI 管理员助手代你：……”。', {
@@ -86,10 +91,11 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       text: z.string().min(1).max(2000),
     }, guard(async ({ role, project, text }) => {
       const p = await findProject(project);
+      if (!(p.package ? p.roles.some(r => r.id === role) : roles[role])) return fail('这个项目没有该角色');
       if (!p.chatId) return fail(`${label(p)} 没有对应的群，不能代你说话`);
       const r = await workbench.message({ chatId: p.chatId, role, text, via: 'admin' });
       const what = r.queued ? '它正在干活，这句话先记下了，这一步做完再回' : r.retrying ? '它开始重试这一步了' : r.stage ? '它开始按这句话修改了' : r.chatting ? '它会在群里回应' : r.confirming ? '群里发了确认卡，要管理员在群里点' : r.stopping ? '已让它停下这一步' : r.busy ? '它正在干活，现在不能重试；等这一步做完，或先停下再发“重试”' : r.waiting ? '没有执行：现在没有进行中的项目，或这一步并没有停下' : '已交给它处理';
-      return reply(`已代管理员对${roles[role].name}说：“${text}”。${what}。`);
+      return reply(`已代管理员对${roleName(p, role)}说：“${text}”。${what}。`);
     })),
 
     tool('press_button', '代管理员点关口的确认或打回。只接受最新完整的明确指令，如“确认 #3 设计”“打回 #3 网页”“验收通过 #3”。多个项目等确认时必须带项目编号；admin_words 不可截取片段。', {
@@ -107,10 +113,11 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       if (!snapshot) return fail('团队服务没在运行，读不到项目');
       const p = snapshot.projects.find(x => x.number === project);
       if (!p) return fail(`没有 #${project} 这个项目`);
-      const role = gateRole(p.stage);
-      if (!role || p.busy || p.error || !p.cardId) return fail(`${label(p)} 现在在「${stageNames[p.stage] ?? p.stage}」，不在等人确认的关口，没有按钮可点`);
-      if ((consent.project !== null && consent.project !== project) || (consent.stage && consent.stage !== p.stage)) return fail('原话指定的项目或关口与要点的按钮不一致，不能代点。');
-      const eligible = snapshot.projects.filter(x => gateRole(x.stage) && !x.busy && !x.error && x.cardId && (!consent.stage || x.stage === consent.stage));
+      const decision = p.package ? p.approval : p.stage;
+      const role = p.package ? p.stageType === 'gate' && !p.questions && p.cardRole : gateRole(p.stage);
+      if (!role || p.busy || p.error || !p.cardId) return fail(`${label(p)} 现在在「${p.stageName ?? stageNames[p.stage] ?? p.stage}」，不在等人确认的关口，没有按钮可点`);
+      if ((consent.project !== null && consent.project !== project) || (consent.stage && consent.stage !== decision)) return fail('原话指定的项目或关口与要点的按钮不一致，不能代点。');
+      const eligible = snapshot.projects.filter(x => (x.package ? x.stageType === 'gate' && !x.questions : gateRole(x.stage)) && !x.busy && !x.error && x.cardId && (!consent.stage || (x.package ? x.approval : x.stage) === consent.stage));
       if (consent.project === null && eligible.length !== 1) return fail('有多个项目等确认，请管理员在指令中写明项目编号，不能代选。');
       if (adminWords() !== originals || originals.length - 1 !== consentIndex || originals.at(-1)?.trim() !== words) return fail('管理员的指令已经更新，不能再按之前的话代点。');
       const used = usedConsents.get(originals) ?? new Set();
@@ -119,6 +126,7 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       usedConsents.set(originals, used);
       const result = await workbench.action({ chatId: p.chatId, role, value: { action, stage: p.stage, projectId: p.id, cardId: p.cardId }, via: 'admin' });
       if (result.toast?.content !== '已收到操作') return fail(`没点成：${result.toast?.content ?? '请看最新的项目状态'}`);
+      if (p.package) return reply(`已代你${action === 'confirm' ? '确认' : '打回'}「${p.stageName}」。${action === 'reject' ? '接着把管理员的修改意见发给本关角色。' : '团队将按自己的协作规则继续。'}`);
       const buttons = { confirm_prd: ['确认 PRD', '打回 PRD', 'AI 设计开始画线框', 'AI 产品经理'], confirm_design: ['确认设计', '打回设计', 'AI 程序员会开始做网页', 'AI 设计'], accept: ['验收通过', '打回网页', '项目完成', 'AI 程序员'] };
       const [confirm, reject, next, who] = buttons[p.stage];
       return reply(action === 'confirm' ? `已代你点了“${confirm}”。${next}。` : `已代你点了“${reject}”。这只是退回修改，修改意见还没发出去；接着用 tell_colleague 把管理员的原话发给 ${who}。`);
@@ -133,7 +141,7 @@ export function buildTools({ supervisor, workbench, changes, deploy, runAgent, r
       reason: z.string().min(1).max(200),
     }, guard(async () => {
       const r = await deploy.restart();
-      return r.ok ? reply('团队服务重启好了，3 个机器人已连上飞书') : fail(r.error);
+      return r.ok ? reply('团队服务重启好了，团队机器人已连上飞书') : fail(r.error);
     })),
 
     tool('revert_change', '回退管理员助手做过的一次改动（git revert）。不填 sha 就回退最近一次；代码类回退后会重启团队服务。', {

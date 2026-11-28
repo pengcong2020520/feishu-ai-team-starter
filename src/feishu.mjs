@@ -4,7 +4,6 @@ import { createFeishuLogger } from './feishu-logger.mjs';
 import { createMessageReceiver, eventIdentity } from './projects/events.mjs';
 import { recipient } from './projects/directory.mjs';
 
-const names = ['product', 'designer', 'developer'];
 const err = e => {
   const d = e?.response?.data;
   return new Error(`${e?.message ?? '飞书请求失败'}${d?.code != null ? `（code ${d.code}，msg ${d.msg ?? ''}）` : ''}`);
@@ -34,12 +33,13 @@ export const timed = (promise, ms, what) => {
   return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
 };
 
-export function createFeishu({ credentials, onMessage, onAction, onDiscussion, observe, shouldRecord, recorder, logger = console, uploadMs = 60000 }) {
+export function createFeishu({ credentials, onMessage, onAction, onDiscussion, observe, shouldRecord, recorder, roleOrder, logger = console, uploadMs = 60000 }) {
+  const names = Object.keys(credentials);
   const sdkLogger = createFeishuLogger(logger);
   const clients = Object.fromEntries(names.map(role => [role, new Lark.Client({ ...credentials[role], logger: sdkLogger })]));
   const sockets = [];
   const ids = new Map();
-  const receive = createMessageReceiver({ ids, onMessage, onDiscussion, observe, shouldRecord, recorder });
+  const receive = createMessageReceiver({ ids, onMessage, onDiscussion, observe, shouldRecord, recorder, roleOrder: roleOrder || names });
   const owner = new Map();
   const cardChats = new Map();
   const pick = (chatId, role) => clients[role ?? owner.get(chatId) ?? 'product'];
@@ -95,12 +95,12 @@ export function createFeishu({ credentials, onMessage, onAction, onDiscussion, o
         if (r.data?.invalid_id_list?.length || r.data?.not_existed_id_list?.length || r.data?.pending_approval_id_list?.length) throw Error('部分成员未成功入群，请检查应用可用范围或群加人审批');
       }
     },
-    async createProjectGroup({ projectId, name, team }) {
+    async createProjectGroup({ projectId, name, team, botRoles = ['product', 'designer', 'developer'] }) {
       const owner = recipient(team.people.find(p => p.id === team.ownerId));
       if (!owner) throw Error('项目负责人缺少飞书身份');
       const r = await call(() => clients.product.im.v1.chat.create({ params: { user_id_type: owner.type, set_bot_manager: true, uuid: `project-${projectId}`.slice(0, 50) }, data: {
         name: `项目 · ${name}`.slice(0, 80), description: '本群对应一个独立项目。讨论完整留档；@ AI 同事交流，按确认卡推进。',
-        owner_id: owner.id, user_id_list: [owner.id], bot_id_list: ['designer', 'developer'].map(role => credentials[role].appId),
+        owner_id: owner.id, user_id_list: [owner.id], bot_id_list: botRoles.filter(role => role !== 'product').map(role => { if (!credentials[role]) throw Error(`机器人 ${role} 尚未连接，请重启服务`); return credentials[role].appId; }),
       } }));
       const chatId = r.data?.chat_id;
       if (!chatId) throw Error('创建项目群没有返回群号');

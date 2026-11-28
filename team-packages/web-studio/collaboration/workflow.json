@@ -1,0 +1,179 @@
+{
+  "entry": "clarifying",
+  "coordinator": "product",
+  "relations": [
+    {
+      "from": "product",
+      "to": "product",
+      "kind": "dispatch"
+    },
+    {
+      "from": "product",
+      "to": "designer",
+      "kind": "dispatch"
+    },
+    {
+      "from": "product",
+      "to": "developer",
+      "kind": "dispatch"
+    },
+    {
+      "from": "developer",
+      "to": "designer",
+      "kind": "review"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "clarifying",
+      "name": "澄清与 PRD",
+      "type": "task",
+      "role": "product",
+      "skills": [],
+      "prompt": "用户的话：{{demand}}\n用户的回答：{{feedback}}\n这是第 {{round}} 轮。第三轮必须用 prd-spec 和 spec-checklist 交付 PRD、outline 与 checklist，不再提问。前两轮信息不足时用 clarify 交付 questions.json。",
+      "outputs": [],
+      "next": "confirm-prd",
+      "validator": "web-clarify",
+      "questions": "questions"
+    },
+    {
+      "id": "questions",
+      "name": "回答澄清",
+      "type": "gate",
+      "role": "product",
+      "approval": "clarifying",
+      "next": "clarifying",
+      "questions": true
+    },
+    {
+      "id": "confirm-prd",
+      "name": "确认 PRD",
+      "type": "gate",
+      "role": "product",
+      "approval": "confirm_prd",
+      "next": "designing",
+      "reject": "revise-prd"
+    },
+    {
+      "id": "revise-prd",
+      "name": "修改 PRD",
+      "type": "task",
+      "role": "product",
+      "skills": [
+        "prd-spec",
+        "spec-checklist"
+      ],
+      "prompt": "用户对 PRD 的修改意见：{{feedback}}。只改提到的部分。",
+      "outputs": [
+        "prd",
+        "outline",
+        "checklist"
+      ],
+      "next": "confirm-prd",
+      "validator": "web-prd"
+    },
+    {
+      "id": "designing",
+      "name": "线框与主题",
+      "type": "task",
+      "role": "designer",
+      "skills": [
+        "lofi-wireframe",
+        "theme-pick"
+      ],
+      "prompt": "PRD 已确认。画线框并选主题，按角色说明中「画线框与主题」做。",
+      "outputs": [
+        "wireframe",
+        "theme"
+      ],
+      "next": "confirm-design",
+      "validator": "web-design",
+      "timeoutMinutes": 15
+    },
+    {
+      "id": "confirm-design",
+      "name": "确认设计",
+      "type": "gate",
+      "role": "designer",
+      "approval": "confirm_design",
+      "next": "building",
+      "reject": "revise-design"
+    },
+    {
+      "id": "revise-design",
+      "name": "修改设计",
+      "type": "task",
+      "role": "designer",
+      "skills": [],
+      "prompt": "用户对设计的修改意见：{{feedback}}。只改提到的部分。",
+      "outputs": [
+        "wireframe",
+        "theme"
+      ],
+      "next": "confirm-design",
+      "validator": "web-design"
+    },
+    {
+      "id": "building",
+      "name": "开发网页",
+      "type": "task",
+      "role": "developer",
+      "skills": [
+        "frontend-design"
+      ],
+      "prompt": "PRD、线框和主题已确认，请开始。",
+      "outputs": [
+        "site"
+      ],
+      "next": "walkthrough",
+      "validator": "web-site",
+      "timeoutMinutes": 20
+    },
+    {
+      "id": "walkthrough",
+      "name": "走查网页",
+      "type": "task",
+      "role": "designer",
+      "skills": [
+        "flow-walkthrough",
+        "consistency-check"
+      ],
+      "prompt": "程序员已经做好网页。这是第 {{round}} 轮走查；有上一轮报告时做回归走查，核对上一轮问题。用户修改意见：{{feedback}}。每屏说明用户看到了什么，不写函数名或代码。",
+      "outputs": [
+        "walkthrough"
+      ],
+      "next": "accept",
+      "validator": "web-walkthrough",
+      "timeoutMinutes": 15,
+      "freshSession": true
+    },
+    {
+      "id": "accept",
+      "name": "最终验收",
+      "type": "gate",
+      "role": "developer",
+      "approval": "accept",
+      "next": "done",
+      "reject": "revise-build"
+    },
+    {
+      "id": "revise-build",
+      "name": "修改网页",
+      "type": "task",
+      "role": "developer",
+      "skills": [],
+      "prompt": "用户意见：{{feedback}}。同时处理走查报告中待改、阻塞的屏，其余保持不变。",
+      "outputs": [
+        "site"
+      ],
+      "next": "walkthrough",
+      "validator": "web-site",
+      "timeoutMinutes": 20
+    },
+    {
+      "id": "done",
+      "name": "已完成",
+      "type": "done"
+    }
+  ]
+}

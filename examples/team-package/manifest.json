@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "runtime": "feishu-team/1",
+  "id": "brief-demo",
+  "name": "拾光 · 简报示例团队",
+  "version": "1.0.0",
+  "description": "供作者复制改造的两角色最小团队包。",
+  "author": "Feishu AI Team contributors",
+  "license": "MIT",
+  "workflow": "collaboration/workflow.json",
+  "collaboration": "collaboration/SKILL.md",
+  "roles": [
+    {
+      "id": "writer",
+      "name": "AI 简报员",
+      "description": "撰写简报",
+      "prompt": "agents/writer.md",
+      "skills": [
+        "writer-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "context",
+        "drafts",
+        "review"
+      ],
+      "write": [
+        "drafts"
+      ],
+      "memory": "project"
+    },
+    {
+      "id": "reviewer",
+      "name": "AI 校对员",
+      "description": "校对简报",
+      "prompt": "agents/reviewer.md",
+      "skills": [
+        "reviewer-method"
+      ],
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Skill"
+      ],
+      "read": [
+        "context",
+        "drafts",
+        "review"
+      ],
+      "write": [
+        "review"
+      ],
+      "memory": "project"
+    }
+  ],
+  "skills": [
+    {
+      "id": "writer-method",
+      "version": "1.0.0",
+      "path": "skills/writer-method/SKILL.md",
+      "description": "撰写或校对简报",
+      "inputs": [
+        "项目目标",
+        "上游简报"
+      ],
+      "outputs": [
+        "drafts/brief.md"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "id": "reviewer-method",
+      "version": "1.0.0",
+      "path": "skills/reviewer-method/SKILL.md",
+      "description": "撰写或校对简报",
+      "inputs": [
+        "项目目标",
+        "上游简报"
+      ],
+      "outputs": [
+        "review/brief.md"
+      ],
+      "tools": [
+        "Read",
+        "Write"
+      ]
+    }
+  ],
+  "workspace": {
+    "directories": [
+      "drafts",
+      "review"
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "writer",
+      "name": "AI 简报员交付",
+      "path": "drafts/brief.md",
+      "format": "markdown"
+    },
+    {
+      "id": "reviewer",
+      "name": "AI 校对员交付",
+      "path": "review/brief.md",
+      "format": "markdown"
+    }
+  ],
+  "examples": [
+    {
+      "name": "功能说明",
+      "demand": "我们要让用户安装别人配置好的 AI 团队；先验证角色、技能和交接能复现，再讨论公开发布。请整理三句简报。",
+      "expectedArtifacts": [
+        "writer",
+        "reviewer"
+      ]
+    }
+  ],
+  "files": [
+    "LICENSE",
+    "agents/reviewer.md",
+    "agents/writer.md",
+    "collaboration/SKILL.md",
+    "collaboration/workflow.json",
+    "manifest.json",
+    "skills/reviewer-method/SKILL.md",
+    "skills/writer-method/SKILL.md"
+  ]
+}

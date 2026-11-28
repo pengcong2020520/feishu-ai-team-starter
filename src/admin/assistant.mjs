@@ -99,7 +99,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
     }
   };
   const diagnosePrompt = p => [
-    `管理员想知道「#${p.number} ${p.name}」为什么在「${stageNames[p.stage] ?? p.stage}」停下了（负责的是${roles[p.retryRole]?.name ?? '某个同事'}，记下的原因：${p.error}）。`,
+    `管理员想知道「#${p.number} ${p.name}」为什么在「${p.stageName ?? stageNames[p.stage] ?? p.stage}」停下了（负责的是${roles[p.retryRole]?.name ?? '某个同事'}，记下的原因：${p.error}）。`,
     `去看 data/service.log 里相关的报错、data/state.json 里这个项目的记录、workspace/${p.id}/ 里的文件，需要的话问负责的同事。`,
     '只查不改：不要代为重试，不要交改动。回复分三段：查到的事实、推断的原因（写明是推断）、建议下一步（比如点“接着做”、改哪里）。',
   ].join('\n');
@@ -114,7 +114,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
       if (alerts.service && !fresh) { alerts.service.closed = true; save(); }
       if (r.ok) {
         await settle('service', '团队服务停了', '✓ 团队服务已恢复');
-        await patch(messageId, closedCard('重启团队服务', '✓ 团队服务重启好了，3 个机器人已连上飞书'));
+        await patch(messageId, closedCard('重启团队服务', '✓ 团队服务重启好了，团队机器人已连上飞书'));
         return;
       }
       if (supervisor.status().running) {
@@ -126,7 +126,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
     } finally { restarting = false; }
   };
 
-  const busyText = busy => `${busy.map(p => `${name(p)}（${roles[p.activeRole]?.name ?? '有同事'}在${stageNames[p.stage] ?? p.stage}）`).join('、')}正在干活，现在重启会打断它。等这一步做完再发“重启”。`;
+  const busyText = busy => `${busy.map(p => `${name(p)}（${roles[p.activeRole]?.name ?? '有同事'}在${p.stageName ?? stageNames[p.stage] ?? p.stage}）`).join('、')}正在干活，现在重启会打断它。等这一步做完再发“重启”。`;
 
   return {
     serviceDown,
@@ -220,11 +220,11 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
         void (async () => {
           const p = (await workbench.state())?.projects.find(x => x.id === a.projectId);
           if (!p || p.waitingFor !== '重试' || p.stage !== a.stage || p.stuckCardId !== a.stuckCardId) {
-            await patch(messageId, closedCard('有项目停下了', p ? `这张提醒过期了：${name(p)} 现在在「${stageNames[p.stage] ?? p.stage}」，${p.chatId?.startsWith('web:') ? '请到工作台看最新那张卡片' : '请到群里点最新那张卡片'}。` : '这张提醒过期了：读不到这个项目，发“状态”看最新情况'));
+            await patch(messageId, closedCard('有项目停下了', p ? `这张提醒过期了：${name(p)} 现在在「${p.stageName ?? stageNames[p.stage] ?? p.stage}」，${p.chatId?.startsWith('web:') ? '请到工作台看最新那张卡片' : '请到群里点最新那张卡片'}。` : '这张提醒过期了：读不到这个项目，发“状态”看最新情况'));
             return;
           }
           await workbench.message({ chatId: p.chatId, role: p.retryRole, text: '重试', via: 'admin' });
-          await patch(messageId, closedCard('有项目停下了', `✓ 已让 ${roles[p.retryRole]?.name ?? '负责的同事'}接着做 ${name(p)}「${stageNames[p.stage] ?? p.stage}」，到${p.chatId?.startsWith('web:') ? '工作台' : '飞书群'}看进度卡。`));
+          await patch(messageId, closedCard('有项目停下了', `✓ 已让 ${roles[p.retryRole]?.name ?? '负责的同事'}接着做 ${name(p)}「${p.stageName ?? stageNames[p.stage] ?? p.stage}」，到${p.chatId?.startsWith('web:') ? '工作台' : '飞书群'}看进度卡。`));
         })().catch(async error => {
           a.closed = false;
           save();
@@ -247,7 +247,7 @@ export function createAssistant({ root, bot, supervisor, workbench, steward = nu
       for (const [key, p] of stuck) await alert(key, cardId => stuckCard({ p, cardId }), { kind: 'stuck', projectId: p.id, stage: p.stage, stuckCardId: p.stuckCardId });
       for (const key of Object.keys(alerts).filter(k => k.startsWith('stuck:') && !stuck.has(k))) {
         const p = snapshot.projects.find(x => x.id === alerts[key].projectId);
-        const text = !p ? '✓ 这个项目已经不在了' : p.waitingFor === '重试' ? '这一步又停下了一次，看新的提醒' : p.stage === 'done' ? `✓ ${name(p)} 已${p.ended ? '结束' : '完成'}` : `✓ ${name(p)} 已经接着在做了（现在在「${stageNames[p.stage] ?? p.stage}」）`;
+        const text = !p ? '✓ 这个项目已经不在了' : p.waitingFor === '重试' ? '这一步又停下了一次，看新的提醒' : p.stage === 'done' ? `✓ ${name(p)} 已${p.ended ? '结束' : '完成'}` : `✓ ${name(p)} 已经接着在做了（现在在「${p.stageName ?? stageNames[p.stage] ?? p.stage}」）`;
         await settle(key, '有项目停下了', text);
       }
     },

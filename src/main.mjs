@@ -1,6 +1,7 @@
 import { startPreview } from './preview.mjs';
 import { createTeam } from './team.mjs';
 import { teamModeNames } from './team-mode.mjs';
+import { extraCredentials } from './packages/bindings.mjs';
 
 process.loadEnvFile();
 const credentials = {};
@@ -14,11 +15,12 @@ const port = Number(process.env.PREVIEW_PORT || 4870);
 if (!Number.isInteger(port) || port < 1024 || port > 65534) throw new Error('PREVIEW_PORT 必须是 1024–65534 的整数');
 const workbenchBase = process.env.PUBLIC_WORKBENCH_BASE || `http://127.0.0.1:${port}`;
 const previewBase = process.env.PUBLIC_PREVIEW_BASE || `http://127.0.0.1:${port + 1}`;
-const { mode, flow, feishu, recorder } = createTeam({ credentials, workbenchBase, previewBase });
+const allCredentials = extraCredentials(process.env, credentials);
+const { mode, flow, feishu, recorder } = createTeam({ credentials: allCredentials, workbenchBase, previewBase });
 const preview = await startPreview({ flow, feishu, recorder, host: process.env.PREVIEW_HOST || '127.0.0.1', previewBase, workbenchPort: port, modelPort: port + 1 });
 try {
   await feishu.start();
-  console.log('3 个机器人已连上飞书');
+  console.log(`${Object.keys(allCredentials).length} 个机器人已连上飞书`);
   console.log(`当前版本：${teamModeNames[mode]}`);
   console.log(`预览地址：${previewBase}；走查与工作台地址：${workbenchBase}`);
 } catch (error) {

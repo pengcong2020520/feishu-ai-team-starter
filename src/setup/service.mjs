@@ -28,7 +28,7 @@ export function serviceStatus(root) {
   return isOurProcess(pid, entry) ? { running: true, pid } : { running: false };
 }
 
-export async function startService(root, { entry = 'src/admin/main.mjs', readyText = '3 个机器人已连上飞书', timeoutMs = 60000, intervalMs = 500 } = {}) {
+export async function startService(root, { entry = 'src/admin/main.mjs', readyText = '个机器人已连上飞书', timeoutMs = 60000, intervalMs = 500 } = {}) {
   const current = serviceStatus(root);
   if (current.running) return { ok: true, already: true, pid: current.pid };
   const { pid: pidFile, log } = paths(root);

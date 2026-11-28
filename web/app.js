@@ -161,8 +161,8 @@ function cardStatus(item) {
 }
 function renderBoard() {
   clear($('#board'));
-  for (const [title, stages] of columns) {
-    const items = app.state.projects.filter(item => stages.includes(item.stage)), column = el('div', null, 'column'), head = el('div', null, 'column-head'), body = el('div', null, 'column-body');
+  for (const [title, stages] of [...columns, ['团队协作', null]]) {
+    const items = app.state.projects.filter(item => stages ? !item.package && stages.includes(item.stage) : Boolean(item.package)), column = el('div', null, 'column'), head = el('div', null, 'column-head'), body = el('div', null, 'column-body');
     head.append(el('span',title),el('span',String(items.length),'column-count'));
     column.append(head, body);
     if (!items.length) body.append(el('div', title === '澄清与 PRD' ? '点右上角「+ 提需求」开始' : '暂无', 'empty'));
@@ -171,6 +171,7 @@ function renderBoard() {
       const card = el('button', null, `project-card ${waiting ? 'is-waiting' : ''} ${item.queuedForAgent === true ? 'is-queued' : ''} ${item.stage === 'done' ? 'compact' : ''}`), top = el('div', null, 'card-top');
       top.append(el('span', `#${item.number} ${item.name}`, 'project-name'), el('span', timeSince(item.createdAt), 'project-time'));
       card.append(top);
+      if (item.package) { card.append(el('div', item.packageName, 'card-status'), el('div', item.error || item.activity || item.stageName, 'card-status')); card.onclick = () => { location.href = '/teams#' + item.id; }; body.append(card); continue; }
       if (item.stage === 'done') {
         card.append(el('div', item.ended ? '已结束' : '✓ 已完成', `card-status ${item.ended ? 'ended' : 'done'}`), el('div', `${item.source} · ${new Date(item.createdAt).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })} 开始`, 'done-meta'));
       } else {
@@ -809,6 +810,7 @@ async function refresh() {
     app.chats = Array.isArray(chats) ? chats : [];
     app.modelBase = config.modelBase || app.modelBase;
     // 旧版冒烟服务没有 /api/team，404 时保持原来的工作台。
+    if (team.value?.approvalOptions) { approvalStages.splice(0, approvalStages.length, ...Object.entries(team.value.approvalOptions)); }
     if (team.missing) { app.team = null; app.teamMissing = true; app.teamError = ''; }
     else if (team.value) { app.team = team.value; app.teamMissing = false; app.teamError = ''; }
     else if (team.error && team.error !== app.teamError) { app.teamError = team.error; notice(team.error); }

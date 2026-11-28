@@ -27,7 +27,7 @@ export function serviceLine(service, now = Date.now()) {
 }
 
 export function projectLine(p, now = Date.now()) {
-  const stage = stageNames[p.stage] ?? p.stage;
+  const stage = p.stageName ?? stageNames[p.stage] ?? p.stage;
   if (p.waitingFor === '重试') return `**${projectTitle(p)}** · ${stage} · ⚠️ 停下了：${plain(p.errorBrief ?? p.error, 80)}`;
   if (p.busy) return `**${projectTitle(p)}** · ${stage} · ${roles[p.activeRole]?.name ?? '有同事'}${p.activity ? `：${plain(p.activity, 40)}` : '在干活'}`;
   if (p.waitingFor) { const duration = p.stageAt && since(p.stageAt, now); return `**${projectTitle(p)}** · 等你${p.waitingFor}${duration ? `（${duration === '刚刚' ? duration : `已等 ${duration}`}）` : ''}`; }
@@ -51,7 +51,7 @@ export function statusCard({ service, snapshot, now = Date.now(), cardId }) {
 export function stuckCard({ p, cardId }) {
   const who = roles[p.retryRole]?.name ?? '负责的同事';
   return card('有项目停下了', [
-    line(`**${projectTitle(p)}** 在「${stageNames[p.stage] ?? p.stage}」停下了：${plain(p.errorBrief ?? p.error)}`),
+    line(`**${projectTitle(p)}** 在「${p.stageName ?? stageNames[p.stage] ?? p.stage}」停下了：${plain(p.errorBrief ?? p.error)}`),
     grey(`点“接着做”，${who}会再做一次这一步，群里会显示“${ADMIN_NAME}代你：重试”。点“看看原因”，我去查日志和文件，只查不改，要稍等一会儿。`),
     { tag: 'action', actions: [button('接着做', { action: 'retry', cardId, projectId: p.id, stage: p.stage }, 'primary'), button('看看原因', { action: 'diagnose', cardId, projectId: p.id, stage: p.stage }), button('先不管', { action: 'ignore', cardId })] },
   ]);
