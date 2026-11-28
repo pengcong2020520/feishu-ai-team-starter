@@ -36,10 +36,17 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
   const file = path.join(root, 'data/package-projects.json');
   let state = { projects: [], requests: {} }, writes = Promise.resolve();
   const intakes = new Map();
+  const interrupted = new Set();
   const jobs = new Map(), controls = new Map(), conversations = new Map(), mutations = new Map(), creating = new Map();
   const ready = (async () => {
     try { state = JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-    for (const p of state.projects) if (p.busy) { p.busy = false; p.error = '团队服务重启过，这一步未完成，请重试'; p.running = []; p.cardId = randomUUID(); p.cardSent = false; }
+    for (const p of state.projects) {
+      if (p.busy) {
+        if (!p.error && !p.ended && !p.stopRequested) p.recoveryPending = true;
+        p.busy = false; p.error = '团队服务重启过，这一步未完成，请重试'; p.running = []; p.cardId = randomUUID(); p.cardSent = false;
+      }
+      if (p.recoveryPending && p.error === '团队服务重启过，这一步未完成，请重试' && !p.ended && !p.stopRequested) interrupted.add(p.id);
+    }
     for (const p of state.projects) for (const [id, item] of Object.entries(p.groupMessages || {})) if (['queued','routed','failed'].includes(item.status)) delete p.groupMessages[id];
     await atomicJson(file, state);
   })();
@@ -347,7 +354,7 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
         await allowed(p, event, action, n.approval);
         if (action === 'stop' || action === 'end') {
           if (action === 'end' && p.busy) throw Error('请先停下正在执行的任务，再结束项目');
-          if (action === 'stop') { if (!p.busy) throw Error('当前没有正在执行的任务'); p.stopRequested = true; for (const c of controls.get(p.id)?.values() || []) await c.stop?.(); }
+          if (action === 'stop') { if (!p.busy) throw Error('当前没有正在执行的任务'); p.stopRequested = true; await save(); for (const c of controls.get(p.id)?.values() || []) await c.stop?.(); }
           else { p.stage = pack.workflow.nodes.find(n => n.type === 'done').id; p.ended = true; p.error = null; p.cardId = randomUUID(); await save(); await issue(p, pack); }
           return { ok: true };
         }
@@ -553,6 +560,21 @@ export function createPackageEngine({ root = process.cwd(), agent = runAgent, re
       documentTimer.unref?.();
     },
     stopDocumentPolling() { clearInterval(documentTimer); documentTimer = null; },
+    async resumeInterrupted() {
+      await ready;
+      for (const id of interrupted) {
+        interrupted.delete(id); const p = find(id);
+        await exclusive(p.chatId, async () => {
+          if (p.busy || jobs.has(id) || p.error !== '团队服务重启过，这一步未完成，请重试' || p.ended || p.stopRequested) return;
+          if (Date.now() - Date.parse(p.lastAutoRecovery || '') < 600000) { p.recoveryPending = false; await save(); await issue(p, await packFor(p)); return; }
+          // 仅接续崩溃前已授权的工作，不能从待审状态主动确认；十分钟内最多自动接续一次。
+          await record(p, { kind: 'text', actor: '服务恢复', text: '服务已恢复，接续被中断的步骤；原确认关口仍需按项目审核方式处理。' });
+          p.recoveryPending = false; p.lastAutoRecovery = new Date().toISOString(); await save();
+          p.error = null; p.busy = true; p.cardId = randomUUID(); await save();
+          launch(p);
+        });
+      }
+    },
     async list() { await ready; return copy(state.projects); },
     async snapshot() {
       await ready;

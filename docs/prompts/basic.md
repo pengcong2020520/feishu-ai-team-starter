@@ -2,12 +2,15 @@
 
 适合先体验三个 AI 同事怎样把需求做成网页。3 位 AI 同事在原群协作，另有管理员助手和网页工作台。无需独立项目群、人员名册或职责配置。群内一个项目完成后可以继续提下一个；工作台保留历次项目产物。
 
+> 安装前先按 docs/部署与常驻.md 确定部署位置，已明确选择不重复问。本地执行 `node setup.mjs deploy local` 后走标准 setup，验收系统自启和异常重启；服务器先收集 SSH 主机、用户名、端口、登录方式和目录，记录 `deploy server --host … --user …`，在远端执行 `deploy server --here` 和 setup。不要先在本机创建、运行机器人再决定部署。服务器首次扫码使用标准扫码页加 SSH 转发。说明 macOS 登录后自启、Linux 需要 linger，以及休眠/断网的边界；服务恢复只接续已在执行的步骤，不批准人工关口。
+
 ## 给 coding agent 的搭建提示词
 
 ```text
 我要搭建飞书 AI 团队「启航版 · 单群入门」。选择已经明确，不必再问版本。
 从 https://github.com/pengcong2020520/feishu-ai-team-starter 的 main 安装完整代码。
-先读 AGENTS.md、docs/版本导航.md、本文和 docs/复现指南.md，不重写项目。
+先读 AGENTS.md、docs/版本导航.md、本文、docs/复现指南.md 和 docs/部署与常驻.md，不重写项目。
+先确定服务器还是本地部署；已选择的不重复问。本地安装系统常驻，服务器收集 SSH 信息并在远端执行标准 setup；说明自启范围及休眠限制。
 检查 Node.js >=24、Git、联网条件，在新目录运行 node setup.mjs mode basic，再运行 node setup.mjs，按“下一步”完成。
 模型用支持 Anthropic 消息、工具调用和结构化输出的接口；密钥只保存在 .env，不放进命令行、日志或提交。
 如果已有机器人，复用现有凭证；先确认旧实例停下，跳过已完成的扫码，不重建应用。

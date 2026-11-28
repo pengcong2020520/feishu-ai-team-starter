@@ -87,7 +87,7 @@ test('并发启动共用一次就绪结果，停下和重启串行执行', async
 
 test('npm start 后台起的是管理服务，团队服务是它的子进程；npm stop 两个一起停', async () => {
   const root = fixture({ 'src/main.mjs': "import { writeFileSync } from 'node:fs'; writeFileSync('team.pid', String(process.pid)); console.log('3 个机器人已连上飞书'); setInterval(() => {}, 1000);" });
-  for (const file of ['src/admin/main.mjs', 'src/admin/supervisor.mjs', 'src/setup/service.mjs', 'src/setup/proc.mjs']) { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); copyFileSync(path.join(repo, file), path.join(root, file)); }
+  for (const file of ['src/admin/main.mjs', 'src/admin/supervisor.mjs', 'src/setup/service.mjs', 'src/setup/proc.mjs', 'src/setup/managed-service.mjs']) { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); copyFileSync(path.join(repo, file), path.join(root, file)); }
   const r = await startService(root, { intervalMs: 50 });
   assert.equal(r.ok, true);
   assert.equal(serviceStatus(root).running, true);
@@ -99,4 +99,15 @@ test('npm start 后台起的是管理服务，团队服务是它的子进程；n
   await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(alive(teamPid), false);
   assert.match(readFileSync(path.join(root, 'data/service.log'), 'utf8'), /管理服务已启动/);
+});
+
+test('守护模式异常退出会自动拉起，显式停止不会再次启动', async () => {
+  const root=fixture({'team.mjs':"import {existsSync,writeFileSync} from 'node:fs'; console.log('3 个机器人已连上飞书'); if(!existsSync('once')){writeFileSync('once','1');setTimeout(()=>process.exit(3),30);}else setInterval(()=>{},1000);"});
+  const sup=createSupervisor({root,entry:'team.mjs',echo:false,autoRestart:true,restartMs:30});
+  try {
+    const first=await sup.start(); const deadline=Date.now()+3000;
+    while((sup.status().pid===first.pid||!sup.status().healthy)&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
+    assert.equal(sup.status().healthy,true);assert.notEqual(sup.status().pid,first.pid);
+    await sup.stop();await new Promise(r=>setTimeout(r,100));assert.equal(sup.status().running,false);
+  }finally{await sup.stop();sup.close();}
 });

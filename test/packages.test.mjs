@@ -31,6 +31,24 @@ const fake = async args => {
 };
 const press = async (engine, p, action, extra = {}) => engine.action({ chatId: p.chatId, value: { action: `package_${action}`, projectId: p.id, stage: p.stage, cardId: p.cardId }, ...extra });
 
+test('服务恢复仅接续崩溃前任务，不批准待审、恢复手工停下或反复重启的项目',()=>fixture(async root=>{
+ const lock=await installPackage('examples/team-package',root),initial=createPackageEngine({root,agent:fake});
+ const created=await initial.create({package:lock,text:'恢复验证'});await initial.waitForIdle(created.id);
+ const file=path.join(root,'data/package-projects.json'),base=JSON.parse(await readFile(file,'utf8'));
+ for(const scenario of ['gate','interrupted','startup-failure','stopped','failed','cooldown']){
+  const state=structuredClone(base),p=state.projects[0];let calls=0;
+  if(scenario!=='gate'){p.stage='review';p.busy=true;p.error=scenario==='failed'?'业务错误':null;}
+  if(scenario==='stopped')p.stopRequested=true;if(scenario==='cooldown')p.lastAutoRecovery=new Date().toISOString();
+  await put(root,'data/package-projects.json',state);
+  const create=()=>createPackageEngine({root,agent:async args=>{calls++;return fake(args);}});
+  let engine=create();if(scenario==='startup-failure'){await engine.list();engine=create();}
+  await engine.resumeInterrupted();await engine.resumeInterrupted();const end=await engine.waitForIdle(p.id);
+  assert.equal(calls,['interrupted','startup-failure'].includes(scenario)?1:0,scenario);assert.equal(end.approvals?.length||0,0);
+  if(['interrupted','startup-failure'].includes(scenario)){assert.equal(end.stage,'accept');assert.ok(end.lastAutoRecovery);assert.equal(end.recoveryPending,false);}
+  if(scenario==='gate')assert.equal(end.stage,'scope');
+ }
+}));
+
 test('十分钟接续按真人和项目隔离，只有单角色点名建立上下文，不能把好的当批准',()=>fixture(async root=>{
   const lock=await installPackage('examples/team-package',root),directory=createDirectory(root),calls=[];
   const alice=await directory.observe({unionId:'alice'},'甲');await directory.observe({unionId:'bob'},'乙');

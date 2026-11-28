@@ -30,6 +30,10 @@
 
 ## 安装与运行（用户要搭建时先看这里）
 
+先读 [部署与常驻](docs/部署与常驻.md)，在初始化时确定服务实际运行位置：本地执行 `node setup.mjs deploy local`；服务器收集 SSH 主机、用户名、端口、登录方式和目录，执行 `deploy server --host … --user …`，再由 Coding Agent 在远端目录执行 `deploy server --here` 和标准 setup。已明确的选择不重复问。同一组机器人只连一处；不要先在本机扫码运行完再询问部署位置。
+
+本地安装系统守护，macOS 为登录后自启的 LaunchAgent，Linux 为 systemd 用户服务，启用 linger 才算开机自启完成。新安装只接续崩溃前已在执行的任务；十分钟内同项目最多一次自动接续，不批准待审、不重试业务错误、不重开主动停止的项目。旧安装未选择部署时仍保持下文手工恢复行为。`npm stop` 停止系统任务；`node setup.mjs service uninstall` 移除自启并保留项目。不能宣称电脑休眠、关机或断网时仍在线。
+
 1. 运行 `node setup.mjs`（Node 24 以上；不用先 `npm install`，它会在后台装依赖）。它每次只做下一件能做的事，最后打印 `== 下一步 ==`：照着在对话里问用户、或告诉用户要做什么，拿到回答后再运行。不要自己写扫码、建群之类的脚本。
 2. 模型：问用户接口地址、密钥、模型名（Anthropic 兼容接口；火山方舟是 `https://ark.cn-beijing.volces.com/api/compatible`，不是 `/api/v3`）。密钥用户可以直接发给你，也可以自己填进 `.env` 的 `MODEL_API_KEY`。拿到后先用你的文件写入工具把密钥原样存成 `data/model-key.txt`（不要用 echo、printf 等 shell 命令写，密钥里的引号会破坏命令），再运行 `node setup.mjs model --base-url <地址> --model <模型名> --key-file data/model-key.txt`，它读完会删掉这个文件；不要把密钥放进命令行参数、不要复述。终端已有 `ANTHROPIC_*` 变量时 setup 会提示，用户说"沿用"就运行 `node setup.mjs --use-anthropic-env`。
 3. 扫码：先告诉用户马上会弹出二维码页面、用飞书手机版逐个扫码并在手机上确认（3 个 AI 同事 + AI 管理员助手，共 4 张；扫管理员助手那张的人就是管理员），再运行 `node setup.mjs scan`。它会等到扫完（最长 9 分钟）：把命令超时放宽到 10 分钟，或放到后台运行并查看输出。被打断就重跑，已建成的不用再扫。

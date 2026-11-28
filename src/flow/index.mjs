@@ -31,6 +31,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   // 正在跑的智能体：用来把用户的引导插进去、让它停下
   const live = new Map();
   const creations = new Map();
+  const interrupted = new Set();
   const actions = new Set(), teamChanges = new Set();
   let state = { groups: {}, archived: [], proposals: {} };
   let saves = Promise.resolve();
@@ -44,10 +45,13 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     // 上次服务停掉时（电脑重启、睡眠、被关掉）还在干活的项目：标成出错并在群里说明，好让用户发“重试”接着做
     for (const project of Object.values(state.groups)) {
       if (project.busy && project.stage !== 'done' && !project.error) {
+        if (!project.ending && !project.stoppedBy) { project.recoveryPending = true; interrupted.add(project.chatId); }
         const notice = safeError(project, new StepError('团队服务重启过，这一步没做完', { kind: 'restart' })).catch(error => console.error(`重启提示没发出去：${errorText(error)}`));
         const entry = notice.finally(() => { if (jobs.get(project.chatId) === entry) jobs.delete(project.chatId); });
         jobs.set(project.chatId, entry);
       }
+      // 网络未恢复时启动也可能失败；保留恢复意图，直到真正接续或用户作出其他决定。
+      if (project.recoveryPending && project.lastFailure?.kind === 'restart' && !project.stoppedBy && !project.ending && !project.ended && project.stage !== 'done') interrupted.add(project.chatId);
       project.busy = false;
       project.queuedForAgent = false;
       project.activity = null;
@@ -156,6 +160,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     const entry = live.get(p.chatId);
     if (!entry) { await sendText(p.chatId, '这一步正在收尾，停不下来了，做完会发新卡片。', role); return false; }
     p.stoppedBy = actor;
+    await save();
     void entry.control.stop?.();
     return true;
   };
@@ -347,6 +352,7 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
   // 重试：停下卡上的按钮和文字“重试”都走这里
   const retry = async (p, actor) => {
     if (p.busy) return;
+    p.stoppedBy = null;
     p.busy = true; // 先占住这一步，再更新飞书卡片，防止消息与按钮并发重试。
     const stuck = p.stuckMessageId;
     p.stuckCardId = null; p.stuckMessageId = null;
@@ -728,5 +734,21 @@ export function createFlow({ root = process.cwd(), agent = runAgent, feishu, rec
     return { team: p.team };
     } finally { teamChanges.delete(p.chatId); }
   };
-  return { projects, updateTeam, handleMessage, handleAction, getProject: get, getProjectById, syncContext: async chatId => { const p = await get(chatId); if (p?.dedicated) await projects.syncContext(p); }, waitForIdle: async chatId => { await ready; while (creations.has(chatId) || jobs.has(chatId) || talks.has(chatId)) await (creations.get(chatId) ?? jobs.get(chatId) ?? talks.get(chatId)); return get(chatId); }, getState };
+  const resumeInterrupted = async () => {
+    await ready;
+    for (const chatId of interrupted) {
+      interrupted.delete(chatId); await jobs.get(chatId);
+      const p = state.groups[chatId];
+      const eligible = () => p && state.groups[chatId] === p && !p.busy && !p.ended && p.stage !== 'done' && p.lastFailure?.kind === 'restart' && !p.stoppedBy && !p.ending && !actions.has(chatId) && !jobs.has(chatId);
+      if (!eligible()) continue;
+      if (Date.now() - Date.parse(p.lastAutoRecovery || '') < 600000) { p.recoveryPending = false; await save(); continue; }
+      await sendText(chatId, '服务已恢复，接续被中断的步骤；待确认的成果不会自动批准。', retryRole(p));
+      // 发恢复通知期间可能收到用户的结束/重试操作，不能用旧状态覆盖用户决定。
+      if (!eligible()) continue;
+      p.recoveryPending = false; p.lastAutoRecovery = new Date().toISOString(); await save();
+      if (!eligible()) continue;
+      await retry(p, '服务自动恢复');
+    }
+  };
+  return { projects, resumeInterrupted, updateTeam, handleMessage, handleAction, getProject: get, getProjectById, syncContext: async chatId => { const p = await get(chatId); if (p?.dedicated) await projects.syncContext(p); }, waitForIdle: async chatId => { await ready; while (creations.has(chatId) || jobs.has(chatId) || talks.has(chatId)) await (creations.get(chatId) ?? jobs.get(chatId) ?? talks.get(chatId)); return get(chatId); }, getState };
 }

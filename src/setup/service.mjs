@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import { isOurProcess } from './proc.mjs';
+import { managedService, startManaged, stopManaged } from './managed-service.mjs';
 
 // 团队服务脱离启动它的进程常驻，不随 AI 助手这一轮对话结束被关。
 // 后台跑的是管理服务（src/admin/main.mjs），由它带起团队服务（src/main.mjs）；旧的 pid 文件里记的是 src/main.mjs，照样认得
@@ -34,6 +35,17 @@ export async function startService(root, { entry = 'src/admin/main.mjs', readyTe
   const { pid: pidFile, log } = paths(root);
   mkdirSync(path.dirname(log), { recursive: true });
   const offset = existsSync(log) ? statSync(log).size : 0;
+  const managed = entry === 'src/admin/main.mjs' && managedService(root);
+  if (managed) {
+    try { startManaged(managed); } catch (e) { return { ok: false, error: `系统服务启动失败：${String(e.stderr || e.message).trim()}` }; }
+    const end = Date.now() + timeoutMs;
+    while (Date.now() < end) {
+      const status = serviceStatus(root), text = existsSync(log) ? readFileSync(log).subarray(offset).toString('utf8') : '';
+      if (status.running && text.includes(readyText)) return { ok: true, pid: status.pid, managed: true };
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+    return { ok: false, error: '系统守护已启动，但尚未确认飞书连接就绪；请查看 data/service.log，勿另起一份进程。' };
+  }
   const fd = openSync(log, 'a');
   const child = spawn(process.execPath, [entry], { cwd: root, detached: true, stdio: ['ignore', fd, fd] });
   closeSync(fd);
@@ -59,6 +71,15 @@ export async function startService(root, { entry = 'src/admin/main.mjs', readyTe
 export async function stopService(root, { timeoutMs = 10000, kill = (pid, signal) => process.kill(pid, signal) } = {}) {
   const status = serviceStatus(root);
   const pidFile = paths(root).pid;
+  const managed = managedService(root);
+  if (managed) {
+    // 先停止系统任务，否则 KeepAlive 会把用户刚停止的服务再次拉起。
+    stopManaged(managed);
+    const end = Date.now() + timeoutMs;
+    while (status.running && alive(status.pid) && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 100));
+    if (status.running && alive(status.pid)) throw Error('系统服务仍在停止，暂不启动第二份；请稍后查看状态');
+    rmSync(pidFile, { force: true }); return { stopped: status.running };
+  }
   if (!status.running) { rmSync(pidFile, { force: true }); return { stopped: false }; }
   // AI 助手的沙箱（Codex 默认沙箱、Grok）不让给沙箱外或上一轮起的进程发信号：留着 pid 文件，交给用户自己停
   try { kill(status.pid, 'SIGTERM'); } catch (error) { if (error.code === 'EPERM') return { stopped: false, denied: true, pid: status.pid }; throw error; }
@@ -83,6 +104,11 @@ export async function workbenchMessage(port, { chatId, role, text, via }, token)
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `工作台返回 ${res.status}`);
   return data;
+}
+
+export async function workbenchPackageRetry(port, project) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/packages/action`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench': '1' }, body: JSON.stringify({ chatId: project.chatId, value: { action: 'package_retry', projectId: project.id, stage: project.stage, cardId: project.cardId } }), signal: AbortSignal.timeout(10000) });
+  const data = await res.json().catch(() => ({})); if (!res.ok) throw Error(data.error || `工作台返回 ${res.status}`); return data;
 }
 
 // AI 管理员助手代管理员点卡片按钮（关口的确认、打回），和在工作台上点一样

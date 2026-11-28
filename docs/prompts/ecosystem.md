@@ -1,10 +1,12 @@
 # 开放团队包搭建提示词
 
+> 安装前先按 docs/部署与常驻.md 确定部署位置，已明确选择不重复问。本地执行 `node setup.mjs deploy local` 后走标准 setup，验收系统自启和异常重启；服务器先收集 SSH 主机、用户名、端口、登录方式和目录，记录 `deploy server --host … --user …`，在远端执行 `deploy server --here` 和 setup。不要先在本机创建、运行机器人再决定部署。服务器首次扫码使用标准扫码页加 SSH 转发。说明 macOS 登录后自启、Linux 需要 linger，以及休眠/断网的边界；服务恢复只接续已在执行的步骤，不批准人工关口。
+
 把下面这段连同本仓库链接交给 Coding Agent：
 
 > 请读取 AGENTS.md、docs/版本导航.md 和 docs/AI团队包规范.md。先确认我要的是原来的网页团队，还是可安装他人团队包的协作环境；已明确的选择不要重复问。保留既有项目与工作区；团队包的独立群使用包内的角色与工作流。
 >
-> 按 node setup.mjs 的下一步把本机服务跑通，不自行写扫码或建群脚本。已有机器人按标准命令增补权限。然后执行 node scripts/team-pack.mjs init，安装筑页、观澜和文枢三支团队。说明观澜 2.1 来自 TradingAgents 固定提交，五角色十六技能，保留 Apache-2.0。默认免费 Bing RSS 搜索、公开 HTTPS 网页阅读；检查 pdftotext 是否可用，缺少时协助安装 Poppler 后验证 PDF 读取。Calculate 是本地确定性运算，不是实时行情服务；实际研究优先官方来源并核对时期与口径，演示数据只用于明确标记的演示。验收须核对 context/source-ledger.jsonl 中的实际 search/read_pdf/calculate 记录，不能把工具声明当作成功。旧已完成项目群 @ 协调同事提新研究，确认开工后应新建独立群，旧上下文不迁入，workflow 不变。说明 Newtype 是固定上游版本的独立来源适配包，许可保留，不将其标为 MIT。
+> 先按 docs/部署与常驻.md 选择服务器或本地，沿用已明确的选择；服务器收集 SSH 信息并在远端执行。按 node setup.mjs 的下一步把所选机器上的常驻服务跑通，不自行写扫码或建群脚本。已有机器人按标准命令增补权限。然后执行 node scripts/team-pack.mjs init，安装筑页、观澜和文枢三支团队。说明观澜 2.1 来自 TradingAgents 固定提交，五角色十六技能，保留 Apache-2.0。默认免费 Bing RSS 搜索、公开 HTTPS 网页阅读；检查 pdftotext 是否可用，缺少时协助安装 Poppler 后验证 PDF 读取。Calculate 是本地确定性运算，不是实时行情服务；实际研究优先官方来源并核对时期与口径，演示数据只用于明确标记的演示。验收须核对 context/source-ledger.jsonl 中的实际 search/read_pdf/calculate 记录，不能把工具声明当作成功。旧已完成项目群 @ 协调同事提新研究，确认开工后应新建独立群，旧上下文不迁入，workflow 不变。说明 Newtype 是固定上游版本的独立来源适配包，许可保留，不将其标为 MIT。
 >
 > 打开工作台首页，选择团队，核对角色、Skill 和完整 workflow。观澜创建自己的 5 个新角色，文枢创建自己的 8 个新角色，不复用产品经理冒充负责人或代建群。点“扫码连接飞书”，或运行 node scripts/team-pack.mjs bots <包ID> 打开同一扫码流程。先告诉我要弹二维码，由我在手机确认；当前团队已扫好的角色只复用，不重复创建。扫码后自动连接，Skill 按包加载，再新建飞书项目。新项目默认最新版本，旧项目不迁移。
 >

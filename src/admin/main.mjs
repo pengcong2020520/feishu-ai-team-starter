@@ -27,11 +27,12 @@ let assistant = null;
 let bot = null;
 let closing = false;
 let timer = null;
+const managed = process.env.TEAM_SERVICE_MANAGED === '1';
 
-const supervisor = createSupervisor({ root, env: baseEnv, logFile, onExit: exit => {
+const supervisor = createSupervisor({ root, env: baseEnv, logFile, autoRestart: managed, onExit: exit => {
   logger.error(`团队服务意外退出（${exit.signal ?? `退出码 ${exit.code}`}）`);
   if (assistant) void assistant.serviceDown(exit);
-  else void shutdown(typeof exit.code === 'number' && exit.code !== 0 ? exit.code : 1);
+  else if (!managed) void shutdown(typeof exit.code === 'number' && exit.code !== 0 ? exit.code : 1);
 } });
 async function shutdown(code = 0) {
   if (closing) return;
@@ -83,6 +84,6 @@ if (result.ok) logger.log(`管理服务已启动（pid ${process.pid}），团�
 // 60 秒没连上但还活着（比如网络慢）：不杀它，和以前一样接着等
 else if (supervisor.status().running) logger.error(`团队服务还没连上飞书：${result.error}`);
 else if (assistant) { logger.error(`团队服务没起来：${result.error}`); void assistant.serviceDown(null, result.error); }
-else { logger.error(`团队服务没起来：${result.error}`); void shutdown(1); }
+else { logger.error(`团队服务没起来：${result.error}${managed ? '；守护将退避重试' : ''}`); if (!managed) void shutdown(1); }
 
 if (assistant) timer = setInterval(() => void assistant.tick().catch(error => logger.error(`巡检出错：${error.message}`)), 30000);

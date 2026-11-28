@@ -217,7 +217,7 @@ test('发问题卡片失败后只重发卡片，不重复调用智能体', () =>
   assert.equal((await local.getProject('card')).error, null);
 }));
 
-test('服务在智能体干活时停掉：重启后在群里说明，发“重试”接着做这一步', async () => {
+for (const recovery of ['manual', 'auto', 'auto-after-startup-failure']) test(`服务在智能体干活时停掉：${recovery} 接续且仍停在确认 PRD`, async () => {
   const dir = await mkdtemp(path.join(root, 'test-flow-'));
   try {
     await put(dir, 'data/state.json', { groups: { g: { id: 'p1', chatId: 'g', name: '报名页', demand: '报名页', stage: 'clarifying', busy: true, error: null, questionRound: 2, walkthroughRound: 0, sessions: { product: 's2' }, cardId: null, cardMessageId: 'm2', lastDetail: '需要电话吗？：需要' } }, archived: [] });
@@ -225,12 +225,13 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
     const messages = [];
     const calls = [];
     const sent = [];
-    const local = createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { sent.push(card); return 'm3'; }, patchCard: async () => {} }, agent: async ({ prompt, resume, projectDir }) => {
+    const create = () => createFlow({ root: dir, feishu: { sendText: async (_, text) => messages.push(text), sendCard: async (_, card) => { sent.push(card); return 'm3'; }, patchCard: async () => {} }, agent: async ({ prompt, resume, projectDir }) => {
       calls.push({ prompt, resume });
       await put(projectDir, 'docs/prd.md', prd); await put(projectDir, 'docs/outline.json', outline);
       await put(projectDir, 'docs/checklist.md', Array.from({ length: 14 }, (_, i) => `- [x] CHK${String(i + 1).padStart(3, '0')}`).join('\n'));
       return { ok: true, text: '已写好 PRD', sessionId: 's3', stats: { turns: 1, durationMs: 1, inputTokens: 0, outputTokens: 0 } };
     } });
+    let local = create();
     const p = await local.waitForIdle('g');
     assert.equal(p.busy, false);
     assert.match(p.error, /团队服务重启过/);
@@ -239,7 +240,10 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
     const [listed] = (await local.getState()).projects;
     assert.deepEqual([listed.number, listed.waitingFor, listed.retryRole], [1, '重试', 'product']);
     assert.equal((JSON.parse(await readFile(path.join(dir, 'data/state.json'), 'utf8'))).groups.g.busy, false);
-    await local.handleMessage({ chatId: 'g', role: 'product', text: '重试' }); await local.waitForIdle('g');
+    if (recovery === 'auto-after-startup-failure') { local = create(); await local.waitForIdle('g'); }
+    if (recovery === 'manual') await local.handleMessage({ chatId: 'g', role: 'product', text: '重试' });
+    else { await local.resumeInterrupted(); await local.resumeInterrupted(); }
+    await local.waitForIdle('g');
     assert.equal(calls.length, 1);
     assert.match(calls[0].prompt, /用户的回答：需要电话吗？：需要/);
     assert.match(calls[0].prompt, /这是最后一轮/);
@@ -248,6 +252,26 @@ test('服务在智能体干活时停掉：重启后在群里说明，发“重�
     assert.equal(after.stage, 'confirm_prd');
     assert.equal(after.error, null);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('恢复通知发送期间用户结束项目，不得重新启动已结束项目', async () => {
+  const dir = await mkdtemp(path.join(root, 'test-flow-'));
+  const notified = Promise.withResolvers(), release = Promise.withResolvers();
+  let calls = 0;
+  try {
+    await put(dir, 'data/state.json', { groups: { g: { id: 'p1', chatId: 'g', name: '报名页', demand: '报名页', stage: 'clarifying', busy: true, error: null, sessions: {} } }, archived: [] });
+    const local = createFlow({ root: dir, feishu: {
+      sendText: async (_, text) => { if (text.startsWith('服务已恢复')) { notified.resolve(); await release.promise; } },
+      sendCard: async () => 'card', patchCard: async () => {},
+    }, agent: async () => { calls++; return { ok: false, error: '不应调用' }; } });
+    await local.waitForIdle('g');
+    const recovery = local.resumeInterrupted(); await notified.promise;
+    const p = await local.getProject('g');
+    await local.handleAction({ chatId: 'g', value: { action: 'end', projectId: p.id, stage: p.stage, cardId: p.stuckCardId } });
+    release.resolve(); await recovery;
+    assert.equal(calls, 0); assert.equal(await local.getProject('g'), null);
+    assert.equal(JSON.parse(await readFile(path.join(dir, 'data/state.json'), 'utf8')).archived[0].ended, true);
+  } finally { release.resolve(); await rm(dir, { recursive: true, force: true }); }
 });
 
 test('确认卡片没发出去就停掉：重试只重发确认卡片，不再调用智能体', async () => {
